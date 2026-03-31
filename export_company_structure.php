@@ -544,30 +544,125 @@ function buildSvg(array $sections, array $cfg, int $canvasWidth, int $canvasHeig
     return implode("\n", $svg);
 }
 
-function convertSvgToJpg(string $svg, int $canvasWidth, int $canvasHeight): ?string
+function commandExists(string $command): bool
 {
-    if (!class_exists('Imagick')) {
+    $output = [];
+    $exitCode = 1;
+    @exec('command -v ' . escapeshellarg($command) . ' 2>/dev/null', $output, $exitCode);
+    return $exitCode === 0 && !empty($output);
+}
+
+function convertPngBlobToJpgBlob(string $pngBlob, int $quality = 90): ?string
+{
+    if (!function_exists('imagecreatefromstring') || !function_exists('imagejpeg')) {
         return null;
     }
 
     try {
-        $imagick = new \Imagick();
-        $imagick->setBackgroundColor(new \ImagickPixel('white'));
-        $imagick->readImageBlob($svg);
-        $imagick->setImageFormat('jpeg');
-        $imagick->setImageCompression(\Imagick::COMPRESSION_JPEG);
-        $imagick->setImageCompressionQuality(90);
-        $imagick->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
-        $imagick->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
-        $imagick->resizeImage($canvasWidth, $canvasHeight, \Imagick::FILTER_LANCZOS, 1, true);
-        $jpgBlob = $imagick->getImageBlob();
-        $imagick->clear();
-        $imagick->destroy();
+        $src = imagecreatefromstring($pngBlob);
+        if ($src === false) {
+            return null;
+        }
 
-        return $jpgBlob !== false ? $jpgBlob : null;
+        $width = imagesx($src);
+        $height = imagesy($src);
+        $dst = imagecreatetruecolor($width, $height);
+        if ($dst === false) {
+            imagedestroy($src);
+            return null;
+        }
+
+        $white = imagecolorallocate($dst, 255, 255, 255);
+        imagefilledrectangle($dst, 0, 0, $width, $height, $white);
+        imagecopy($dst, $src, 0, 0, 0, 0, $width, $height);
+
+        ob_start();
+        imagejpeg($dst, null, $quality);
+        $jpgBlob = ob_get_clean();
+
+        imagedestroy($dst);
+        imagedestroy($src);
+
+        return is_string($jpgBlob) ? $jpgBlob : null;
     } catch (\Throwable $e) {
         return null;
     }
+}
+
+function convertSvgToJpg(string $svg, int $canvasWidth, int $canvasHeight): ?string
+{
+    // 1) Если доступен Imagick — используем его как быстрый путь.
+    if (class_exists('Imagick')) {
+        try {
+            $imagick = new \Imagick();
+            $imagick->setBackgroundColor(new \ImagickPixel('white'));
+            $imagick->readImageBlob($svg);
+            $imagick->setImageFormat('jpeg');
+            $imagick->setImageCompression(\Imagick::COMPRESSION_JPEG);
+            $imagick->setImageCompressionQuality(90);
+            $imagick->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
+            $imagick->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
+            $imagick->resizeImage($canvasWidth, $canvasHeight, \Imagick::FILTER_LANCZOS, 1, true);
+            $jpgBlob = $imagick->getImageBlob();
+            $imagick->clear();
+            $imagick->destroy();
+            if ($jpgBlob !== false) {
+                return $jpgBlob;
+            }
+        } catch (\Throwable $e) {
+            // fallback ниже
+        }
+    }
+
+    // 2) Без Imagick: пробуем rsvg-convert + GD (PNG -> JPG).
+    if (!commandExists('rsvg-convert')) {
+        return null;
+    }
+
+    if (!function_exists('imagecreatefromstring') || !function_exists('imagejpeg')) {
+        return null;
+    }
+
+    $tmpSvg = tempnam(sys_get_temp_dir(), 'org_svg_');
+    $tmpPng = tempnam(sys_get_temp_dir(), 'org_png_');
+    if ($tmpSvg === false || $tmpPng === false) {
+        return null;
+    }
+
+    $result = null;
+    try {
+        file_put_contents($tmpSvg, $svg);
+
+        $cmd = sprintf(
+            'rsvg-convert -w %d -h %d -f png -o %s %s 2>/dev/null',
+            (int)$canvasWidth,
+            (int)$canvasHeight,
+            escapeshellarg($tmpPng),
+            escapeshellarg($tmpSvg)
+        );
+
+        $output = [];
+        $exitCode = 1;
+        @exec($cmd, $output, $exitCode);
+
+        if ($exitCode === 0 && is_file($tmpPng) && filesize($tmpPng) > 0) {
+            $pngBlob = file_get_contents($tmpPng);
+            if (is_string($pngBlob) && $pngBlob !== '') {
+                $result = convertPngBlobToJpgBlob($pngBlob, 90);
+            }
+        }
+    } catch (\Throwable $e) {
+        $result = null;
+    } finally {
+        if (is_file($tmpSvg)) {
+            @unlink($tmpSvg);
+        }
+        if (is_file($tmpPng)) {
+            @unlink($tmpPng);
+        }
+    }
+
+    return $result;
 }
 
 $svg = buildSvg($sections, $CONFIG, $canvasWidth, $canvasHeight);
@@ -586,7 +681,7 @@ switch ($format) {
         $jpgBlob = convertSvgToJpg($svg, $canvasWidth, $canvasHeight);
         if ($jpgBlob === null) {
             header('Content-Type: text/plain; charset=UTF-8');
-            echo 'Ошибка: экспорт JPG недоступен. Требуется расширение Imagick с поддержкой SVG.';
+            echo 'Ошибка: экспорт JPG недоступен. Нужен Imagick ИЛИ связка rsvg-convert + GD.';
             break;
         }
 
