@@ -55,7 +55,7 @@ if (!in_array($format, $allowedFormats, true)) {
 }
 
 $layoutMode = isset($_GET['layout']) ? trim((string)$_GET['layout']) : 'vertical';
-$allowedLayouts = ['vertical', 'horizontal'];
+$allowedLayouts = ['vertical', 'horizontal', 'hybrid'];
 if (!in_array($layoutMode, $allowedLayouts, true)) {
     $layoutMode = 'vertical';
 }
@@ -273,8 +273,17 @@ function layoutTreeByLevels(array &$sections, array $rootIds, array $cfg): void
     }
 
     ksort($levels);
+    $maxNodesInLevel = 0;
+    foreach ($levels as $nodeIds) {
+        $maxNodesInLevel = max($maxNodesInLevel, count($nodeIds));
+    }
+    $maxRowWidth = ($maxNodesInLevel > 0)
+        ? ($maxNodesInLevel * $nodeWidth + max(0, $maxNodesInLevel - 1) * $horizontalGap)
+        : $nodeWidth;
+
     foreach ($levels as $level => $nodeIds) {
-        $x = $padding;
+        $rowWidth = count($nodeIds) * $nodeWidth + max(0, count($nodeIds) - 1) * $horizontalGap;
+        $x = $padding + max(0, ($maxRowWidth - $rowWidth) / 2);
         $y = $padding + $level * ($nodeHeight + ($verticalGap * 2));
         foreach ($nodeIds as $nodeId) {
             $sections[$nodeId]['x'] = $x;
@@ -284,8 +293,119 @@ function layoutTreeByLevels(array &$sections, array $rootIds, array $cfg): void
     }
 }
 
+/**
+ * Гибридная раскладка:
+ * - первые 3 уровня (0,1,2) в горизонтальном режиме по центру;
+ * - уровни от 3 и глубже — вертикальные ветки под узлами 3-го уровня.
+ */
+function layoutTreeHybrid(array &$sections, array $rootIds, array $cfg): void
+{
+    $nodeWidth = $cfg['nodeWidth'];
+    $nodeHeight = $cfg['nodeHeight'];
+    $horizontalGap = $cfg['horizontalGap'];
+    $verticalGap = $cfg['verticalGap'];
+    $padding = $cfg['padding'];
+
+    $levels = [];
+    $queue = $rootIds;
+    while (!empty($queue)) {
+        $nodeId = array_shift($queue);
+        if (!isset($sections[$nodeId])) {
+            continue;
+        }
+
+        $level = $sections[$nodeId]['level'];
+        if (!isset($levels[$level])) {
+            $levels[$level] = [];
+        }
+        $levels[$level][] = $nodeId;
+
+        foreach ($sections[$nodeId]['children'] as $childId) {
+            if (isset($sections[$childId])) {
+                $queue[] = $childId;
+            }
+        }
+    }
+
+    $horizontalLevels = [0, 1, 2];
+    $maxNodesInLevel = 0;
+    foreach ($horizontalLevels as $lvl) {
+        $maxNodesInLevel = max($maxNodesInLevel, isset($levels[$lvl]) ? count($levels[$lvl]) : 0);
+    }
+    $maxRowWidth = ($maxNodesInLevel > 0)
+        ? ($maxNodesInLevel * $nodeWidth + max(0, $maxNodesInLevel - 1) * $horizontalGap)
+        : $nodeWidth;
+
+    foreach ($horizontalLevels as $lvl) {
+        if (empty($levels[$lvl])) {
+            continue;
+        }
+
+        $rowWidth = count($levels[$lvl]) * $nodeWidth + max(0, count($levels[$lvl]) - 1) * $horizontalGap;
+        $x = $padding + max(0, ($maxRowWidth - $rowWidth) / 2);
+        $y = $padding + $lvl * ($nodeHeight + ($verticalGap * 2));
+
+        foreach ($levels[$lvl] as $nodeId) {
+            $sections[$nodeId]['x'] = $x;
+            $sections[$nodeId]['y'] = $y;
+            $x += $nodeWidth + $horizontalGap;
+        }
+    }
+
+    $indentStep = $horizontalGap + ($nodeWidth * 0.22);
+
+    $layoutSubtreeVertical = static function (int $nodeId, float $baseX, float $baseY, int &$row) use (&$sections, &$layoutSubtreeVertical, $nodeHeight, $verticalGap, $indentStep): void {
+        if (!isset($sections[$nodeId])) {
+            return;
+        }
+
+        $levelOffset = max(0, $sections[$nodeId]['level'] - 3);
+        $sections[$nodeId]['x'] = $baseX + ($levelOffset * $indentStep);
+        $sections[$nodeId]['y'] = $baseY + $row * ($nodeHeight + $verticalGap);
+        $row++;
+
+        foreach ($sections[$nodeId]['children'] as $childId) {
+            $layoutSubtreeVertical($childId, $baseX, $baseY, $row);
+        }
+    };
+
+    if (!empty($levels[2])) {
+        foreach ($levels[2] as $level2Id) {
+            if (!isset($sections[$level2Id])) {
+                continue;
+            }
+
+            $baseX = $sections[$level2Id]['x'];
+            $baseY = $sections[$level2Id]['y'] + $nodeHeight + ($verticalGap * 2);
+            $row = 0;
+            foreach ($sections[$level2Id]['children'] as $childId) {
+                $layoutSubtreeVertical($childId, $baseX, $baseY, $row);
+            }
+        }
+    } elseif (!empty($levels[1])) {
+        // Если есть только 2 уровня — продолжаем вертикально от второго уровня.
+        foreach ($levels[1] as $level1Id) {
+            if (!isset($sections[$level1Id])) {
+                continue;
+            }
+
+            $baseX = $sections[$level1Id]['x'];
+            $baseY = $sections[$level1Id]['y'] + $nodeHeight + ($verticalGap * 2);
+            $row = 0;
+            foreach ($sections[$level1Id]['children'] as $childId) {
+                $layoutSubtreeVertical($childId, $baseX, $baseY, $row);
+            }
+        }
+    } else {
+        // Для очень мелких деревьев fallback к горизонтальному режиму.
+        layoutTreeByLevels($sections, $rootIds, $cfg);
+    }
+}
+
 if ($layoutMode === 'horizontal') {
     layoutTreeByLevels($sections, $filteredRootIds, $CONFIG);
+} elseif ($layoutMode === 'hybrid') {
+    layoutTreeHybrid($sections, $filteredRootIds, $CONFIG);
 } else {
     $rowIndex = 0;
     foreach ($filteredRootIds as $rootId) {
@@ -492,6 +612,7 @@ switch ($format) {
                     <select name="layout" id="layout">
                         <option value="vertical" <?php echo $layoutMode === 'vertical' ? 'selected' : ''; ?>>Вертикально</option>
                         <option value="horizontal" <?php echo $layoutMode === 'horizontal' ? 'selected' : ''; ?>>Горизонтально по уровням</option>
+                        <option value="hybrid" <?php echo $layoutMode === 'hybrid' ? 'selected' : ''; ?>>Гибрид (3 уровня + вертикально)</option>
                     </select>
                     <button type="submit">Показать</button>
                 </form>
