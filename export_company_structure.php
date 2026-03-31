@@ -54,6 +54,12 @@ if (!in_array($format, $allowedFormats, true)) {
     $format = 'html';
 }
 
+$layoutMode = isset($_GET['layout']) ? trim((string)$_GET['layout']) : 'vertical';
+$allowedLayouts = ['vertical', 'horizontal'];
+if (!in_array($layoutMode, $allowedLayouts, true)) {
+    $layoutMode = 'vertical';
+}
+
 /**
  * Получаем ID инфоблока структуры компании
  */
@@ -216,12 +222,6 @@ $filteredRootIds = array_values(array_filter(
     }
 ));
 
-/**
- * Компактная вертикальная раскладка:
- * - корневое подразделение всегда сверху;
- * - подразделения идут вниз списком (pre-order);
- * - вложенность отображается горизонтальным отступом.
- */
 function layoutTreeTopDownCompact(array &$sections, int $nodeId, int &$rowIndex, array $cfg): void
 {
     $nodeWidth = $cfg['nodeWidth'];
@@ -239,9 +239,58 @@ function layoutTreeTopDownCompact(array &$sections, int $nodeId, int &$rowIndex,
     }
 }
 
-$rowIndex = 0;
-foreach ($filteredRootIds as $rootId) {
-    layoutTreeTopDownCompact($sections, $rootId, $rowIndex, $CONFIG);
+/**
+ * Горизонтальная раскладка по уровням:
+ * 1-й уровень в первой строке, 2-й — под ним и т.д.
+ */
+function layoutTreeByLevels(array &$sections, array $rootIds, array $cfg): void
+{
+    $nodeWidth = $cfg['nodeWidth'];
+    $nodeHeight = $cfg['nodeHeight'];
+    $horizontalGap = $cfg['horizontalGap'];
+    $verticalGap = $cfg['verticalGap'];
+    $padding = $cfg['padding'];
+
+    $levels = [];
+    $queue = $rootIds;
+    while (!empty($queue)) {
+        $nodeId = array_shift($queue);
+        if (!isset($sections[$nodeId])) {
+            continue;
+        }
+
+        $level = $sections[$nodeId]['level'];
+        if (!isset($levels[$level])) {
+            $levels[$level] = [];
+        }
+        $levels[$level][] = $nodeId;
+
+        foreach ($sections[$nodeId]['children'] as $childId) {
+            if (isset($sections[$childId])) {
+                $queue[] = $childId;
+            }
+        }
+    }
+
+    ksort($levels);
+    foreach ($levels as $level => $nodeIds) {
+        $x = $padding;
+        $y = $padding + $level * ($nodeHeight + ($verticalGap * 2));
+        foreach ($nodeIds as $nodeId) {
+            $sections[$nodeId]['x'] = $x;
+            $sections[$nodeId]['y'] = $y;
+            $x += $nodeWidth + $horizontalGap;
+        }
+    }
+}
+
+if ($layoutMode === 'horizontal') {
+    layoutTreeByLevels($sections, $filteredRootIds, $CONFIG);
+} else {
+    $rowIndex = 0;
+    foreach ($filteredRootIds as $rootId) {
+        layoutTreeTopDownCompact($sections, $rootId, $rowIndex, $CONFIG);
+    }
 }
 
 /**
@@ -439,9 +488,14 @@ switch ($format) {
                             </option>
                         <?php endfor; ?>
                     </select>
+                    <label for="layout">Отображение:</label>
+                    <select name="layout" id="layout">
+                        <option value="vertical" <?php echo $layoutMode === 'vertical' ? 'selected' : ''; ?>>Вертикально</option>
+                        <option value="horizontal" <?php echo $layoutMode === 'horizontal' ? 'selected' : ''; ?>>Горизонтально по уровням</option>
+                    </select>
                     <button type="submit">Показать</button>
                 </form>
-                <a class="download" href="?format=svg&amp;levels=<?php echo (int)$requestedLevels; ?>">Скачать SVG</a>
+                <a class="download" href="?format=svg&amp;levels=<?php echo (int)$requestedLevels; ?>&amp;layout=<?php echo urlencode($layoutMode); ?>">Скачать SVG</a>
             </div>
             <div class="canvas">
                 <?php echo $svg; ?>
