@@ -185,6 +185,37 @@ foreach ($rootIds as $rootId) {
     assignLevels($sections, $rootId, 0);
 }
 
+$maxLevel = 0;
+foreach ($sections as $node) {
+    $maxLevel = max($maxLevel, $node['level']);
+}
+
+$maxAvailableLevels = $maxLevel + 1;
+$requestedLevels = isset($_GET['levels']) ? (int)$_GET['levels'] : $maxAvailableLevels;
+$requestedLevels = max(1, min($requestedLevels, $maxAvailableLevels));
+
+foreach ($sections as $id => $node) {
+    if ($node['level'] >= $requestedLevels) {
+        unset($sections[$id]);
+    }
+}
+
+foreach ($sections as $id => $node) {
+    $sections[$id]['children'] = array_values(array_filter(
+        $node['children'],
+        static function (int $childId) use ($sections): bool {
+            return isset($sections[$childId]);
+        }
+    ));
+}
+
+$filteredRootIds = array_values(array_filter(
+    $rootIds,
+    static function (int $rootId) use ($sections): bool {
+        return isset($sections[$rootId]);
+    }
+));
+
 /**
  * Компактная вертикальная раскладка:
  * - корневое подразделение всегда сверху;
@@ -209,32 +240,8 @@ function layoutTreeTopDownCompact(array &$sections, int $nodeId, int &$rowIndex,
 }
 
 $rowIndex = 0;
-foreach ($rootIds as $rootId) {
+foreach ($filteredRootIds as $rootId) {
     layoutTreeTopDownCompact($sections, $rootId, $rowIndex, $CONFIG);
-}
-
-$maxLevel = 0;
-foreach ($sections as $node) {
-    $maxLevel = max($maxLevel, $node['level']);
-}
-
-$maxAvailableLevels = $maxLevel + 1;
-$requestedLevels = isset($_GET['levels']) ? (int)$_GET['levels'] : $maxAvailableLevels;
-$requestedLevels = max(1, min($requestedLevels, $maxAvailableLevels));
-
-foreach ($sections as $id => $node) {
-    if ($node['level'] >= $requestedLevels) {
-        unset($sections[$id]);
-    }
-}
-
-foreach ($sections as $id => $node) {
-    $sections[$id]['children'] = array_values(array_filter(
-        $node['children'],
-        static function (int $childId) use ($sections): bool {
-            return isset($sections[$childId]);
-        }
-    ));
 }
 
 /**
