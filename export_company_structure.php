@@ -32,10 +32,10 @@ if (!Loader::includeModule('iblock')) {
  * Настройки отрисовки
  */
 $CONFIG = [
-    'nodeWidth'      => 280,
+    'nodeWidth'      => 300,
     'nodeHeight'     => 64,
-    'horizontalGap'  => 220,
-    'verticalGap'    => 20,
+    'horizontalGap'  => 46,
+    'verticalGap'    => 24,
     'padding'        => 30,
     'fontSize'       => 14,
     'lineColor'      => '#8aa4c8',
@@ -105,7 +105,6 @@ while ($section = $rsSections->Fetch()) {
         'children'    => [],
         'x'           => 0,
         'y'           => 0,
-        'subtree_w'   => 0,
         'level'       => 0,
     ];
 }
@@ -187,33 +186,12 @@ foreach ($rootIds as $rootId) {
 }
 
 /**
- * Вычисляем ширину поддерева в "ячейках"
+ * Компактная вертикальная раскладка:
+ * - корневое подразделение всегда сверху;
+ * - подразделения идут вниз списком (pre-order);
+ * - вложенность отображается горизонтальным отступом.
  */
-function calcSubtreeHeight(array &$sections, int $nodeId): int
-{
-    $children = $sections[$nodeId]['children'];
-    if (empty($children)) {
-        $sections[$nodeId]['subtree_w'] = 1;
-        return 1;
-    }
-
-    $sum = 0;
-    foreach ($children as $childId) {
-        $sum += calcSubtreeHeight($sections, $childId);
-    }
-
-    $sections[$nodeId]['subtree_w'] = max(1, $sum);
-    return $sections[$nodeId]['subtree_w'];
-}
-
-foreach ($rootIds as $rootId) {
-    calcSubtreeHeight($sections, $rootId);
-}
-
-/**
- * Расстановка узлов по координатам (компактно по горизонтали, развёрнуто по вертикали)
- */
-function layoutTreeCompact(array &$sections, int $nodeId, float $topCell, array $cfg): void
+function layoutTreeTopDownCompact(array &$sections, int $nodeId, int &$rowIndex, array $cfg): void
 {
     $nodeWidth = $cfg['nodeWidth'];
     $nodeHeight = $cfg['nodeHeight'];
@@ -221,29 +199,18 @@ function layoutTreeCompact(array &$sections, int $nodeId, float $topCell, array 
     $verticalGap = $cfg['verticalGap'];
     $padding = $cfg['padding'];
 
-    $subtreeHeightCells = $sections[$nodeId]['subtree_w'];
-    $totalHeightPx = $subtreeHeightCells * $nodeHeight + max(0, $subtreeHeightCells - 1) * $verticalGap;
+    $sections[$nodeId]['x'] = $padding + $sections[$nodeId]['level'] * ($horizontalGap + ($nodeWidth * 0.22));
+    $sections[$nodeId]['y'] = $padding + $rowIndex * ($nodeHeight + $verticalGap);
+    $rowIndex++;
 
-    $sections[$nodeId]['x'] = $padding + $sections[$nodeId]['level'] * ($nodeWidth + $horizontalGap);
-    $sections[$nodeId]['y'] = $padding + $topCell + ($totalHeightPx - $nodeHeight) / 2;
-
-    $currentTop = $topCell;
     foreach ($sections[$nodeId]['children'] as $childId) {
-        $childCells = $sections[$childId]['subtree_w'];
-        $childHeightPx = $childCells * $nodeHeight + max(0, $childCells - 1) * $verticalGap;
-
-        layoutTreeCompact($sections, $childId, $currentTop, $cfg);
-        $currentTop += $childHeightPx + $verticalGap;
+        layoutTreeTopDownCompact($sections, $childId, $rowIndex, $cfg);
     }
 }
 
-$currentTop = 0;
+$rowIndex = 0;
 foreach ($rootIds as $rootId) {
-    $rootCells = $sections[$rootId]['subtree_w'];
-    $rootHeightPx = $rootCells * $CONFIG['nodeHeight'] + max(0, $rootCells - 1) * $CONFIG['verticalGap'];
-
-    layoutTreeCompact($sections, $rootId, $currentTop, $CONFIG);
-    $currentTop += $rootHeightPx + $CONFIG['verticalGap'];
+    layoutTreeTopDownCompact($sections, $rootId, $rowIndex, $CONFIG);
 }
 
 $maxLevel = 0;
