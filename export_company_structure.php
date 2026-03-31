@@ -544,125 +544,123 @@ function buildSvg(array $sections, array $cfg, int $canvasWidth, int $canvasHeig
     return implode("\n", $svg);
 }
 
-function commandExists(string $command): bool
+function allocateHexColor(\GdImage $image, string $hexColor): int
 {
-    $output = [];
-    $exitCode = 1;
-    @exec('command -v ' . escapeshellarg($command) . ' 2>/dev/null', $output, $exitCode);
-    return $exitCode === 0 && !empty($output);
+    $hex = ltrim(trim($hexColor), '#');
+    if (strlen($hex) === 3) {
+        $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+    }
+
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+
+    return imagecolorallocate($image, $r, $g, $b);
 }
 
-function convertPngBlobToJpgBlob(string $pngBlob, int $quality = 90): ?string
+function detectTtfFontPath(): ?string
 {
-    if (!function_exists('imagecreatefromstring') || !function_exists('imagejpeg')) {
+    $candidates = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    ];
+
+    foreach ($candidates as $fontPath) {
+        if (is_readable($fontPath)) {
+            return $fontPath;
+        }
+    }
+
+    return null;
+}
+
+function buildJpg(array $sections, array $cfg, int $canvasWidth, int $canvasHeight): ?string
+{
+    if (!function_exists('imagecreatetruecolor') || !function_exists('imagejpeg')) {
+        return null;
+    }
+
+    $width = max(1, $canvasWidth);
+    $height = max(1, $canvasHeight);
+    $image = imagecreatetruecolor($width, $height);
+    if ($image === false) {
         return null;
     }
 
     try {
-        $src = imagecreatefromstring($pngBlob);
-        if ($src === false) {
-            return null;
-        }
+        $bgColor = imagecolorallocate($image, 255, 255, 255);
+        imagefilledrectangle($image, 0, 0, $width, $height, $bgColor);
 
-        $width = imagesx($src);
-        $height = imagesy($src);
-        $dst = imagecreatetruecolor($width, $height);
-        if ($dst === false) {
-            imagedestroy($src);
-            return null;
-        }
+        $lineColor = allocateHexColor($image, $cfg['lineColor']);
+        $nodeStroke = allocateHexColor($image, $cfg['nodeStroke']);
+        $nodeFill = allocateHexColor($image, $cfg['nodeFill']);
+        $rootFill = allocateHexColor($image, $cfg['rootFill']);
+        $textColor = allocateHexColor($image, $cfg['textColor']);
 
-        $white = imagecolorallocate($dst, 255, 255, 255);
-        imagefilledrectangle($dst, 0, 0, $width, $height, $white);
-        imagecopy($dst, $src, 0, 0, 0, 0, $width, $height);
+        imagesetthickness($image, 2);
+
+        foreach ($sections as $node) {
+            $parentCenterX = (int)round($node['x'] + $cfg['nodeWidth'] / 2);
+            $parentBottomY = (int)round($node['y'] + $cfg['nodeHeight']);
+
+            foreach ($node['children'] as $childId) {
+                $child = $sections[$childId];
+                $childCenterX = (int)round($child['x'] + $cfg['nodeWidth'] / 2);
+                $childTopY = (int)round($child['y']);
+                $midY = (int)round($parentBottomY + ($childTopY - $parentBottomY) / 2);
+
+                imageline($image, $parentCenterX, $parentBottomY, $parentCenterX, $midY, $lineColor);
+                imageline($image, $parentCenterX, $midY, $childCenterX, $midY, $lineColor);
+                imageline($image, $childCenterX, $midY, $childCenterX, $childTopY, $lineColor);
+            }
+        }
+        imagesetthickness($image, 1);
+
+        $fontPath = detectTtfFontPath();
+        $fontSize = 12;
+
+        foreach ($sections as $node) {
+            $x1 = (int)round($node['x']);
+            $y1 = (int)round($node['y']);
+            $x2 = (int)round($node['x'] + $cfg['nodeWidth']);
+            $y2 = (int)round($node['y'] + $cfg['nodeHeight']);
+            $fill = ($node['level'] === 0) ? $rootFill : $nodeFill;
+
+            imagefilledrectangle($image, $x1, $y1, $x2, $y2, $fill);
+            imagerectangle($image, $x1, $y1, $x2, $y2, $nodeStroke);
+
+            $lines = splitTextToLines($node['name'], 28);
+            $lineHeight = $fontPath ? 16 : 14;
+            $startY = (int)round($node['y'] + ($cfg['nodeHeight'] / 2) - ((count($lines) - 1) * $lineHeight / 2));
+
+            foreach ($lines as $index => $line) {
+                $textY = $startY + $index * $lineHeight;
+                if ($fontPath && function_exists('imagettftext')) {
+                    $bbox = imagettfbbox($fontSize, 0, $fontPath, $line);
+                    $textWidth = is_array($bbox) ? abs($bbox[2] - $bbox[0]) : 0;
+                    $textX = (int)round($node['x'] + ($cfg['nodeWidth'] - $textWidth) / 2);
+                    imagettftext($image, $fontSize, 0, $textX, $textY + 5, $textColor, $fontPath, $line);
+                } else {
+                    $text = mb_substr($line, 0, 40, 'UTF-8');
+                    $font = 2;
+                    $textWidth = imagefontwidth($font) * mb_strlen($text, 'UTF-8');
+                    $textX = (int)round($node['x'] + ($cfg['nodeWidth'] - $textWidth) / 2);
+                    imagestring($image, $font, $textX, $textY - 6, $text, $textColor);
+                }
+            }
+        }
 
         ob_start();
-        imagejpeg($dst, null, $quality);
+        imagejpeg($image, null, 90);
         $jpgBlob = ob_get_clean();
-
-        imagedestroy($dst);
-        imagedestroy($src);
+        imagedestroy($image);
 
         return is_string($jpgBlob) ? $jpgBlob : null;
     } catch (\Throwable $e) {
+        imagedestroy($image);
         return null;
     }
-}
-
-function convertSvgToJpg(string $svg, int $canvasWidth, int $canvasHeight): ?string
-{
-    // 1) Если доступен Imagick — используем его как быстрый путь.
-    if (class_exists('Imagick')) {
-        try {
-            $imagick = new \Imagick();
-            $imagick->setBackgroundColor(new \ImagickPixel('white'));
-            $imagick->readImageBlob($svg);
-            $imagick->setImageFormat('jpeg');
-            $imagick->setImageCompression(\Imagick::COMPRESSION_JPEG);
-            $imagick->setImageCompressionQuality(90);
-            $imagick->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
-            $imagick->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
-            $imagick->resizeImage($canvasWidth, $canvasHeight, \Imagick::FILTER_LANCZOS, 1, true);
-            $jpgBlob = $imagick->getImageBlob();
-            $imagick->clear();
-            $imagick->destroy();
-            if ($jpgBlob !== false) {
-                return $jpgBlob;
-            }
-        } catch (\Throwable $e) {
-            // fallback ниже
-        }
-    }
-
-    // 2) Без Imagick: пробуем rsvg-convert + GD (PNG -> JPG).
-    if (!commandExists('rsvg-convert')) {
-        return null;
-    }
-
-    if (!function_exists('imagecreatefromstring') || !function_exists('imagejpeg')) {
-        return null;
-    }
-
-    $tmpSvg = tempnam(sys_get_temp_dir(), 'org_svg_');
-    $tmpPng = tempnam(sys_get_temp_dir(), 'org_png_');
-    if ($tmpSvg === false || $tmpPng === false) {
-        return null;
-    }
-
-    $result = null;
-    try {
-        file_put_contents($tmpSvg, $svg);
-
-        $cmd = sprintf(
-            'rsvg-convert -w %d -h %d -f png -o %s %s 2>/dev/null',
-            (int)$canvasWidth,
-            (int)$canvasHeight,
-            escapeshellarg($tmpPng),
-            escapeshellarg($tmpSvg)
-        );
-
-        $output = [];
-        $exitCode = 1;
-        @exec($cmd, $output, $exitCode);
-
-        if ($exitCode === 0 && is_file($tmpPng) && filesize($tmpPng) > 0) {
-            $pngBlob = file_get_contents($tmpPng);
-            if (is_string($pngBlob) && $pngBlob !== '') {
-                $result = convertPngBlobToJpgBlob($pngBlob, 90);
-            }
-        }
-    } catch (\Throwable $e) {
-        $result = null;
-    } finally {
-        if (is_file($tmpSvg)) {
-            @unlink($tmpSvg);
-        }
-        if (is_file($tmpPng)) {
-            @unlink($tmpPng);
-        }
-    }
-
-    return $result;
 }
 
 $svg = buildSvg($sections, $CONFIG, $canvasWidth, $canvasHeight);
@@ -678,10 +676,10 @@ switch ($format) {
         break;
 
     case 'jpg':
-        $jpgBlob = convertSvgToJpg($svg, $canvasWidth, $canvasHeight);
+        $jpgBlob = buildJpg($sections, $CONFIG, $canvasWidth, $canvasHeight);
         if ($jpgBlob === null) {
             header('Content-Type: text/plain; charset=UTF-8');
-            echo 'Ошибка: экспорт JPG недоступен. Нужен Imagick ИЛИ связка rsvg-convert + GD.';
+            echo 'Ошибка: экспорт JPG недоступен. Требуется расширение GD.';
             break;
         }
 
