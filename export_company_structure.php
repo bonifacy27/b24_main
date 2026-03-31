@@ -5,10 +5,12 @@
  *
  * Экспорт структуры компании Битрикс24 без сотрудников:
  * - format=svg     -> SVG-файл
+ * - format=png     -> PNG-файл
  * - format=html    -> предпросмотр в браузере
  *
  * Пример:
  * /pub/company/export_company_structure.php?format=svg
+ * /pub/company/export_company_structure.php?format=png
  * /pub/company/export_company_structure.php?format=html
  */
 
@@ -49,7 +51,7 @@ $CONFIG = [
  * Формат экспорта
  */
 $format = isset($_GET['format']) ? trim((string)$_GET['format']) : 'html';
-$allowedFormats = ['svg', 'html'];
+$allowedFormats = ['svg', 'png', 'html'];
 if (!in_array($format, $allowedFormats, true)) {
     $format = 'html';
 }
@@ -542,6 +544,30 @@ function buildSvg(array $sections, array $cfg, int $canvasWidth, int $canvasHeig
     return implode("\n", $svg);
 }
 
+function convertSvgToPng(string $svg, int $canvasWidth, int $canvasHeight): ?string
+{
+    if (!class_exists('Imagick')) {
+        return null;
+    }
+
+    try {
+        $imagick = new \Imagick();
+        $imagick->setBackgroundColor(new \ImagickPixel('white'));
+        $imagick->readImageBlob($svg);
+        $imagick->setImageFormat('png32');
+        $imagick->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
+        $imagick->mergeImageLayers(\Imagick::LAYERMETHOD_FLATTEN);
+        $imagick->resizeImage($canvasWidth, $canvasHeight, \Imagick::FILTER_LANCZOS, 1, true);
+        $pngBlob = $imagick->getImageBlob();
+        $imagick->clear();
+        $imagick->destroy();
+
+        return $pngBlob !== false ? $pngBlob : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
 $svg = buildSvg($sections, $CONFIG, $canvasWidth, $canvasHeight);
 
 /**
@@ -552,6 +578,19 @@ switch ($format) {
         header('Content-Type: image/svg+xml; charset=UTF-8');
         header('Content-Disposition: attachment; filename="company_structure.svg"');
         echo $svg;
+        break;
+
+    case 'png':
+        $pngBlob = convertSvgToPng($svg, $canvasWidth, $canvasHeight);
+        if ($pngBlob === null) {
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo 'Ошибка: экспорт PNG недоступен. Требуется расширение Imagick с поддержкой SVG.';
+            break;
+        }
+
+        header('Content-Type: image/png');
+        header('Content-Disposition: attachment; filename="company_structure.png"');
+        echo $pngBlob;
         break;
 
     case 'html':
@@ -617,6 +656,7 @@ switch ($format) {
                     <button type="submit">Показать</button>
                 </form>
                 <a class="download" href="?format=svg&amp;levels=<?php echo (int)$requestedLevels; ?>&amp;layout=<?php echo urlencode($layoutMode); ?>">Скачать SVG</a>
+                <a class="download" href="?format=png&amp;levels=<?php echo (int)$requestedLevels; ?>&amp;layout=<?php echo urlencode($layoutMode); ?>">Скачать PNG</a>
             </div>
             <div class="canvas">
                 <?php echo $svg; ?>
