@@ -4,13 +4,13 @@
  * Версия: v1.0
  *
  * Экспорт структуры компании Битрикс24 без сотрудников:
- * - format=drawio  -> файл .drawio (совместим с draw.io / diagrams.net)
  * - format=svg     -> SVG-файл
+ * - format=jpg     -> JPG-файл
  * - format=html    -> предпросмотр в браузере
  *
  * Пример:
- * /pub/company/export_company_structure.php?format=drawio
  * /pub/company/export_company_structure.php?format=svg
+ * /pub/company/export_company_structure.php?format=jpg
  * /pub/company/export_company_structure.php?format=html
  */
 
@@ -34,10 +34,10 @@ if (!Loader::includeModule('iblock')) {
  * Настройки отрисовки
  */
 $CONFIG = [
-    'nodeWidth'      => 260,
-    'nodeHeight'     => 70,
-    'horizontalGap'  => 40,
-    'verticalGap'    => 90,
+    'nodeWidth'      => 300,
+    'nodeHeight'     => 64,
+    'horizontalGap'  => 46,
+    'verticalGap'    => 24,
     'padding'        => 30,
     'fontSize'       => 14,
     'lineColor'      => '#8aa4c8',
@@ -50,10 +50,16 @@ $CONFIG = [
 /**
  * Формат экспорта
  */
-$format = isset($_GET['format']) ? trim((string)$_GET['format']) : 'drawio';
-$allowedFormats = ['drawio', 'svg', 'html'];
+$format = isset($_GET['format']) ? trim((string)$_GET['format']) : 'html';
+$allowedFormats = ['svg', 'jpg', 'html'];
 if (!in_array($format, $allowedFormats, true)) {
-    $format = 'drawio';
+    $format = 'html';
+}
+
+$layoutMode = isset($_GET['layout']) ? trim((string)$_GET['layout']) : 'vertical';
+$allowedLayouts = ['vertical', 'horizontal', 'hybrid'];
+if (!in_array($layoutMode, $allowedLayouts, true)) {
+    $layoutMode = 'vertical';
 }
 
 /**
@@ -107,7 +113,6 @@ while ($section = $rsSections->Fetch()) {
         'children'    => [],
         'x'           => 0,
         'y'           => 0,
-        'subtree_w'   => 0,
         'level'       => 0,
     ];
 }
@@ -188,34 +193,38 @@ foreach ($rootIds as $rootId) {
     assignLevels($sections, $rootId, 0);
 }
 
-/**
- * Вычисляем ширину поддерева в "ячейках"
- */
-function calcSubtreeWidth(array &$sections, int $nodeId): int
-{
-    $children = $sections[$nodeId]['children'];
-    if (empty($children)) {
-        $sections[$nodeId]['subtree_w'] = 1;
-        return 1;
-    }
-
-    $sum = 0;
-    foreach ($children as $childId) {
-        $sum += calcSubtreeWidth($sections, $childId);
-    }
-
-    $sections[$nodeId]['subtree_w'] = max(1, $sum);
-    return $sections[$nodeId]['subtree_w'];
+$maxLevel = 0;
+foreach ($sections as $node) {
+    $maxLevel = max($maxLevel, $node['level']);
 }
 
-foreach ($rootIds as $rootId) {
-    calcSubtreeWidth($sections, $rootId);
+$maxAvailableLevels = $maxLevel + 1;
+$requestedLevels = isset($_GET['levels']) ? (int)$_GET['levels'] : $maxAvailableLevels;
+$requestedLevels = max(1, min($requestedLevels, $maxAvailableLevels));
+
+foreach ($sections as $id => $node) {
+    if ($node['level'] >= $requestedLevels) {
+        unset($sections[$id]);
+    }
 }
 
-/**
- * Расстановка узлов по координатам
- */
-function layoutTree(array &$sections, int $nodeId, float $leftCell, array $cfg): void
+foreach ($sections as $id => $node) {
+    $sections[$id]['children'] = array_values(array_filter(
+        $node['children'],
+        static function (int $childId) use ($sections): bool {
+            return isset($sections[$childId]);
+        }
+    ));
+}
+
+$filteredRootIds = array_values(array_filter(
+    $rootIds,
+    static function (int $rootId) use ($sections): bool {
+        return isset($sections[$rootId]);
+    }
+));
+
+function layoutTreeTopDownCompact(array &$sections, int $nodeId, int &$rowIndex, array $cfg): void
 {
     $nodeWidth = $cfg['nodeWidth'];
     $nodeHeight = $cfg['nodeHeight'];
@@ -223,29 +232,187 @@ function layoutTree(array &$sections, int $nodeId, float $leftCell, array $cfg):
     $verticalGap = $cfg['verticalGap'];
     $padding = $cfg['padding'];
 
-    $subtreeWidthCells = $sections[$nodeId]['subtree_w'];
-    $totalWidthPx = $subtreeWidthCells * $nodeWidth + max(0, $subtreeWidthCells - 1) * $horizontalGap;
+    $sections[$nodeId]['x'] = $padding + $sections[$nodeId]['level'] * ($horizontalGap + ($nodeWidth * 0.22));
+    $sections[$nodeId]['y'] = $padding + $rowIndex * ($nodeHeight + $verticalGap);
+    $rowIndex++;
 
-    $sections[$nodeId]['x'] = $padding + $leftCell + ($totalWidthPx - $nodeWidth) / 2;
-    $sections[$nodeId]['y'] = $padding + $sections[$nodeId]['level'] * ($nodeHeight + $verticalGap);
-
-    $currentLeft = $leftCell;
     foreach ($sections[$nodeId]['children'] as $childId) {
-        $childCells = $sections[$childId]['subtree_w'];
-        $childWidthPx = $childCells * $nodeWidth + max(0, $childCells - 1) * $horizontalGap;
-
-        layoutTree($sections, $childId, $currentLeft, $cfg);
-        $currentLeft += $childWidthPx + $horizontalGap;
+        layoutTreeTopDownCompact($sections, $childId, $rowIndex, $cfg);
     }
 }
 
-$currentLeft = 0;
-foreach ($rootIds as $rootId) {
-    $rootCells = $sections[$rootId]['subtree_w'];
-    $rootWidthPx = $rootCells * $CONFIG['nodeWidth'] + max(0, $rootCells - 1) * $CONFIG['horizontalGap'];
+/**
+ * Горизонтальная раскладка по уровням:
+ * 1-й уровень в первой строке, 2-й — под ним и т.д.
+ */
+function layoutTreeByLevels(array &$sections, array $rootIds, array $cfg): void
+{
+    $nodeWidth = $cfg['nodeWidth'];
+    $nodeHeight = $cfg['nodeHeight'];
+    $horizontalGap = $cfg['horizontalGap'];
+    $verticalGap = $cfg['verticalGap'];
+    $padding = $cfg['padding'];
 
-    layoutTree($sections, $rootId, $currentLeft, $CONFIG);
-    $currentLeft += $rootWidthPx + $CONFIG['horizontalGap'];
+    $levels = [];
+    $queue = $rootIds;
+    while (!empty($queue)) {
+        $nodeId = array_shift($queue);
+        if (!isset($sections[$nodeId])) {
+            continue;
+        }
+
+        $level = $sections[$nodeId]['level'];
+        if (!isset($levels[$level])) {
+            $levels[$level] = [];
+        }
+        $levels[$level][] = $nodeId;
+
+        foreach ($sections[$nodeId]['children'] as $childId) {
+            if (isset($sections[$childId])) {
+                $queue[] = $childId;
+            }
+        }
+    }
+
+    ksort($levels);
+    $maxNodesInLevel = 0;
+    foreach ($levels as $nodeIds) {
+        $maxNodesInLevel = max($maxNodesInLevel, count($nodeIds));
+    }
+    $maxRowWidth = ($maxNodesInLevel > 0)
+        ? ($maxNodesInLevel * $nodeWidth + max(0, $maxNodesInLevel - 1) * $horizontalGap)
+        : $nodeWidth;
+
+    foreach ($levels as $level => $nodeIds) {
+        $rowWidth = count($nodeIds) * $nodeWidth + max(0, count($nodeIds) - 1) * $horizontalGap;
+        $x = $padding + max(0, ($maxRowWidth - $rowWidth) / 2);
+        $y = $padding + $level * ($nodeHeight + ($verticalGap * 2));
+        foreach ($nodeIds as $nodeId) {
+            $sections[$nodeId]['x'] = $x;
+            $sections[$nodeId]['y'] = $y;
+            $x += $nodeWidth + $horizontalGap;
+        }
+    }
+}
+
+/**
+ * Гибридная раскладка:
+ * - первые 3 уровня (0,1,2) в горизонтальном режиме по центру;
+ * - уровни от 3 и глубже — вертикальные ветки под узлами 3-го уровня.
+ */
+function layoutTreeHybrid(array &$sections, array $rootIds, array $cfg): void
+{
+    $nodeWidth = $cfg['nodeWidth'];
+    $nodeHeight = $cfg['nodeHeight'];
+    $horizontalGap = $cfg['horizontalGap'];
+    $verticalGap = $cfg['verticalGap'];
+    $padding = $cfg['padding'];
+
+    $levels = [];
+    $queue = $rootIds;
+    while (!empty($queue)) {
+        $nodeId = array_shift($queue);
+        if (!isset($sections[$nodeId])) {
+            continue;
+        }
+
+        $level = $sections[$nodeId]['level'];
+        if (!isset($levels[$level])) {
+            $levels[$level] = [];
+        }
+        $levels[$level][] = $nodeId;
+
+        foreach ($sections[$nodeId]['children'] as $childId) {
+            if (isset($sections[$childId])) {
+                $queue[] = $childId;
+            }
+        }
+    }
+
+    $horizontalLevels = [0, 1, 2];
+    $maxNodesInLevel = 0;
+    foreach ($horizontalLevels as $lvl) {
+        $maxNodesInLevel = max($maxNodesInLevel, isset($levels[$lvl]) ? count($levels[$lvl]) : 0);
+    }
+    $maxRowWidth = ($maxNodesInLevel > 0)
+        ? ($maxNodesInLevel * $nodeWidth + max(0, $maxNodesInLevel - 1) * $horizontalGap)
+        : $nodeWidth;
+
+    foreach ($horizontalLevels as $lvl) {
+        if (empty($levels[$lvl])) {
+            continue;
+        }
+
+        $rowWidth = count($levels[$lvl]) * $nodeWidth + max(0, count($levels[$lvl]) - 1) * $horizontalGap;
+        $x = $padding + max(0, ($maxRowWidth - $rowWidth) / 2);
+        $y = $padding + $lvl * ($nodeHeight + ($verticalGap * 2));
+
+        foreach ($levels[$lvl] as $nodeId) {
+            $sections[$nodeId]['x'] = $x;
+            $sections[$nodeId]['y'] = $y;
+            $x += $nodeWidth + $horizontalGap;
+        }
+    }
+
+    $indentStep = $horizontalGap + ($nodeWidth * 0.22);
+
+    $layoutSubtreeVertical = static function (int $nodeId, float $baseX, float $baseY, int &$row) use (&$sections, &$layoutSubtreeVertical, $nodeHeight, $verticalGap, $indentStep): void {
+        if (!isset($sections[$nodeId])) {
+            return;
+        }
+
+        $levelOffset = max(0, $sections[$nodeId]['level'] - 3);
+        $sections[$nodeId]['x'] = $baseX + ($levelOffset * $indentStep);
+        $sections[$nodeId]['y'] = $baseY + $row * ($nodeHeight + $verticalGap);
+        $row++;
+
+        foreach ($sections[$nodeId]['children'] as $childId) {
+            $layoutSubtreeVertical($childId, $baseX, $baseY, $row);
+        }
+    };
+
+    if (!empty($levels[2])) {
+        foreach ($levels[2] as $level2Id) {
+            if (!isset($sections[$level2Id])) {
+                continue;
+            }
+
+            $baseX = $sections[$level2Id]['x'];
+            $baseY = $sections[$level2Id]['y'] + $nodeHeight + ($verticalGap * 2);
+            $row = 0;
+            foreach ($sections[$level2Id]['children'] as $childId) {
+                $layoutSubtreeVertical($childId, $baseX, $baseY, $row);
+            }
+        }
+    } elseif (!empty($levels[1])) {
+        // Если есть только 2 уровня — продолжаем вертикально от второго уровня.
+        foreach ($levels[1] as $level1Id) {
+            if (!isset($sections[$level1Id])) {
+                continue;
+            }
+
+            $baseX = $sections[$level1Id]['x'];
+            $baseY = $sections[$level1Id]['y'] + $nodeHeight + ($verticalGap * 2);
+            $row = 0;
+            foreach ($sections[$level1Id]['children'] as $childId) {
+                $layoutSubtreeVertical($childId, $baseX, $baseY, $row);
+            }
+        }
+    } else {
+        // Для очень мелких деревьев fallback к горизонтальному режиму.
+        layoutTreeByLevels($sections, $rootIds, $cfg);
+    }
+}
+
+if ($layoutMode === 'horizontal') {
+    layoutTreeByLevels($sections, $filteredRootIds, $CONFIG);
+} elseif ($layoutMode === 'hybrid') {
+    layoutTreeHybrid($sections, $filteredRootIds, $CONFIG);
+} else {
+    $rowIndex = 0;
+    foreach ($filteredRootIds as $rootId) {
+        layoutTreeTopDownCompact($sections, $rootId, $rowIndex, $CONFIG);
+    }
 }
 
 /**
@@ -253,11 +420,9 @@ foreach ($rootIds as $rootId) {
  */
 $maxX = 0;
 $maxY = 0;
-$maxLevel = 0;
 foreach ($sections as $node) {
     $maxX = max($maxX, $node['x'] + $CONFIG['nodeWidth']);
     $maxY = max($maxY, $node['y'] + $CONFIG['nodeHeight']);
-    $maxLevel = max($maxLevel, $node['level']);
 }
 
 $canvasWidth = (int)ceil($maxX + $CONFIG['padding']);
@@ -312,80 +477,6 @@ function splitTextToLines(string $text, int $maxLineLength = 28): array
     return array_slice($lines, 0, 3);
 }
 
-/**
- * Генерация draw.io XML
- */
-function buildDrawioXml(array $sections, array $rootIds, array $cfg, int $canvasWidth, int $canvasHeight): string
-{
-    $cells = [];
-
-    // Базовые ячейки
-    $cells[] = '<mxCell id="0"/>';
-    $cells[] = '<mxCell id="1" parent="0"/>';
-
-    // Узлы
-    foreach ($sections as $node) {
-        $cellId = 'node_' . $node['id'];
-
-        $fill = ($node['level'] === 0) ? $cfg['rootFill'] : $cfg['nodeFill'];
-
-        $style = implode(';', [
-            'rounded=1',
-            'whiteSpace=wrap',
-            'html=1',
-            'fontSize=' . (int)$cfg['fontSize'],
-            'fontColor=' . ltrim($cfg['textColor'], '#'),
-            'strokeColor=' . ltrim($cfg['nodeStroke'], '#'),
-            'fillColor=' . ltrim($fill, '#'),
-            'align=center',
-            'verticalAlign=middle',
-            'spacing=8',
-        ]) . ';';
-
-        $cells[] =
-            '<mxCell id="' . xml($cellId) . '" value="' . xml($node['name']) . '" style="' . xml($style) . '" vertex="1" parent="1">' .
-                '<mxGeometry x="' . (int)$node['x'] . '" y="' . (int)$node['y'] . '" width="' . (int)$cfg['nodeWidth'] . '" height="' . (int)$cfg['nodeHeight'] . '" as="geometry"/>' .
-            '</mxCell>';
-    }
-
-    // Связи
-    foreach ($sections as $node) {
-        foreach ($node['children'] as $childId) {
-            $edgeId = 'edge_' . $node['id'] . '_' . $childId;
-            $style = implode(';', [
-                'edgeStyle=orthogonalEdgeStyle',
-                'rounded=0',
-                'orthogonalLoop=1',
-                'jettySize=auto',
-                'html=1',
-                'strokeColor=' . ltrim($cfg['lineColor'], '#'),
-                'endArrow=none',
-                'startArrow=none',
-            ]) . ';';
-
-            $cells[] =
-                '<mxCell id="' . xml($edgeId) . '" style="' . xml($style) . '" edge="1" parent="1" source="node_' . (int)$node['id'] . '" target="node_' . (int)$childId . '">' .
-                    '<mxGeometry relative="1" as="geometry"/>' .
-                '</mxCell>';
-        }
-    }
-
-    $xml =
-        '<?xml version="1.0" encoding="UTF-8"?>' .
-        '<mxfile host="app.diagrams.net" modified="' . date('c') . '" agent="Bitrix24 export_company_structure.php v1.0" version="24.7.17" type="device">' .
-            '<diagram id="company-structure" name="Company Structure">' .
-                '<mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="' . (int)$canvasWidth . '" pageHeight="' . (int)$canvasHeight . '" math="0" shadow="0">' .
-                    '<root>' . implode('', $cells) . '</root>' .
-                '</mxGraphModel>' .
-            '</diagram>' .
-        '</mxfile>';
-
-    return $xml;
-}
-
-/**
- * Генерация SVG
- */
 function buildSvg(array $sections, array $cfg, int $canvasWidth, int $canvasHeight): string
 {
     $svg = [];
@@ -453,7 +544,125 @@ function buildSvg(array $sections, array $cfg, int $canvasWidth, int $canvasHeig
     return implode("\n", $svg);
 }
 
-$drawioXml = buildDrawioXml($sections, $rootIds, $CONFIG, $canvasWidth, $canvasHeight);
+function allocateHexColor(\GdImage $image, string $hexColor): int
+{
+    $hex = ltrim(trim($hexColor), '#');
+    if (strlen($hex) === 3) {
+        $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+    }
+
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+
+    return imagecolorallocate($image, $r, $g, $b);
+}
+
+function detectTtfFontPath(): ?string
+{
+    $candidates = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    ];
+
+    foreach ($candidates as $fontPath) {
+        if (is_readable($fontPath)) {
+            return $fontPath;
+        }
+    }
+
+    return null;
+}
+
+function buildJpg(array $sections, array $cfg, int $canvasWidth, int $canvasHeight): ?string
+{
+    if (!function_exists('imagecreatetruecolor') || !function_exists('imagejpeg')) {
+        return null;
+    }
+
+    $width = max(1, $canvasWidth);
+    $height = max(1, $canvasHeight);
+    $image = imagecreatetruecolor($width, $height);
+    if ($image === false) {
+        return null;
+    }
+
+    try {
+        $bgColor = imagecolorallocate($image, 255, 255, 255);
+        imagefilledrectangle($image, 0, 0, $width, $height, $bgColor);
+
+        $lineColor = allocateHexColor($image, $cfg['lineColor']);
+        $nodeStroke = allocateHexColor($image, $cfg['nodeStroke']);
+        $nodeFill = allocateHexColor($image, $cfg['nodeFill']);
+        $rootFill = allocateHexColor($image, $cfg['rootFill']);
+        $textColor = allocateHexColor($image, $cfg['textColor']);
+
+        imagesetthickness($image, 2);
+
+        foreach ($sections as $node) {
+            $parentCenterX = (int)round($node['x'] + $cfg['nodeWidth'] / 2);
+            $parentBottomY = (int)round($node['y'] + $cfg['nodeHeight']);
+
+            foreach ($node['children'] as $childId) {
+                $child = $sections[$childId];
+                $childCenterX = (int)round($child['x'] + $cfg['nodeWidth'] / 2);
+                $childTopY = (int)round($child['y']);
+                $midY = (int)round($parentBottomY + ($childTopY - $parentBottomY) / 2);
+
+                imageline($image, $parentCenterX, $parentBottomY, $parentCenterX, $midY, $lineColor);
+                imageline($image, $parentCenterX, $midY, $childCenterX, $midY, $lineColor);
+                imageline($image, $childCenterX, $midY, $childCenterX, $childTopY, $lineColor);
+            }
+        }
+        imagesetthickness($image, 1);
+
+        $fontPath = detectTtfFontPath();
+        $fontSize = 12;
+
+        foreach ($sections as $node) {
+            $x1 = (int)round($node['x']);
+            $y1 = (int)round($node['y']);
+            $x2 = (int)round($node['x'] + $cfg['nodeWidth']);
+            $y2 = (int)round($node['y'] + $cfg['nodeHeight']);
+            $fill = ($node['level'] === 0) ? $rootFill : $nodeFill;
+
+            imagefilledrectangle($image, $x1, $y1, $x2, $y2, $fill);
+            imagerectangle($image, $x1, $y1, $x2, $y2, $nodeStroke);
+
+            $lines = splitTextToLines($node['name'], 28);
+            $lineHeight = $fontPath ? 16 : 14;
+            $startY = (int)round($node['y'] + ($cfg['nodeHeight'] / 2) - ((count($lines) - 1) * $lineHeight / 2));
+
+            foreach ($lines as $index => $line) {
+                $textY = $startY + $index * $lineHeight;
+                if ($fontPath && function_exists('imagettftext')) {
+                    $bbox = imagettfbbox($fontSize, 0, $fontPath, $line);
+                    $textWidth = is_array($bbox) ? abs($bbox[2] - $bbox[0]) : 0;
+                    $textX = (int)round($node['x'] + ($cfg['nodeWidth'] - $textWidth) / 2);
+                    imagettftext($image, $fontSize, 0, $textX, $textY + 5, $textColor, $fontPath, $line);
+                } else {
+                    $text = mb_substr($line, 0, 40, 'UTF-8');
+                    $font = 2;
+                    $textWidth = imagefontwidth($font) * mb_strlen($text, 'UTF-8');
+                    $textX = (int)round($node['x'] + ($cfg['nodeWidth'] - $textWidth) / 2);
+                    imagestring($image, $font, $textX, $textY - 6, $text, $textColor);
+                }
+            }
+        }
+
+        ob_start();
+        imagejpeg($image, null, 90);
+        $jpgBlob = ob_get_clean();
+        imagedestroy($image);
+
+        return is_string($jpgBlob) ? $jpgBlob : null;
+    } catch (\Throwable $e) {
+        imagedestroy($image);
+        return null;
+    }
+}
+
 $svg = buildSvg($sections, $CONFIG, $canvasWidth, $canvasHeight);
 
 /**
@@ -464,6 +673,19 @@ switch ($format) {
         header('Content-Type: image/svg+xml; charset=UTF-8');
         header('Content-Disposition: attachment; filename="company_structure.svg"');
         echo $svg;
+        break;
+
+    case 'jpg':
+        $jpgBlob = buildJpg($sections, $CONFIG, $canvasWidth, $canvasHeight);
+        if ($jpgBlob === null) {
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo 'Ошибка: экспорт JPG недоступен. Требуется расширение GD.';
+            break;
+        }
+
+        header('Content-Type: image/jpeg');
+        header('Content-Disposition: attachment; filename="company_structure.jpg"');
+        echo $jpgBlob;
         break;
 
     case 'html':
@@ -477,16 +699,29 @@ switch ($format) {
             <style>
                 body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f5f7fa; }
                 .toolbar { margin-bottom: 15px; }
-                .toolbar a {
-                    display: inline-block;
+                .toolbar .controls {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 10px;
                     margin-right: 10px;
+                }
+                .toolbar select, .toolbar button, .toolbar a {
+                    display: inline-block;
                     padding: 8px 12px;
+                    font-size: 14px;
+                    border-radius: 6px;
+                    border: 1px solid #c7d3e6;
+                    background: #fff;
+                    color: #1f2d3d;
+                }
+                .toolbar button, .toolbar a.download {
                     background: #2f74d0;
                     color: #fff;
                     text-decoration: none;
-                    border-radius: 6px;
+                    border: none;
+                    cursor: pointer;
                 }
-                .toolbar a:hover { background: #235dae; }
+                .toolbar button:hover, .toolbar a.download:hover { background: #235dae; }
                 .canvas {
                     background: #fff;
                     border: 1px solid #dce3ee;
@@ -497,8 +732,26 @@ switch ($format) {
         </head>
         <body>
             <div class="toolbar">
-                <a href="?format=drawio">Скачать draw.io</a>
-                <a href="?format=svg">Скачать SVG</a>
+                <form method="get" class="controls">
+                    <input type="hidden" name="format" value="html">
+                    <label for="levels">Количество уровней:</label>
+                    <select name="levels" id="levels">
+                        <?php for ($level = 1; $level <= $maxAvailableLevels; $level++): ?>
+                            <option value="<?php echo (int)$level; ?>" <?php echo $level === $requestedLevels ? 'selected' : ''; ?>>
+                                <?php echo (int)$level; ?>
+                            </option>
+                        <?php endfor; ?>
+                    </select>
+                    <label for="layout">Отображение:</label>
+                    <select name="layout" id="layout">
+                        <option value="vertical" <?php echo $layoutMode === 'vertical' ? 'selected' : ''; ?>>Вертикально</option>
+                        <option value="horizontal" <?php echo $layoutMode === 'horizontal' ? 'selected' : ''; ?>>Горизонтально по уровням</option>
+                        <option value="hybrid" <?php echo $layoutMode === 'hybrid' ? 'selected' : ''; ?>>Гибрид (3 уровня + вертикально)</option>
+                    </select>
+                    <button type="submit">Показать</button>
+                </form>
+                <a class="download" href="?format=svg&amp;levels=<?php echo (int)$requestedLevels; ?>&amp;layout=<?php echo urlencode($layoutMode); ?>">Скачать SVG</a>
+                <a class="download" href="?format=jpg&amp;levels=<?php echo (int)$requestedLevels; ?>&amp;layout=<?php echo urlencode($layoutMode); ?>">Скачать JPG</a>
             </div>
             <div class="canvas">
                 <?php echo $svg; ?>
@@ -508,11 +761,10 @@ switch ($format) {
         <?php
         break;
 
-    case 'drawio':
     default:
-        header('Content-Type: application/xml; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="company_structure.drawio"');
-        echo $drawioXml;
+        header('Content-Type: image/svg+xml; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="company_structure.svg"');
+        echo $svg;
         break;
 }
 
