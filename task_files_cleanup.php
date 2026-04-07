@@ -79,23 +79,59 @@ function hasColumn(string $tableName, string $columnName): bool
     $table = $sqlHelper->forSql($tableName);
     $column = $sqlHelper->forSql($columnName);
 
+    if (!hasTable($tableName)) {
+        $cache[$key] = false;
+        return false;
+    }
+
     $row = $connection->query("SHOW COLUMNS FROM {$table} LIKE '{$column}'")->fetch();
     $cache[$key] = is_array($row);
 
     return $cache[$key];
 }
 
+function hasTable(string $tableName): bool
+{
+    static $cache = [];
+    if (array_key_exists($tableName, $cache)) {
+        return $cache[$tableName];
+    }
+
+    $connection = Application::getConnection();
+    $sqlHelper = $connection->getSqlHelper();
+    $table = $sqlHelper->forSql($tableName);
+
+    $row = $connection->query("SHOW TABLES LIKE '{$table}'")->fetch();
+    $cache[$tableName] = is_array($row);
+
+    return $cache[$tableName];
+}
+
+function getTasksFileTable(): ?string
+{
+    if (hasTable('b_tasks_file')) {
+        return 'b_tasks_file';
+    }
+
+    if (hasTable('b_tasks_files')) {
+        return 'b_tasks_files';
+    }
+
+    return null;
+}
+
 function buildTaskUserFilter(int $userId): string
 {
     $conditions = [];
+    $tasksFileTable = getTasksFileTable();
 
     if (hasColumn('b_file', 'CREATED_BY')) {
         $conditions[] = 'f.CREATED_BY = ' . $userId;
     }
-    if (hasColumn('b_tasks_files', 'USER_ID')) {
+    if ($tasksFileTable !== null && hasColumn($tasksFileTable, 'USER_ID')) {
         $conditions[] = 'tf.USER_ID = ' . $userId;
     }
-    if (hasColumn('b_tasks_files', 'CREATED_BY')) {
+    if ($tasksFileTable !== null && hasColumn($tasksFileTable, 'CREATED_BY')) {
         $conditions[] = 'tf.CREATED_BY = ' . $userId;
     }
     if (hasColumn('b_tasks', 'CREATED_BY')) {
@@ -133,6 +169,11 @@ function buildCommentUserFilter(int $userId): string
 function loadTaskFileUsages(int $userId): array
 {
     $connection = Application::getConnection();
+    $tasksFileTable = getTasksFileTable();
+    if ($tasksFileTable === null) {
+        return [];
+    }
+
     $filter = buildTaskUserFilter($userId);
     $items = [];
 
@@ -151,7 +192,7 @@ function loadTaskFileUsages(int $userId): array
             t.STATUS,
             COALESCE(t.CHANGED_DATE, t.CREATED_DATE) AS USAGE_DATE,
             'TASK' AS USAGE_TYPE
-        FROM b_tasks_files tf
+        FROM {$tasksFileTable} tf
         INNER JOIN b_file f ON f.ID = tf.FILE_ID
         INNER JOIN b_tasks t ON t.ID = tf.TASK_ID
         WHERE {$filter}
