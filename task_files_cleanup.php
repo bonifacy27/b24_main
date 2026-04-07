@@ -540,6 +540,7 @@ $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
 <form method="get">
     <label for="user_id"><strong>Пользователь:</strong></label>
     <input type="hidden" name="user_id" id="user_id" value="<?= (int)$selectedUserId ?>">
+    <input type="number" id="user_id_manual" value="<?= (int)$selectedUserId ?>" min="1" placeholder="ID пользователя" style="width: 140px;">
     <button type="button" id="user_picker_btn">Выбрать пользователя</button>
     <span id="user_picker_label" class="muted"><?= $user ? h($user['LABEL']) : 'Не выбран' ?></span>
     <button type="submit">Сканировать</button>
@@ -621,11 +622,25 @@ $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
     </form>
 <?php endif; ?>
 <script>
-BX.ready(function () {
+(function () {
     const userInput = document.getElementById('user_id');
+    const manualInput = document.getElementById('user_id_manual');
     const userLabel = document.getElementById('user_picker_label');
     const btn = document.getElementById('user_picker_btn');
-    if (!btn || !BX.UI || !BX.UI.EntitySelector) {
+
+    if (manualInput && userInput) {
+        manualInput.addEventListener('change', function () {
+            userInput.value = manualInput.value || '';
+            if (!manualInput.value) {
+                userLabel.textContent = 'Не выбран';
+            }
+        });
+    }
+
+    if (typeof window.BX === 'undefined' || !btn || !BX.UI || !BX.UI.EntitySelector) {
+        if (btn) {
+            btn.style.display = 'none';
+        }
         return;
     }
 
@@ -639,10 +654,16 @@ BX.ready(function () {
             'Item:onSelect': function (event) {
                 const item = event.getData().item;
                 userInput.value = item.getId();
+                if (manualInput) {
+                    manualInput.value = item.getId();
+                }
                 userLabel.textContent = item.getTitle() + ' [' + item.getId() + ']';
             },
             'Item:onDeselect': function () {
                 userInput.value = '';
+                if (manualInput) {
+                    manualInput.value = '';
+                }
                 userLabel.textContent = 'Не выбран';
             }
         }
@@ -651,7 +672,7 @@ BX.ready(function () {
     btn.addEventListener('click', function () {
         dialog.show();
     });
-});
+})();
 </script>
 </body>
 </html>
