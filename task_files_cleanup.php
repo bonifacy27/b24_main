@@ -42,27 +42,149 @@ function formatBytes(int $bytes): string
     return round($bytes / (1024 ** $power), 2) . ' ' . $units[$power];
 }
 
-function loadUsers(): array
+function getUserById(int $userId): ?array
 {
-    $users = [];
-    $result = UserTable::getList([
-        'order' => ['LAST_NAME' => 'ASC', 'NAME' => 'ASC', 'LOGIN' => 'ASC'],
-        'select' => ['ID', 'LOGIN', 'NAME', 'LAST_NAME', 'ACTIVE'],
-    ]);
-
-    while ($user = $result->fetch()) {
-        $fullName = trim($user['LAST_NAME'] . ' ' . $user['NAME']);
-        if ($fullName === '') {
-            $fullName = $user['LOGIN'];
-        }
-
-        $users[] = [
-            'ID' => (int)$user['ID'],
-            'LABEL' => sprintf('[%d] %s (%s)%s', (int)$user['ID'], $fullName, (string)$user['LOGIN'], $user['ACTIVE'] === 'N' ? ' [неактивен]' : ''),
-        ];
+    if ($userId <= 0) {
+        return null;
     }
 
-    return $users;
+    $user = UserTable::getList([
+        'filter' => ['=ID' => $userId],
+        'select' => ['ID', 'LOGIN', 'NAME', 'LAST_NAME', 'ACTIVE'],
+        'limit' => 1,
+    ])->fetch();
+
+    if (!$user) {
+        return null;
+    }
+
+    $fullName = trim($user['LAST_NAME'] . ' ' . $user['NAME']);
+    if ($fullName === '') {
+        $fullName = $user['LOGIN'];
+    }
+
+    return [
+        'ID' => (int)$user['ID'],
+        'LABEL' => sprintf('[%d] %s (%s)%s', (int)$user['ID'], $fullName, (string)$user['LOGIN'], $user['ACTIVE'] === 'N' ? ' [неактивен]' : ''),
+    ];
+}
+
+function getSortParams(array $request): array
+{
+    $allowed = [
+        'file_size' => 'file_size',
+        'usage_date' => 'usage_date',
+        'task_created_date' => 'task_created_date',
+    ];
+
+    $sort = isset($request['sort']) ? (string)$request['sort'] : 'usage_date';
+    if (!isset($allowed[$sort])) {
+        $sort = 'usage_date';
+    }
+
+    $dir = isset($request['dir']) ? strtoupper((string)$request['dir']) : 'DESC';
+    $dir = $dir === 'ASC' ? 'ASC' : 'DESC';
+
+    return ['sort' => $sort, 'dir' => $dir];
+}
+
+function sortRows(array $rows, string $sort, string $dir): array
+{
+    $multiplier = $dir === 'ASC' ? 1 : -1;
+
+    uasort($rows, static function (array $a, array $b) use ($sort, $multiplier): int {
+        $fileA = $a['FILE'];
+        $fileB = $b['FILE'];
+        $usageA = $a['USAGES'][0] ?? null;
+        $usageB = $b['USAGES'][0] ?? null;
+
+        if ($sort === 'file_size') {
+            return ((int)$fileA['FILE_SIZE'] <=> (int)$fileB['FILE_SIZE']) * $multiplier;
+        }
+
+        if ($sort === 'task_created_date') {
+            $aVal = (string)($usageA['TASK_CREATED_DATE'] ?? '');
+            $bVal = (string)($usageB['TASK_CREATED_DATE'] ?? '');
+            return strcmp($aVal, $bVal) * $multiplier;
+        }
+
+        $aVal = (string)($usageA['USAGE_DATE'] ?? $fileA['TIMESTAMP_X']);
+        $bVal = (string)($usageB['USAGE_DATE'] ?? $fileB['TIMESTAMP_X']);
+        return strcmp($aVal, $bVal) * $multiplier;
+    });
+
+    return $rows;
+}
+
+function sortLink(string $column, string $title, int $selectedUserId, string $currentSort, string $currentDir): string
+{
+    $nextDir = ($currentSort === $column && $currentDir === 'ASC') ? 'DESC' : 'ASC';
+    $arrow = $currentSort === $column ? ($currentDir === 'ASC' ? ' ▲' : ' ▼') : '';
+    $url = '?user_id=' . $selectedUserId . '&sort=' . urlencode($column) . '&dir=' . urlencode($nextDir);
+    return '<a href="' . h($url) . '">' . h($title . $arrow) . '</a>';
+}
+
+function buildUserFilter(string $fileAlias, array $candidates, int $fallbackUserId): string
+{
+    $conditions = [];
+
+    if (hasColumn('b_file', 'CREATED_BY')) {
+        $conditions[] = $fileAlias . '.CREATED_BY = ' . $fallbackUserId;
+    }
+
+    foreach ($candidates as $candidate) {
+        [$table, $column, $alias] = $candidate;
+        if (hasColumn($table, $column)) {
+            $conditions[] = $alias . '.' . $column . ' = ' . $fallbackUserId;
+        }
+    }
+
+    if (empty($conditions)) {
+        return '1=0';
+    }
+
+    return '(' . implode(' OR ', $conditions) . ')';
+}
+
+function buildTaskUserFilter(int $userId): string
+{
+    $tasksFileTable = getTasksFileTable();
+    if ($tasksFileTable === null) {
+        return '1=0';
+    }
+
+    $main = buildUserFilter('f', [
+        [$tasksFileTable, 'USER_ID', 'tf'],
+        [$tasksFileTable, 'CREATED_BY', 'tf'],
+    ], $userId);
+
+    if ($main !== '1=0') {
+        return $main;
+    }
+
+    if (hasColumn('b_tasks', 'CREATED_BY')) {
+        return '(t.CREATED_BY = ' . $userId . ')';
+    }
+
+    return '1=0';
+}
+
+function buildCommentUserFilter(int $userId): string
+{
+    $main = buildUserFilter('f', [
+        ['b_forum_message', 'AUTHOR_ID', 'fm'],
+        ['b_forum_message', 'USER_ID', 'fm'],
+    ], $userId);
+
+    if ($main !== '1=0') {
+        return $main;
+    }
+
+    if (hasColumn('b_tasks', 'CREATED_BY')) {
+        return '(t.CREATED_BY = ' . $userId . ')';
+    }
+
+    return '1=0';
 }
 
 function hasColumn(string $tableName, string $columnName): bool
@@ -118,52 +240,6 @@ function getTasksFileTable(): ?string
     }
 
     return null;
-}
-
-function buildTaskUserFilter(int $userId): string
-{
-    $conditions = [];
-    $tasksFileTable = getTasksFileTable();
-
-    if (hasColumn('b_file', 'CREATED_BY')) {
-        $conditions[] = 'f.CREATED_BY = ' . $userId;
-    }
-    if ($tasksFileTable !== null && hasColumn($tasksFileTable, 'USER_ID')) {
-        $conditions[] = 'tf.USER_ID = ' . $userId;
-    }
-    if ($tasksFileTable !== null && hasColumn($tasksFileTable, 'CREATED_BY')) {
-        $conditions[] = 'tf.CREATED_BY = ' . $userId;
-    }
-    if (hasColumn('b_tasks', 'CREATED_BY')) {
-        $conditions[] = 't.CREATED_BY = ' . $userId;
-    }
-
-    if (empty($conditions)) {
-        return '1=0';
-    }
-
-    return '(' . implode(' OR ', $conditions) . ')';
-}
-
-function buildCommentUserFilter(int $userId): string
-{
-    $conditions = [];
-
-    if (hasColumn('b_file', 'CREATED_BY')) {
-        $conditions[] = 'f.CREATED_BY = ' . $userId;
-    }
-    if (hasColumn('b_forum_message', 'AUTHOR_ID')) {
-        $conditions[] = 'fm.AUTHOR_ID = ' . $userId;
-    }
-    if (hasColumn('b_tasks', 'CREATED_BY')) {
-        $conditions[] = 't.CREATED_BY = ' . $userId;
-    }
-
-    if (empty($conditions)) {
-        return '1=0';
-    }
-
-    return '(' . implode(' OR ', $conditions) . ')';
 }
 
 function loadTaskFileUsages(int $userId): array
@@ -271,6 +347,51 @@ function loadCommentFileUsages(int $userId): array
             'TASK_CLOSED_DATE' => (string)$row['CLOSED_DATE'],
             'TASK_STATUS' => (int)$row['STATUS'],
         ];
+    }
+
+    if (hasColumn('b_forum_message', 'FILE_ID')) {
+        $legacySql = "
+            SELECT
+                f.ID AS FILE_ID,
+                f.FILE_NAME,
+                f.ORIGINAL_NAME,
+                f.FILE_SIZE,
+                f.SUBDIR,
+                f.TIMESTAMP_X,
+                t.ID AS TASK_ID,
+                t.TITLE AS TASK_TITLE,
+                t.CREATED_DATE,
+                t.CLOSED_DATE,
+                t.STATUS,
+                fm.POST_DATE AS USAGE_DATE,
+                'COMMENT' AS USAGE_TYPE
+            FROM b_forum_message fm
+            INNER JOIN b_forum_topic ft ON ft.ID = fm.TOPIC_ID
+            INNER JOIN b_tasks t ON ft.XML_ID LIKE 'TASK_%' AND t.ID = CAST(SUBSTRING(ft.XML_ID, 6) AS UNSIGNED)
+            INNER JOIN b_file f ON f.ID = fm.FILE_ID
+            WHERE fm.FILE_ID > 0
+              AND {$filter}
+        ";
+
+        $legacyResult = $connection->query($legacySql);
+        while ($row = $legacyResult->fetch()) {
+            $fileId = (int)$row['FILE_ID'];
+            $items[$fileId][] = [
+                'FILE_ID' => $fileId,
+                'FILE_NAME' => (string)$row['FILE_NAME'],
+                'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+                'FILE_SIZE' => (int)$row['FILE_SIZE'],
+                'SUBDIR' => (string)$row['SUBDIR'],
+                'TIMESTAMP_X' => (string)$row['TIMESTAMP_X'],
+                'USAGE_TYPE' => (string)$row['USAGE_TYPE'],
+                'USAGE_DATE' => (string)$row['USAGE_DATE'],
+                'TASK_ID' => (int)$row['TASK_ID'],
+                'TASK_TITLE' => (string)$row['TASK_TITLE'],
+                'TASK_CREATED_DATE' => (string)$row['CREATED_DATE'],
+                'TASK_CLOSED_DATE' => (string)$row['CLOSED_DATE'],
+                'TASK_STATUS' => (int)$row['STATUS'],
+            ];
+        }
     }
 
     return $items;
@@ -389,9 +510,12 @@ if ($action === 'delete' && check_bitrix_sessid()) {
     $message = sprintf('Удалено файлов: %d. Ошибок удаления: %d.', count($result['deleted']), count($result['errors']));
 }
 
-$users = loadUsers();
+$user = getUserById($selectedUserId);
+$sortParams = getSortParams($_GET);
 $rows = $selectedUserId > 0 ? buildRows($selectedUserId) : [];
+$rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
 $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
+\CJSCore::Init(['ui.entity-selector']);
 ?>
 <!doctype html>
 <html lang="ru">
@@ -415,12 +539,9 @@ $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
 
 <form method="get">
     <label for="user_id"><strong>Пользователь:</strong></label>
-    <select name="user_id" id="user_id" required>
-        <option value="">-- выберите пользователя --</option>
-        <?php foreach ($users as $user): ?>
-            <option value="<?= (int)$user['ID'] ?>" <?= $selectedUserId === (int)$user['ID'] ? 'selected' : '' ?>><?= h($user['LABEL']) ?></option>
-        <?php endforeach; ?>
-    </select>
+    <input type="hidden" name="user_id" id="user_id" value="<?= (int)$selectedUserId ?>">
+    <button type="button" id="user_picker_btn">Выбрать пользователя</button>
+    <span id="user_picker_label" class="muted"><?= $user ? h($user['LABEL']) : 'Не выбран' ?></span>
     <button type="submit">Сканировать</button>
 </form>
 
@@ -445,7 +566,14 @@ $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
         <table>
             <thead>
             <tr>
-                <th>Удалить</th><th>Файл</th><th>Размер</th><th>Дата использования</th><th>Задача</th><th>Дата создания задачи</th><th>Дата завершения задачи</th><th>Статус задачи</th>
+                <th>Удалить</th>
+                <th>Файл</th>
+                <th><?= sortLink('file_size', 'Размер', $selectedUserId, $sortParams['sort'], $sortParams['dir']) ?></th>
+                <th><?= sortLink('usage_date', 'Дата использования', $selectedUserId, $sortParams['sort'], $sortParams['dir']) ?></th>
+                <th>Задача</th>
+                <th><?= sortLink('task_created_date', 'Дата создания задачи', $selectedUserId, $sortParams['sort'], $sortParams['dir']) ?></th>
+                <th>Дата завершения задачи</th>
+                <th>Статус задачи</th>
             </tr>
             </thead>
             <tbody>
@@ -492,5 +620,38 @@ $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
         </table>
     </form>
 <?php endif; ?>
+<script>
+BX.ready(function () {
+    const userInput = document.getElementById('user_id');
+    const userLabel = document.getElementById('user_picker_label');
+    const btn = document.getElementById('user_picker_btn');
+    if (!btn || !BX.UI || !BX.UI.EntitySelector) {
+        return;
+    }
+
+    const dialog = new BX.UI.EntitySelector.Dialog({
+        targetNode: btn,
+        context: 'TASK_FILES_CLEANUP',
+        multiple: false,
+        entities: [{id: 'user'}],
+        preselectedItems: userInput.value ? [['user', userInput.value]] : [],
+        events: {
+            'Item:onSelect': function (event) {
+                const item = event.getData().item;
+                userInput.value = item.getId();
+                userLabel.textContent = item.getTitle() + ' [' + item.getId() + ']';
+            },
+            'Item:onDeselect': function () {
+                userInput.value = '';
+                userLabel.textContent = 'Не выбран';
+            }
+        }
+    });
+
+    btn.addEventListener('click', function () {
+        dialog.show();
+    });
+});
+</script>
 </body>
 </html>
