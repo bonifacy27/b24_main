@@ -435,16 +435,84 @@ function loadStandaloneUserFiles(int $userId): array
     return $items;
 }
 
+function loadUserDiskFiles(int $userId): array
+{
+    if (!hasTable('b_disk_object')) {
+        return [];
+    }
+
+    $connection = Application::getConnection();
+    $conditions = [];
+
+    if (hasColumn('b_disk_object', 'TYPE')) {
+        $conditions[] = 'do.TYPE = 2';
+    }
+    if (hasColumn('b_disk_object', 'DELETED_TYPE')) {
+        $conditions[] = 'do.DELETED_TYPE = 0';
+    }
+    if (hasColumn('b_disk_object', 'CREATED_BY')) {
+        $conditions[] = 'do.CREATED_BY = ' . $userId;
+    } elseif (hasColumn('b_disk_object', 'CREATE_USER_ID')) {
+        $conditions[] = 'do.CREATE_USER_ID = ' . $userId;
+    } else {
+        return [];
+    }
+
+    $whereSql = implode(' AND ', $conditions);
+    $sizeSql = hasColumn('b_disk_object', 'SIZE') ? 'do.SIZE' : 'COALESCE(f.FILE_SIZE, 0)';
+    $nameSql = hasColumn('b_disk_object', 'NAME') ? 'do.NAME' : 'COALESCE(f.ORIGINAL_NAME, f.FILE_NAME)';
+    $timeSql = hasColumn('b_disk_object', 'UPDATE_TIME') ? 'do.UPDATE_TIME' : (hasColumn('b_disk_object', 'CREATE_TIME') ? 'do.CREATE_TIME' : 'f.TIMESTAMP_X');
+
+    $sql = "
+        SELECT
+            f.ID AS FILE_ID,
+            f.FILE_NAME,
+            f.ORIGINAL_NAME,
+            f.SUBDIR,
+            {$sizeSql} AS FILE_SIZE,
+            {$nameSql} AS DISK_NAME,
+            {$timeSql} AS FILE_TIME
+        FROM b_disk_object do
+        INNER JOIN b_file f ON f.ID = do.FILE_ID
+        WHERE {$whereSql}
+        ORDER BY {$timeSql} DESC, f.ID DESC
+    ";
+
+    $items = [];
+    $result = $connection->query($sql);
+    while ($row = $result->fetch()) {
+        $fileId = (int)$row['FILE_ID'];
+        $items[$fileId] = [
+            'FILE_ID' => $fileId,
+            'FILE_NAME' => (string)$row['FILE_NAME'],
+            'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+            'FILE_SIZE' => (int)$row['FILE_SIZE'],
+            'SUBDIR' => (string)$row['SUBDIR'],
+            'TIMESTAMP_X' => (string)$row['FILE_TIME'],
+            'DISK_NAME' => (string)$row['DISK_NAME'],
+        ];
+    }
+
+    return $items;
+}
+
 function buildRows(int $userId): array
 {
     $taskUsages = loadTaskFileUsages($userId);
     $commentUsages = loadCommentFileUsages($userId);
+    $diskFiles = loadUserDiskFiles($userId);
     $standaloneFiles = loadStandaloneUserFiles($userId);
 
     $byFile = [];
 
-    foreach ($standaloneFiles as $fileId => $file) {
+    foreach ($diskFiles as $fileId => $file) {
         $byFile[$fileId] = ['FILE' => $file, 'USAGES' => []];
+    }
+
+    foreach ($standaloneFiles as $fileId => $file) {
+        if (!isset($byFile[$fileId])) {
+            $byFile[$fileId] = ['FILE' => $file, 'USAGES' => []];
+        }
     }
 
     foreach ([$taskUsages, $commentUsages] as $group) {
