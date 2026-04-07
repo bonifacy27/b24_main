@@ -442,8 +442,46 @@ function loadUserDiskFiles(int $userId): array
     }
 
     $connection = Application::getConnection();
-    $conditions = [];
+    $items = [];
 
+    if (hasTable('b_disk_uploaded_file') && hasColumn('b_disk_uploaded_file', 'USER_ID')) {
+        $sqlUploaded = "
+            SELECT
+                f.ID AS FILE_ID,
+                f.FILE_NAME,
+                f.ORIGINAL_NAME,
+                f.SUBDIR,
+                COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
+                COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
+                COALESCE(dv.CREATE_TIME, do.UPDATE_TIME, do.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
+            FROM b_disk_uploaded_file duf
+            INNER JOIN b_disk_object do ON do.ID = duf.OBJECT_ID
+            LEFT JOIN b_disk_version dv ON dv.ID = (
+                SELECT MAX(v.ID)
+                FROM b_disk_version v
+                WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
+            )
+            LEFT JOIN b_file f ON f.ID = dv.FILE_ID
+            WHERE duf.USER_ID = {$userId}
+              AND f.ID IS NOT NULL
+        ";
+
+        $uploadedResult = $connection->query($sqlUploaded);
+        while ($row = $uploadedResult->fetch()) {
+            $fileId = (int)$row['FILE_ID'];
+            $items[$fileId] = [
+                'FILE_ID' => $fileId,
+                'FILE_NAME' => (string)$row['FILE_NAME'],
+                'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+                'FILE_SIZE' => (int)$row['FILE_SIZE'],
+                'SUBDIR' => (string)$row['SUBDIR'],
+                'TIMESTAMP_X' => (string)$row['FILE_TIME'],
+                'DISK_NAME' => (string)$row['DISK_NAME'],
+            ];
+        }
+    }
+
+    $conditions = [];
     if (hasColumn('b_disk_object', 'TYPE')) {
         $conditions[] = 'do.TYPE = 2';
     }
@@ -454,43 +492,46 @@ function loadUserDiskFiles(int $userId): array
         $conditions[] = 'do.CREATED_BY = ' . $userId;
     } elseif (hasColumn('b_disk_object', 'CREATE_USER_ID')) {
         $conditions[] = 'do.CREATE_USER_ID = ' . $userId;
-    } else {
-        return [];
     }
 
-    $whereSql = implode(' AND ', $conditions);
-    $sizeSql = hasColumn('b_disk_object', 'SIZE') ? 'do.SIZE' : 'COALESCE(f.FILE_SIZE, 0)';
-    $nameSql = hasColumn('b_disk_object', 'NAME') ? 'do.NAME' : 'COALESCE(f.ORIGINAL_NAME, f.FILE_NAME)';
-    $timeSql = hasColumn('b_disk_object', 'UPDATE_TIME') ? 'do.UPDATE_TIME' : (hasColumn('b_disk_object', 'CREATE_TIME') ? 'do.CREATE_TIME' : 'f.TIMESTAMP_X');
+    if (!empty($conditions) && hasTable('b_disk_version')) {
+        $whereSql = implode(' AND ', $conditions);
+        $sqlFallback = "
+            SELECT
+                f.ID AS FILE_ID,
+                f.FILE_NAME,
+                f.ORIGINAL_NAME,
+                f.SUBDIR,
+                COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
+                COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
+                COALESCE(do.UPDATE_TIME, do.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
+            FROM b_disk_object do
+            LEFT JOIN b_disk_version dv ON dv.ID = (
+                SELECT MAX(v.ID)
+                FROM b_disk_version v
+                WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
+            )
+            LEFT JOIN b_file f ON f.ID = dv.FILE_ID
+            WHERE {$whereSql}
+              AND f.ID IS NOT NULL
+        ";
 
-    $sql = "
-        SELECT
-            f.ID AS FILE_ID,
-            f.FILE_NAME,
-            f.ORIGINAL_NAME,
-            f.SUBDIR,
-            {$sizeSql} AS FILE_SIZE,
-            {$nameSql} AS DISK_NAME,
-            {$timeSql} AS FILE_TIME
-        FROM b_disk_object do
-        INNER JOIN b_file f ON f.ID = do.FILE_ID
-        WHERE {$whereSql}
-        ORDER BY {$timeSql} DESC, f.ID DESC
-    ";
-
-    $items = [];
-    $result = $connection->query($sql);
-    while ($row = $result->fetch()) {
-        $fileId = (int)$row['FILE_ID'];
-        $items[$fileId] = [
-            'FILE_ID' => $fileId,
-            'FILE_NAME' => (string)$row['FILE_NAME'],
-            'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
-            'FILE_SIZE' => (int)$row['FILE_SIZE'],
-            'SUBDIR' => (string)$row['SUBDIR'],
-            'TIMESTAMP_X' => (string)$row['FILE_TIME'],
-            'DISK_NAME' => (string)$row['DISK_NAME'],
-        ];
+        $fallbackResult = $connection->query($sqlFallback);
+        while ($row = $fallbackResult->fetch()) {
+            $fileId = (int)$row['FILE_ID'];
+            if (isset($items[$fileId])) {
+                continue;
+            }
+            $items[$fileId] = [
+                'FILE_ID' => $fileId,
+                'FILE_NAME' => (string)$row['FILE_NAME'],
+                'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+                'FILE_SIZE' => (int)$row['FILE_SIZE'],
+                'SUBDIR' => (string)$row['SUBDIR'],
+                'TIMESTAMP_X' => (string)$row['FILE_TIME'],
+                'DISK_NAME' => (string)$row['DISK_NAME'],
+            ];
+        }
     }
 
     return $items;
@@ -582,7 +623,6 @@ $user = getUserById($selectedUserId);
 $sortParams = getSortParams($_GET);
 $rows = $selectedUserId > 0 ? buildRows($selectedUserId) : [];
 $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
-$hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
 \CJSCore::Init(['ui.entity-selector']);
 ?>
 <!doctype html>
@@ -613,10 +653,6 @@ $hasCreatedBy = hasColumn('b_file', 'CREATED_BY');
     <span id="user_picker_label" class="muted"><?= $user ? h($user['LABEL']) : 'Не выбран' ?></span>
     <button type="submit">Сканировать</button>
 </form>
-
-<?php if (!$hasCreatedBy): ?>
-    <div class="warn">В таблице <code>b_file</code> нет поля <code>CREATED_BY</code>. Показаны файлы, найденные по привязкам к задачам/комментариям выбранного пользователя.</div>
-<?php endif; ?>
 
 <?php if ($message !== ''): ?>
     <div class="msg"><?= h($message) ?></div>
