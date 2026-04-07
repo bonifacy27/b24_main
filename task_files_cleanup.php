@@ -822,6 +822,7 @@ function deleteFiles(array $fileIds): array
 {
     $deleted = [];
     $errors = [];
+    $diagnostics = [];
 
     foreach (array_unique(array_map('intval', $fileIds)) as $fileId) {
         if ($fileId <= 0) {
@@ -832,20 +833,75 @@ function deleteFiles(array $fileIds): array
             $deleted[] = $fileId;
         } else {
             $errors[] = $fileId;
+            $diagnostics[$fileId] = buildDeleteDiagnostic($fileId);
         }
     }
 
-    return ['deleted' => $deleted, 'errors' => $errors];
+    return ['deleted' => $deleted, 'errors' => $errors, 'diagnostics' => $diagnostics];
+}
+
+function buildDeleteDiagnostic(int $fileId): array
+{
+    $connection = Application::getConnection();
+    $diag = [
+        'FILE_ID' => $fileId,
+        'FILE_ROW_EXISTS' => false,
+        'FILE_PATH' => '',
+        'FILE_EXISTS_ON_DISK' => null,
+        'DISK_VERSION_LINKS' => null,
+        'DISK_OBJECT_LINKS' => null,
+        'TASK_LINKS' => null,
+        'FORUM_LINKS' => null,
+    ];
+
+    $fileRow = $connection->query("
+        SELECT ID, SUBDIR, FILE_NAME
+        FROM b_file
+        WHERE ID = {$fileId}
+        LIMIT 1
+    ")->fetch();
+
+    if ($fileRow) {
+        $diag['FILE_ROW_EXISTS'] = true;
+        $relativePath = '/upload/' . trim((string)$fileRow['SUBDIR'] . '/' . (string)$fileRow['FILE_NAME'], '/');
+        $diag['FILE_PATH'] = $relativePath;
+        $diag['FILE_EXISTS_ON_DISK'] = is_file($_SERVER['DOCUMENT_ROOT'] . $relativePath);
+    }
+
+    if (hasTable('b_disk_version') && hasColumn('b_disk_version', 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM b_disk_version WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['DISK_VERSION_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    if (hasTable('b_disk_object') && hasColumn('b_disk_object', 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM b_disk_object WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['DISK_OBJECT_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    $tasksFileTable = getTasksFileTable();
+    if ($tasksFileTable !== null && hasColumn($tasksFileTable, 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM {$tasksFileTable} WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['TASK_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    if (hasTable('b_forum_message') && hasColumn('b_forum_message', 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM b_forum_message WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['FORUM_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    return $diag;
 }
 
 $selectedUserId = isset($_REQUEST['user_id']) ? (int)$_REQUEST['user_id'] : 0;
 $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
 $message = '';
+$deleteDiagnostics = [];
 
 if ($action === 'delete' && check_bitrix_sessid()) {
     $toDelete = isset($_POST['delete_files']) && is_array($_POST['delete_files']) ? $_POST['delete_files'] : [];
     $result = deleteFiles($toDelete);
     $message = sprintf('Удалено файлов: %d. Ошибок удаления: %d.', count($result['deleted']), count($result['errors']));
+    $deleteDiagnostics = $result['diagnostics'] ?? [];
 }
 
 $user = getUserById($selectedUserId);
@@ -885,6 +941,25 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
 
 <?php if ($message !== ''): ?>
     <div class="msg"><?= h($message) ?></div>
+<?php endif; ?>
+<?php if (!empty($deleteDiagnostics)): ?>
+    <div class="warn">
+        <strong>Диагностика ошибок удаления:</strong>
+        <ul>
+            <?php foreach ($deleteDiagnostics as $fileId => $diag): ?>
+                <li>
+                    <strong>Файл ID <?= (int)$fileId ?></strong>:
+                    b_file: <?= $diag['FILE_ROW_EXISTS'] ? 'есть запись' : 'запись не найдена' ?>;
+                    путь: <?= h((string)$diag['FILE_PATH']) ?: '—' ?>;
+                    на диске: <?= $diag['FILE_EXISTS_ON_DISK'] === null ? 'не проверено' : ($diag['FILE_EXISTS_ON_DISK'] ? 'да' : 'нет') ?>;
+                    ссылок disk_version: <?= $diag['DISK_VERSION_LINKS'] === null ? 'н/д' : (int)$diag['DISK_VERSION_LINKS'] ?>;
+                    ссылок disk_object: <?= $diag['DISK_OBJECT_LINKS'] === null ? 'н/д' : (int)$diag['DISK_OBJECT_LINKS'] ?>;
+                    ссылок tasks_file: <?= $diag['TASK_LINKS'] === null ? 'н/д' : (int)$diag['TASK_LINKS'] ?>;
+                    ссылок forum_message: <?= $diag['FORUM_LINKS'] === null ? 'н/д' : (int)$diag['FORUM_LINKS'] ?>.
+                </li>
+            <?php endforeach; ?>
+        </ul>
+    </div>
 <?php endif; ?>
 
 <?php if ($selectedUserId > 0): ?>
