@@ -444,6 +444,72 @@ function loadUserDiskFiles(int $userId): array
     $connection = Application::getConnection();
     $items = [];
 
+    // 1) Основной источник: все файлы из пользовательского storage Диска (как в UI volume/files/{USER_ID}).
+    if (
+        hasTable('b_disk_storage')
+        && hasColumn('b_disk_storage', 'ENTITY_TYPE')
+        && hasColumn('b_disk_storage', 'ENTITY_ID')
+        && hasColumn('b_disk_storage', 'ID')
+        && hasColumn('b_disk_object', 'STORAGE_ID')
+        && hasTable('b_disk_version')
+    ) {
+        $storageSql = "
+            SELECT s.ID
+            FROM b_disk_storage s
+            WHERE s.ENTITY_TYPE = 'USER'
+              AND s.ENTITY_ID = {$userId}
+            LIMIT 1
+        ";
+        $storageRow = $connection->query($storageSql)->fetch();
+        $storageId = $storageRow ? (int)$storageRow['ID'] : 0;
+
+        if ($storageId > 0) {
+            $scopeConditions = ['do.STORAGE_ID = ' . $storageId];
+            if (hasColumn('b_disk_object', 'TYPE')) {
+                $scopeConditions[] = 'do.TYPE = 2';
+            }
+            if (hasColumn('b_disk_object', 'DELETED_TYPE')) {
+                $scopeConditions[] = 'do.DELETED_TYPE = 0';
+            }
+
+            $scopeWhere = implode(' AND ', $scopeConditions);
+            $scopeSql = "
+                SELECT
+                    f.ID AS FILE_ID,
+                    f.FILE_NAME,
+                    f.ORIGINAL_NAME,
+                    f.SUBDIR,
+                    COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
+                    COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
+                    COALESCE(do.UPDATE_TIME, do.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
+                FROM b_disk_object do
+                LEFT JOIN b_disk_version dv ON dv.ID = (
+                    SELECT MAX(v.ID)
+                    FROM b_disk_version v
+                    WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
+                )
+                LEFT JOIN b_file f ON f.ID = dv.FILE_ID
+                WHERE {$scopeWhere}
+                  AND f.ID IS NOT NULL
+                ORDER BY FILE_TIME DESC, f.ID DESC
+            ";
+
+            $scopeResult = $connection->query($scopeSql);
+            while ($row = $scopeResult->fetch()) {
+                $fileId = (int)$row['FILE_ID'];
+                $items[$fileId] = [
+                    'FILE_ID' => $fileId,
+                    'FILE_NAME' => (string)$row['FILE_NAME'],
+                    'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+                    'FILE_SIZE' => (int)$row['FILE_SIZE'],
+                    'SUBDIR' => (string)$row['SUBDIR'],
+                    'TIMESTAMP_X' => (string)$row['FILE_TIME'],
+                    'DISK_NAME' => (string)$row['DISK_NAME'],
+                ];
+            }
+        }
+    }
+
     if (hasTable('b_disk_uploaded_file') && hasColumn('b_disk_uploaded_file', 'USER_ID')) {
         $sqlUploaded = "
             SELECT
@@ -469,6 +535,9 @@ function loadUserDiskFiles(int $userId): array
         $uploadedResult = $connection->query($sqlUploaded);
         while ($row = $uploadedResult->fetch()) {
             $fileId = (int)$row['FILE_ID'];
+            if (isset($items[$fileId])) {
+                continue;
+            }
             $items[$fileId] = [
                 'FILE_ID' => $fileId,
                 'FILE_NAME' => (string)$row['FILE_NAME'],
