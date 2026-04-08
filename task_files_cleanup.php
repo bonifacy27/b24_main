@@ -633,10 +633,10 @@ function loadUserDiskFiles(int $userId): array
             $scopeWhere = implode(' AND ', $scopeConditions);
             $scopeSql = "
                 SELECT
-                    f.ID AS FILE_ID,
-                    f.FILE_NAME,
-                    f.ORIGINAL_NAME,
-                    f.SUBDIR,
+                    COALESCE(f.ID, dv.FILE_ID, do.FILE_ID) AS FILE_ID,
+                    COALESCE(f.FILE_NAME, CONCAT('disk_object_', do.ID)) AS FILE_NAME,
+                    COALESCE(f.ORIGINAL_NAME, do.NAME, CONCAT('disk_object_', do.ID)) AS ORIGINAL_NAME,
+                    COALESCE(f.SUBDIR, '') AS SUBDIR,
                     COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
                     COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
                     COALESCE(do.UPDATE_TIME, do.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
@@ -648,13 +648,15 @@ function loadUserDiskFiles(int $userId): array
                 )
                 LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
                 WHERE {$scopeWhere}
-                  AND f.ID IS NOT NULL
                 ORDER BY FILE_TIME DESC, f.ID DESC
             ";
 
             $scopeResult = $connection->query($scopeSql);
             while ($row = $scopeResult->fetch()) {
                 $fileId = (int)$row['FILE_ID'];
+                if ($fileId <= 0) {
+                    continue;
+                }
                 $items[$fileId] = [
                     'FILE_ID' => $fileId,
                     'FILE_NAME' => (string)$row['FILE_NAME'],
@@ -671,10 +673,10 @@ function loadUserDiskFiles(int $userId): array
     if (hasTable('b_disk_uploaded_file') && hasColumn('b_disk_uploaded_file', 'USER_ID')) {
         $sqlUploaded = "
             SELECT
-                f.ID AS FILE_ID,
-                f.FILE_NAME,
-                f.ORIGINAL_NAME,
-                f.SUBDIR,
+                COALESCE(f.ID, dv.FILE_ID, do.FILE_ID) AS FILE_ID,
+                COALESCE(f.FILE_NAME, CONCAT('disk_object_', do.ID)) AS FILE_NAME,
+                COALESCE(f.ORIGINAL_NAME, do.NAME, CONCAT('disk_object_', do.ID)) AS ORIGINAL_NAME,
+                COALESCE(f.SUBDIR, '') AS SUBDIR,
                 COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
                 COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
                 COALESCE(dv.CREATE_TIME, do.UPDATE_TIME, do.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
@@ -687,12 +689,14 @@ function loadUserDiskFiles(int $userId): array
             )
             LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
             WHERE duf.USER_ID = {$userId}
-              AND f.ID IS NOT NULL
         ";
 
         $uploadedResult = $connection->query($sqlUploaded);
         while ($row = $uploadedResult->fetch()) {
             $fileId = (int)$row['FILE_ID'];
+            if ($fileId <= 0) {
+                continue;
+            }
             if (isset($items[$fileId])) {
                 continue;
             }
@@ -725,10 +729,10 @@ function loadUserDiskFiles(int $userId): array
         $whereSql = implode(' AND ', $conditions);
         $sqlFallback = "
             SELECT
-                f.ID AS FILE_ID,
-                f.FILE_NAME,
-                f.ORIGINAL_NAME,
-                f.SUBDIR,
+                COALESCE(f.ID, dv.FILE_ID, do.FILE_ID) AS FILE_ID,
+                COALESCE(f.FILE_NAME, CONCAT('disk_object_', do.ID)) AS FILE_NAME,
+                COALESCE(f.ORIGINAL_NAME, do.NAME, CONCAT('disk_object_', do.ID)) AS ORIGINAL_NAME,
+                COALESCE(f.SUBDIR, '') AS SUBDIR,
                 COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
                 COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
                 COALESCE(do.UPDATE_TIME, do.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
@@ -740,12 +744,14 @@ function loadUserDiskFiles(int $userId): array
             )
             LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
             WHERE {$whereSql}
-              AND f.ID IS NOT NULL
         ";
 
         $fallbackResult = $connection->query($sqlFallback);
         while ($row = $fallbackResult->fetch()) {
             $fileId = (int)$row['FILE_ID'];
+            if ($fileId <= 0) {
+                continue;
+            }
             if (isset($items[$fileId])) {
                 continue;
             }
