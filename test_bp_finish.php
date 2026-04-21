@@ -201,6 +201,49 @@ function buildActionButtons(array $task): array
     ];
 }
 
+function taskIsRunning(int $taskId): bool
+{
+    if ($taskId <= 0 || !class_exists('CBPTaskService')) {
+        return false;
+    }
+
+    $res = CBPTaskService::GetList(['ID' => 'DESC'], ['ID' => $taskId], false, false, ['ID', 'STATUS']);
+    if (!is_object($res)) {
+        return false;
+    }
+
+    $task = $res->GetNext();
+    if (!$task) {
+        return false;
+    }
+
+    return (int)($task['STATUS'] ?? 0) === (int)CBPTaskStatus::Running;
+}
+
+function flattenBizprocErrors(array $errors): string
+{
+    $messages = [];
+    foreach ($errors as $error) {
+        if (is_string($error)) {
+            $message = trim($error);
+            if ($message !== '') {
+                $messages[] = $message;
+            }
+            continue;
+        }
+
+        if (is_array($error)) {
+            $message = trim((string)($error['message'] ?? $error['MESSAGE'] ?? ''));
+            if ($message !== '') {
+                $messages[] = $message;
+            }
+        }
+    }
+
+    $messages = array_values(array_unique($messages));
+    return implode(' ', $messages);
+}
+
 function completeTask(array $task, int $userId, string $action, string $comment): array
 {
     $taskId = (int)($task['ID'] ?? 0);
@@ -211,20 +254,101 @@ function completeTask(array $task, int $userId, string $action, string $comment)
         ];
     }
 
-    $request = ['task_comment' => $comment];
-    if ($action === 'approve') {
-        $request['approve'] = 'Y';
-    } elseif ($action === 'nonapprove') {
-        $request['nonapprove'] = 'Y';
-    } elseif ($action === 'refine') {
-        $request['refine'] = 'Y';
-        $request['REFINE'] = 'Y';
+    $code = strtolower(trim($action));
+    if ($code === '') {
+        $code = 'approve';
     }
 
     $errors = [];
-    $ok = CBPDocument::PostTaskForm($taskId, $userId, $request, $errors, '', $userId);
 
-    return ['OK' => $ok, 'ERRORS' => $errors];
+    $requests = [];
+    $base = [
+        'USER_ID' => $userId,
+        'REAL_USER_ID' => $userId,
+        'task_comment' => $comment,
+        'COMMENT' => $comment,
+    ];
+
+    if ($code === 'approve') {
+        $requests[] = $base + ['approve' => 'Y', 'ACTION' => 'approve'];
+    } elseif ($code === 'nonapprove') {
+        $requests[] = $base + ['nonapprove' => 'Y', 'ACTION' => 'nonapprove'];
+    } elseif ($code === 'refine') {
+        $requests[] = $base + ['refine' => 'Y', 'REFINE' => 'Y', 'nonapprove' => 'Y', 'ACTION' => 'refine'];
+        $requests[] = $base + ['refine' => 'Y', 'REFINE' => 'Y', 'nonapprove' => 'Y', 'ACTION' => 'nonapprove'];
+    }
+
+    foreach ($requests as $request) {
+        $postErrors = [];
+        try {
+            CBPDocument::PostTaskForm($taskId, $userId, $request, $postErrors, '', $userId);
+        } catch (Throwable $e) {
+            $postErrors[] = ['message' => $e->getMessage()];
+        }
+
+        if (!empty($postErrors)) {
+            $errors = array_merge($errors, $postErrors);
+        }
+
+        if (!taskIsRunning($taskId)) {
+            return ['OK' => true, 'ERRORS' => []];
+        }
+    }
+
+    $workflowId = (string)($task['WORKFLOW_ID'] ?? '');
+    $activityName = (string)($task['ACTIVITY_NAME'] ?? '');
+    if ($workflowId !== '' && $activityName !== '') {
+        $payload = [
+            'USER_ID' => $userId,
+            'REAL_USER_ID' => $userId,
+            'COMMENT' => $comment,
+        ];
+        if ($code === 'approve') {
+            $payload['APPROVE'] = true;
+        } else {
+            $payload['APPROVE'] = false;
+            if ($code === 'refine') {
+                $payload['REFINE'] = 'Y';
+            }
+        }
+
+        $eventErrors = [];
+        try {
+            CBPRuntime::SendExternalEvent($workflowId, $activityName, $payload);
+        } catch (Throwable $e) {
+            $eventErrors[] = ['message' => $e->getMessage()];
+        }
+        if (!empty($eventErrors)) {
+            $errors = array_merge($errors, $eventErrors);
+        }
+        if (!taskIsRunning($taskId)) {
+            return ['OK' => true, 'ERRORS' => []];
+        }
+    }
+
+    if (class_exists('CBPTaskService') && method_exists('CBPTaskService', 'DoTask')) {
+        try {
+            CBPTaskService::DoTask($taskId, $userId, [
+                'ACTION' => $code,
+                $code => 'Y',
+                'COMMENT' => $comment,
+                'task_comment' => $comment,
+            ]);
+        } catch (Throwable $e) {
+            $errors[] = ['message' => $e->getMessage()];
+        }
+
+        if (!taskIsRunning($taskId)) {
+            return ['OK' => true, 'ERRORS' => []];
+        }
+    }
+
+    $flatError = flattenBizprocErrors($errors);
+    if ($flatError === '') {
+        $flatError = 'Задание осталось активным после попыток завершения.';
+    }
+
+    return ['OK' => false, 'ERRORS' => [['message' => $flatError]]];
 }
 
 $currentUserId = (int)$USER->GetID();
