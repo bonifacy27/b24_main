@@ -76,6 +76,85 @@ function getElementData(int $iblockId, int $elementId): ?array
     ];
 }
 
+function extractRequestIdFromDocumentId($documentId, int $iblockId): int
+{
+    if (is_array($documentId)) {
+        $documentId = implode('|', $documentId);
+    }
+
+    $documentId = trim((string)$documentId);
+    if ($documentId === '') {
+        return 0;
+    }
+
+    if ($iblockId > 0) {
+        $patternByIblock = '/(?:^|_)' . preg_quote((string)$iblockId, '/') . '_([0-9]+)$/';
+        if (preg_match($patternByIblock, $documentId, $matches)) {
+            return (int)$matches[1];
+        }
+    }
+
+    if (preg_match('/([0-9]+)\D*$/', $documentId, $matches)) {
+        return (int)$matches[1];
+    }
+
+    return 0;
+}
+
+function bizprocTaskIsForUser(array $task, int $userId): bool
+{
+    if ($userId <= 0) {
+        return false;
+    }
+
+    $rawUserId = (string)($task['USER_ID'] ?? '');
+    $scalarUserId = (int)preg_replace('/\D+/u', '', $rawUserId);
+    if ($scalarUserId > 0) {
+        return $scalarUserId === $userId;
+    }
+
+    $users = $task['USERS'] ?? null;
+    if (is_string($users) && $users !== '') {
+        $parts = preg_split('/[,\s;|]+/u', $users) ?: [];
+        foreach ($parts as $part) {
+            $normalized = (int)preg_replace('/\D+/u', '', (string)$part);
+            if ($normalized === $userId) {
+                return true;
+            }
+        }
+    }
+
+    if (is_array($users)) {
+        foreach ($users as $value) {
+            $normalized = (int)preg_replace('/\D+/u', '', (string)$value);
+            if ($normalized === $userId) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function extractTaskParameters($raw): array
+{
+    if (is_array($raw)) {
+        return $raw;
+    }
+
+    if (!is_string($raw) || trim($raw) === '') {
+        return [];
+    }
+
+    $unserialized = @unserialize($raw, ['allowed_classes' => false]);
+    if (is_array($unserialized)) {
+        return $unserialized;
+    }
+
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
 function findCurrentUserTaskForDocument(int $userId, int $iblockId, int $elementId): ?array
 {
     /** @var CBPTaskService $taskService */
@@ -84,29 +163,20 @@ function findCurrentUserTaskForDocument(int $userId, int $iblockId, int $element
     $dbTasks = $taskService->GetList(
         ['ID' => 'DESC'],
         [
-            'USER_ID' => $userId,
             'USER_STATUS' => CBPTaskUserStatus::Waiting,
         ],
         false,
         false,
-        ['ID', 'WORKFLOW_ID', 'ACTIVITY', 'ACTIVITY_NAME', 'NAME', 'DESCRIPTION', 'PARAMETERS', 'DOCUMENT_ID']
+        ['ID', 'WORKFLOW_ID', 'ACTIVITY', 'ACTIVITY_NAME', 'NAME', 'DESCRIPTION', 'PARAMETERS', 'DOCUMENT_ID', 'USER_ID', 'USERS']
     );
 
-    while ($task = $dbTasks->Fetch()) {
-        $documentId = $task['DOCUMENT_ID'] ?? null;
-        if (is_array($documentId)) {
-            $serialized = implode('|', $documentId);
-        } else {
-            $serialized = (string)$documentId;
+    while ($task = $dbTasks->GetNext()) {
+        if (!bizprocTaskIsForUser($task, $userId)) {
+            continue;
         }
 
-        $isTarget = mb_strpos($serialized, 'iblock_' . $iblockId . '_' . $elementId) !== false
-            || (
-                mb_strpos($serialized, (string)$iblockId) !== false
-                && mb_strpos($serialized, (string)$elementId) !== false
-            );
-
-        if ($isTarget) {
+        $taskElementId = extractRequestIdFromDocumentId($task['DOCUMENT_ID'] ?? '', $iblockId);
+        if ($taskElementId === $elementId) {
             return $task;
         }
     }
@@ -116,7 +186,7 @@ function findCurrentUserTaskForDocument(int $userId, int $iblockId, int $element
 
 function buildActionButtons(array $task): array
 {
-    $params = (array)($task['PARAMETERS'] ?? []);
+    $params = extractTaskParameters($task['PARAMETERS'] ?? []);
 
     $approveText = trim((string)($params['TaskButton1Message'] ?? ''));
     $rejectText = trim((string)($params['TaskButton2Message'] ?? ''));
