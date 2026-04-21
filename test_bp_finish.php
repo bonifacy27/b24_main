@@ -232,6 +232,40 @@ function flattenBizprocErrors(array $errors): string
     return implode(' ', $messages);
 }
 
+function validateCommentByTaskParameters(array $task, string $action, string $comment): ?string
+{
+    $params = extractTaskParameters($task['PARAMETERS'] ?? []);
+    $showComment = (string)($params['ShowComment'] ?? 'N');
+    $commentRequired = (string)($params['CommentRequired'] ?? 'N');
+
+    if ($showComment !== 'Y') {
+        return null;
+    }
+
+    $isApprove = $action === 'approve';
+    $isNonApprove = $action === 'nonapprove' || $action === 'refine';
+    $commentEmpty = trim($comment) === '';
+
+    if (!$commentEmpty) {
+        return null;
+    }
+
+    $mustFill = $commentRequired === 'Y'
+        || ($commentRequired === 'YA' && $isApprove)
+        || ($commentRequired === 'YR' && $isNonApprove);
+
+    if (!$mustFill) {
+        return null;
+    }
+
+    $label = trim((string)($params['CommentLabelMessage'] ?? ''));
+    if ($label === '') {
+        $label = 'Комментарий';
+    }
+
+    return 'Поле "' . $label . '" обязательно для выбранного действия.';
+}
+
 function completeTask(array $task, int $userId, string $action, string $comment): array
 {
     $taskId = (int)($task['ID'] ?? 0);
@@ -250,107 +284,64 @@ function completeTask(array $task, int $userId, string $action, string $comment)
     $errors = [];
     $steps = [];
 
-    $requests = [];
-    $base = [
+    $validationError = validateCommentByTaskParameters($task, $code, $comment);
+    if ($validationError !== null) {
+        return [
+            'OK' => false,
+            'ERRORS' => [['message' => $validationError]],
+            'STEPS' => [[
+                'stage' => 'Validation',
+                'request' => ['action' => $code, 'comment' => $comment],
+                'running' => taskIsRunning($taskId) ? 'Y' : 'N',
+                'errors' => [['message' => $validationError]],
+            ]],
+        ];
+    }
+
+    $activityName = (string)($task['ACTIVITY_NAME'] ?? '');
+    $workflowId = (string)($task['WORKFLOW_ID'] ?? '');
+    if ($workflowId === '' || $activityName === '') {
+        return [
+            'OK' => false,
+            'ERRORS' => [['message' => 'Не заполнены WORKFLOW_ID/ACTIVITY_NAME у задания.']],
+            'STEPS' => [],
+        ];
+    }
+
+    $payload = [
         'USER_ID' => $userId,
         'REAL_USER_ID' => $userId,
-        'task_comment' => $comment,
         'COMMENT' => $comment,
     ];
 
     if ($code === 'approve') {
-        $requests[] = $base + ['approve' => 'Y', 'ACTION' => 'approve'];
+        $payload['APPROVE'] = true;
     } elseif ($code === 'nonapprove') {
-        $requests[] = $base + ['nonapprove' => 'Y', 'ACTION' => 'nonapprove'];
+        $payload['APPROVE'] = false;
     } elseif ($code === 'refine') {
-        $requests[] = $base + ['refine' => 'Y', 'REFINE' => 'Y', 'nonapprove' => 'Y', 'ACTION' => 'refine'];
-        $requests[] = $base + ['refine' => 'Y', 'REFINE' => 'Y', 'nonapprove' => 'Y', 'ACTION' => 'nonapprove'];
+        $payload['APPROVE'] = false;
+        $payload['REFINE'] = 'Y';
     }
 
-    foreach ($requests as $request) {
-        $postErrors = [];
-        try {
-            CBPDocument::PostTaskForm($taskId, $userId, $request, $postErrors, '', $userId);
-        } catch (Throwable $e) {
-            $postErrors[] = ['message' => $e->getMessage()];
-        }
-
-        if (!empty($postErrors)) {
-            $errors = array_merge($errors, $postErrors);
-        }
-
-        $running = taskIsRunning($taskId);
-        $steps[] = [
-            'stage' => 'CBPDocument::PostTaskForm',
-            'request' => $request,
-            'running' => $running ? 'Y' : 'N',
-            'errors' => $postErrors,
-        ];
-        if (!$running) {
-            return ['OK' => true, 'ERRORS' => [], 'STEPS' => $steps];
-        }
+    $eventErrors = [];
+    try {
+        CBPRuntime::SendExternalEvent($workflowId, $activityName, $payload);
+    } catch (Throwable $e) {
+        $eventErrors[] = ['message' => $e->getMessage()];
+    }
+    if (!empty($eventErrors)) {
+        $errors = array_merge($errors, $eventErrors);
     }
 
-    $workflowId = (string)($task['WORKFLOW_ID'] ?? '');
-    $activityName = (string)($task['ACTIVITY_NAME'] ?? '');
-    if ($workflowId !== '' && $activityName !== '') {
-        $payload = [
-            'USER_ID' => $userId,
-            'REAL_USER_ID' => $userId,
-            'COMMENT' => $comment,
-        ];
-        if ($code === 'approve') {
-            $payload['APPROVE'] = true;
-        } else {
-            $payload['APPROVE'] = false;
-            if ($code === 'refine') {
-                $payload['REFINE'] = 'Y';
-            }
-        }
-
-        $eventErrors = [];
-        try {
-            CBPRuntime::SendExternalEvent($workflowId, $activityName, $payload);
-        } catch (Throwable $e) {
-            $eventErrors[] = ['message' => $e->getMessage()];
-        }
-        if (!empty($eventErrors)) {
-            $errors = array_merge($errors, $eventErrors);
-        }
-        $running = taskIsRunning($taskId);
-        $steps[] = [
-            'stage' => 'CBPRuntime::SendExternalEvent',
-            'request' => $payload,
-            'running' => $running ? 'Y' : 'N',
-            'errors' => $eventErrors,
-        ];
-        if (!$running) {
-            return ['OK' => true, 'ERRORS' => [], 'STEPS' => $steps];
-        }
-    }
-
-    if (class_exists('CBPTaskService') && method_exists('CBPTaskService', 'DoTask')) {
-        try {
-            CBPTaskService::DoTask($taskId, $userId, [
-                'ACTION' => $code,
-                $code => 'Y',
-                'COMMENT' => $comment,
-                'task_comment' => $comment,
-            ]);
-        } catch (Throwable $e) {
-            $errors[] = ['message' => $e->getMessage()];
-        }
-
-        $running = taskIsRunning($taskId);
-        $steps[] = [
-            'stage' => 'CBPTaskService::DoTask',
-            'request' => ['ACTION' => $code, 'COMMENT' => $comment],
-            'running' => $running ? 'Y' : 'N',
-            'errors' => [],
-        ];
-        if (!$running) {
-            return ['OK' => true, 'ERRORS' => [], 'STEPS' => $steps];
-        }
+    $running = taskIsRunning($taskId);
+    $steps[] = [
+        'stage' => 'CBPRuntime::SendExternalEvent',
+        'request' => $payload,
+        'running' => $running ? 'Y' : 'N',
+        'errors' => $eventErrors,
+    ];
+    if (!$running) {
+        return ['OK' => true, 'ERRORS' => [], 'STEPS' => $steps];
     }
 
     $flatError = flattenBizprocErrors($errors);
