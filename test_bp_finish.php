@@ -203,7 +203,13 @@ function buildActionButtons(array $task): array
 
 function completeTask(array $task, int $userId, string $action, string $comment): array
 {
-    $errors = [];
+    $taskId = (int)($task['ID'] ?? 0);
+    if ($taskId <= 0 || $userId <= 0) {
+        return [
+            'OK' => false,
+            'ERRORS' => [['message' => 'Некорректные входные данные для завершения задания.']],
+        ];
+    }
 
     $request = ['task_comment' => $comment];
     if ($action === 'approve') {
@@ -215,20 +221,8 @@ function completeTask(array $task, int $userId, string $action, string $comment)
         $request['REFINE'] = 'Y';
     }
 
-    $activity = (string)($task['ACTIVITY'] ?? '');
-    $ok = false;
-
-    if ($activity === 'ApproveActivity') {
-        require_once __DIR__ . '/approveactivity/approveactivity.php';
-        $ok = CBPApproveActivity::PostTaskForm($task, $userId, $request, $errors);
-    } elseif ($activity === 'approvecopyactiveschedule') {
-        require_once __DIR__ . '/approvecopyactiveschedule/approvecopyactiveschedule.php';
-        $ok = CBPapprovecopyactiveschedule::PostTaskForm($task, $userId, $request, $errors);
-    } else {
-        $errors[] = [
-            'message' => 'Неподдерживаемое активити: ' . $activity,
-        ];
-    }
+    $errors = [];
+    $ok = CBPDocument::PostTaskForm($taskId, $userId, $request, $errors, '', $userId);
 
     return ['OK' => $ok, 'ERRORS' => $errors];
 }
