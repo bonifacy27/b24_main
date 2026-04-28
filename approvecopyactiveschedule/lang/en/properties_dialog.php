@@ -1,6 +1,7 @@
 <?php
 $MESS["BPAA_PD_APPROVERS"] = "Approving voters";
 $MESS["BPAA_PD_DESCR"] = "Assignment description";
+$MESS["BPAA_PD_DESCR_FORM"] = "Assignment description for form";
 $MESS["BPAA_PD_NAME"] = "Assignment name";
 $MESS["BPAA_PD_NO"] = "No";
 $MESS["BPAA_PD_PERCENT"] = "Minimum percentage of participating users required for acceptance";

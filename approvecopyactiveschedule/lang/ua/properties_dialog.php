@@ -12,6 +12,7 @@ $MESS["BPAA_PD_NAME"] = "Назва завдання";
 $MESS["BPAA_PD_NO"] = "Ні";
 $MESS["BPAA_PD_WAIT"] = "Очікувати, щоб проголосували всі зазначені співробітники";
 $MESS["BPAA_PD_DESCR"] = "Опис завдання";
+$MESS["BPAA_PD_DESCR_FORM"] = "Опис завдання для форми";
 $MESS["BPAA_PD_TIMEOUT_DURATION"] = "Період затвердження";
 $MESS["BPAA_PD_TIME_S"] = "секунд";
 $MESS["BPAA_PD_STATUS_MESSAGE"] = "Текст статуса";

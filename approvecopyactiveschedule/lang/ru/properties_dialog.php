@@ -4,6 +4,7 @@ $MESS["BPAA_PD_TYPE_ANY"] = "Любой сотрудник";
 $MESS["BPAA_PD_APPROVERS"] = "Утверждают сотрудники";
 $MESS["BPAA_PD_PERCENT"] = "Более скольки процентов голосов необходимо для принятия решения";
 $MESS["BPAA_PD_DESCR"] = "Описание задания";
+$MESS["BPAA_PD_DESCR_FORM"] = "Описание задания для формы";
 $MESS["BPAA_PD_NAME"] = "Название задания";
 $MESS["BPAA_PD_TYPE"] = "Тип утверждения";
 $MESS["BPAA_PD_TYPE_VOTE"] = "Голосование сотрудников";
