@@ -1,6 +1,7 @@
 <?php
 $MESS["BPAA_PD_APPROVERS"] = "Genehmigende";
 $MESS["BPAA_PD_DESCR"] = "Aufgabenbeschreibung";
+$MESS["BPAA_PD_DESCR_FORM"] = "Aufgabenbeschreibung für Formular";
 $MESS["BPAA_PD_NAME"] = "Aufgabenname";
 $MESS["BPAA_PD_NO"] = "Nein";
 $MESS["BPAA_PD_PERCENT"] = "Minimaler Prozentsatz der Teilnehmer, die für die Entscheidung erforderlich sind";
@@ -30,4 +31,4 @@ $MESS["BPAR_PD_SHOW_COMMENT"] = "Feld zur Kommentarangabe anzeigen";
 $MESS["BPAR_PD_TASK_BUTTON1_MESSAGE"] = "Text der Schaltfläche beim Annehmen der Aufgabe";
 $MESS["BPAR_PD_TASK_BUTTON2_MESSAGE"] = "Text der Schaltfläche beim Ablehnen der Aufgabe";
 
-$MESS["BPAR_PD_TASK_BUTTON3_MESSAGE"] = "Text der Schaltfläche "Überarbeiten"";
+$MESS["BPAR_PD_TASK_BUTTON3_MESSAGE"] = "Text der Schaltfläche \"Überarbeiten\"";

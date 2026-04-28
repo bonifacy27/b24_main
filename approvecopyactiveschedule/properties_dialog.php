@@ -110,6 +110,12 @@ if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true)die();
 	</td>
 </tr>
 <tr>
+	<td align="right" width="40%" valign="top"><?= GetMessage("BPAA_PD_DESCR_FORM") ?>:</td>
+	<td width="60%" valign="top">
+		<?=CBPDocument::ShowParameterField("text", 'approve_description_form', $arCurrentValues['approve_description_form'], Array('rows'=>'7'))?>
+	</td>
+</tr>
+<tr>
 	<td align="right"><?= GetMessage("BPAA_PD_SET_STATUS_MESSAGE") ?>:</td>
 	<td>
 		<select name="set_status_message">

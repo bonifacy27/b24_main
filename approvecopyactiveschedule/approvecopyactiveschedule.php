@@ -102,6 +102,7 @@ class CBPapprovecopyactiveschedule
 			"OverdueDate" => null,
 			"Name" => null,
 			"Description" => null,
+			"DescriptionForForm" => null,
 			"Parameters" => null,
 			"ApproveMinPercent" => 50,
 			"ApproveWaitForAll" => "N",
@@ -221,6 +222,7 @@ class CBPapprovecopyactiveschedule
 		$arParameters["CommentRequired"] = $this->IsPropertyExists("CommentRequired") ? $this->CommentRequired : "N";
 		$arParameters["AccessControl"] = $this->IsPropertyExists("AccessControl") && $this->AccessControl == 'Y' ? 'Y' : 'N';
 		$arParameters["RefineAllowed"] = $this->IsPropertyExists("RefineAllowed") ? $this->RefineAllowed : "Y"; // <<< ПЕРЕДАЁМ В ПАРАМЕТРЫ
+		$arParameters["DescriptionForForm"] = $this->IsPropertyExists("DescriptionForForm") ? $this->DescriptionForForm : "";
 		$overdueDate = $this->OverdueDate;
 		$timeoutDuration = $this->CalculateTimeoutDuration();
 		if ($timeoutDuration > 0)
@@ -868,6 +870,7 @@ $this->WriteToTrackingService(
 			"OverdueDate" => "approve_overdue_date",
 			"Name" => "approve_name",
 			"Description" => "approve_description",
+			"DescriptionForForm" => "approve_description_form",
 			"Parameters" => "approve_parameters",
 			"ApproveWaitForAll" => "approve_wait",
 			"StatusMessage" => "status_message",
@@ -996,6 +999,7 @@ $this->WriteToTrackingService(
 			"approve_wait" => "ApproveWaitForAll",
 			"approve_name" => "Name",
 			"approve_description" => "Description",
+			"approve_description_form" => "DescriptionForForm",
 			"approve_parameters" => "Parameters",
 			"status_message" => "StatusMessage",
 			"set_status_message" => "SetStatusMessage",
