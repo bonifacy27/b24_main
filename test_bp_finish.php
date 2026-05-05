@@ -53,26 +53,14 @@ function renderFieldValue($value): string
 
 function getElementData(int $iblockId, int $elementId): ?array
 {
-    $res = CIBlockElement::GetList([], ['IBLOCK_ID' => $iblockId, 'ID' => $elementId], false, false, ['*']);
-    $element = $res->GetNextElement();
-    if (!$element) {
+    $res = CIBlockElement::GetList([], ['IBLOCK_ID' => $iblockId, 'ID' => $elementId], false, false, ['ID']);
+    $item = $res->Fetch();
+    if (!$item) {
         return null;
     }
 
-    $fields = $element->GetFields();
-    $props = $element->GetProperties();
-
-    $preparedProps = [];
-    foreach ($props as $code => $prop) {
-        $preparedProps[$code] = [
-            'NAME' => $prop['NAME'],
-            'VALUE' => $prop['VALUE'],
-        ];
-    }
-
     return [
-        'FIELDS' => $fields,
-        'PROPERTIES' => $preparedProps,
+        'ID' => (int)$item['ID'],
     ];
 }
 
@@ -244,6 +232,40 @@ function flattenBizprocErrors(array $errors): string
     return implode(' ', $messages);
 }
 
+function validateCommentByTaskParameters(array $task, string $action, string $comment): ?string
+{
+    $params = extractTaskParameters($task['PARAMETERS'] ?? []);
+    $showComment = (string)($params['ShowComment'] ?? 'N');
+    $commentRequired = (string)($params['CommentRequired'] ?? 'N');
+
+    if ($showComment !== 'Y') {
+        return null;
+    }
+
+    $isApprove = $action === 'approve';
+    $isNonApprove = $action === 'nonapprove' || $action === 'refine';
+    $commentEmpty = trim($comment) === '';
+
+    if (!$commentEmpty) {
+        return null;
+    }
+
+    $mustFill = $commentRequired === 'Y'
+        || ($commentRequired === 'YA' && $isApprove)
+        || ($commentRequired === 'YR' && $isNonApprove);
+
+    if (!$mustFill) {
+        return null;
+    }
+
+    $label = trim((string)($params['CommentLabelMessage'] ?? ''));
+    if ($label === '') {
+        $label = 'Комментарий';
+    }
+
+    return 'Поле "' . $label . '" обязательно для выбранного действия.';
+}
+
 function completeTask(array $task, int $userId, string $action, string $comment): array
 {
     $taskId = (int)($task['ID'] ?? 0);
@@ -260,87 +282,66 @@ function completeTask(array $task, int $userId, string $action, string $comment)
     }
 
     $errors = [];
+    $steps = [];
 
-    $requests = [];
-    $base = [
+    $validationError = validateCommentByTaskParameters($task, $code, $comment);
+    if ($validationError !== null) {
+        return [
+            'OK' => false,
+            'ERRORS' => [['message' => $validationError]],
+            'STEPS' => [[
+                'stage' => 'Validation',
+                'request' => ['action' => $code, 'comment' => $comment],
+                'running' => taskIsRunning($taskId) ? 'Y' : 'N',
+                'errors' => [['message' => $validationError]],
+            ]],
+        ];
+    }
+
+    $activityName = (string)($task['ACTIVITY_NAME'] ?? '');
+    $workflowId = (string)($task['WORKFLOW_ID'] ?? '');
+    if ($workflowId === '' || $activityName === '') {
+        return [
+            'OK' => false,
+            'ERRORS' => [['message' => 'Не заполнены WORKFLOW_ID/ACTIVITY_NAME у задания.']],
+            'STEPS' => [],
+        ];
+    }
+
+    $payload = [
         'USER_ID' => $userId,
         'REAL_USER_ID' => $userId,
-        'task_comment' => $comment,
         'COMMENT' => $comment,
     ];
 
     if ($code === 'approve') {
-        $requests[] = $base + ['approve' => 'Y', 'ACTION' => 'approve'];
+        $payload['APPROVE'] = true;
     } elseif ($code === 'nonapprove') {
-        $requests[] = $base + ['nonapprove' => 'Y', 'ACTION' => 'nonapprove'];
+        $payload['APPROVE'] = false;
     } elseif ($code === 'refine') {
-        $requests[] = $base + ['refine' => 'Y', 'REFINE' => 'Y', 'nonapprove' => 'Y', 'ACTION' => 'refine'];
-        $requests[] = $base + ['refine' => 'Y', 'REFINE' => 'Y', 'nonapprove' => 'Y', 'ACTION' => 'nonapprove'];
+        $payload['APPROVE'] = false;
+        $payload['REFINE'] = 'Y';
     }
 
-    foreach ($requests as $request) {
-        $postErrors = [];
-        try {
-            CBPDocument::PostTaskForm($taskId, $userId, $request, $postErrors, '', $userId);
-        } catch (Throwable $e) {
-            $postErrors[] = ['message' => $e->getMessage()];
-        }
-
-        if (!empty($postErrors)) {
-            $errors = array_merge($errors, $postErrors);
-        }
-
-        if (!taskIsRunning($taskId)) {
-            return ['OK' => true, 'ERRORS' => []];
-        }
+    $eventErrors = [];
+    try {
+        CBPRuntime::SendExternalEvent($workflowId, $activityName, $payload);
+    } catch (Throwable $e) {
+        $eventErrors[] = ['message' => $e->getMessage()];
+    }
+    if (!empty($eventErrors)) {
+        $errors = array_merge($errors, $eventErrors);
     }
 
-    $workflowId = (string)($task['WORKFLOW_ID'] ?? '');
-    $activityName = (string)($task['ACTIVITY_NAME'] ?? '');
-    if ($workflowId !== '' && $activityName !== '') {
-        $payload = [
-            'USER_ID' => $userId,
-            'REAL_USER_ID' => $userId,
-            'COMMENT' => $comment,
-        ];
-        if ($code === 'approve') {
-            $payload['APPROVE'] = true;
-        } else {
-            $payload['APPROVE'] = false;
-            if ($code === 'refine') {
-                $payload['REFINE'] = 'Y';
-            }
-        }
-
-        $eventErrors = [];
-        try {
-            CBPRuntime::SendExternalEvent($workflowId, $activityName, $payload);
-        } catch (Throwable $e) {
-            $eventErrors[] = ['message' => $e->getMessage()];
-        }
-        if (!empty($eventErrors)) {
-            $errors = array_merge($errors, $eventErrors);
-        }
-        if (!taskIsRunning($taskId)) {
-            return ['OK' => true, 'ERRORS' => []];
-        }
-    }
-
-    if (class_exists('CBPTaskService') && method_exists('CBPTaskService', 'DoTask')) {
-        try {
-            CBPTaskService::DoTask($taskId, $userId, [
-                'ACTION' => $code,
-                $code => 'Y',
-                'COMMENT' => $comment,
-                'task_comment' => $comment,
-            ]);
-        } catch (Throwable $e) {
-            $errors[] = ['message' => $e->getMessage()];
-        }
-
-        if (!taskIsRunning($taskId)) {
-            return ['OK' => true, 'ERRORS' => []];
-        }
+    $running = taskIsRunning($taskId);
+    $steps[] = [
+        'stage' => 'CBPRuntime::SendExternalEvent',
+        'request' => $payload,
+        'running' => $running ? 'Y' : 'N',
+        'errors' => $eventErrors,
+    ];
+    if (!$running) {
+        return ['OK' => true, 'ERRORS' => [], 'STEPS' => $steps];
     }
 
     $flatError = flattenBizprocErrors($errors);
@@ -348,7 +349,7 @@ function completeTask(array $task, int $userId, string $action, string $comment)
         $flatError = 'Задание осталось активным после попыток завершения.';
     }
 
-    return ['OK' => false, 'ERRORS' => [['message' => $flatError]]];
+    return ['OK' => false, 'ERRORS' => [['message' => $flatError]], 'STEPS' => $steps];
 }
 
 $currentUserId = (int)$USER->GetID();
@@ -356,6 +357,7 @@ $elementData = getElementData(TEST_IBLOCK_ID, TEST_ELEMENT_ID);
 $task = findCurrentUserTaskForDocument($currentUserId, TEST_IBLOCK_ID, TEST_ELEMENT_ID);
 $message = null;
 $messageType = 'ok';
+$diagnosticSteps = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && check_bitrix_sessid()) {
     $postedTaskId = (int)($_POST['task_id'] ?? 0);
@@ -382,6 +384,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && check_bitrix_sessid()) {
             }
             $message = 'Ошибка завершения задания: ' . implode('; ', $errors);
         }
+        $diagnosticSteps = (array)($result['STEPS'] ?? []);
     }
 }
 
@@ -417,31 +420,39 @@ $buttons = $task ? buildActionButtons($task) : [];
 <?php endif; ?>
 
 <div class="block">
-    <h2>Поля документа (iblock <?= (int)TEST_IBLOCK_ID ?>, element <?= (int)TEST_ELEMENT_ID ?>)</h2>
+    <h2>Документ (минимальные данные)</h2>
     <?php if (!$elementData): ?>
         <p class="msg-error">Документ не найден.</p>
     <?php else: ?>
-        <h3>Системные поля</h3>
         <table>
-            <?php foreach ($elementData['FIELDS'] as $fieldName => $fieldValue): ?>
-                <tr>
-                    <th><?= h($fieldName) ?></th>
-                    <td><?= h(renderFieldValue($fieldValue)) ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </table>
-
-        <h3>Свойства</h3>
-        <table>
-            <?php foreach ($elementData['PROPERTIES'] as $code => $property): ?>
-                <tr>
-                    <th><?= h($code . ' (' . $property['NAME'] . ')') ?></th>
-                    <td><?= h(renderFieldValue($property['VALUE'])) ?></td>
-                </tr>
-            <?php endforeach; ?>
+            <tr><th>IBLOCK_ID</th><td><?= (int)TEST_IBLOCK_ID ?></td></tr>
+            <tr><th>ELEMENT_ID (из константы)</th><td><?= (int)TEST_ELEMENT_ID ?></td></tr>
+            <tr><th>ID (из БД)</th><td><?= (int)$elementData['ID'] ?></td></tr>
         </table>
     <?php endif; ?>
 </div>
+
+<?php if (!empty($diagnosticSteps)): ?>
+    <div class="block">
+        <h2>Диагностика завершения задания</h2>
+        <table>
+            <tr>
+                <th>Этап</th>
+                <th>Задание все еще Running</th>
+                <th>Данные запроса</th>
+                <th>Ошибки</th>
+            </tr>
+            <?php foreach ($diagnosticSteps as $step): ?>
+                <tr>
+                    <td><?= h((string)($step['stage'] ?? '')) ?></td>
+                    <td><?= h((string)($step['running'] ?? '')) ?></td>
+                    <td><pre><?= h(print_r($step['request'] ?? [], true)) ?></pre></td>
+                    <td><pre><?= h(print_r($step['errors'] ?? [], true)) ?></pre></td>
+                </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+<?php endif; ?>
 
 <div class="block">
     <h2>Задание бизнес-процесса текущего пользователя</h2>
