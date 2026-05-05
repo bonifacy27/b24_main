@@ -297,6 +297,80 @@ function loadTaskFileUsages(int $userId): array
     return $items;
 }
 
+function loadTaskDiskAttachedUsages(int $userId): array
+{
+    if (!hasTable('b_disk_attached_object') || !hasTable('b_disk_object') || !hasTable('b_disk_version')) {
+        return [];
+    }
+
+    $connection = Application::getConnection();
+    $items = [];
+
+    $createdByColumn = hasColumn('b_disk_attached_object', 'CREATED_BY') ? 'dao.CREATED_BY' : null;
+    $authorFilter = $createdByColumn ? $createdByColumn . ' = ' . $userId : '1=0';
+
+    $storageFilter = '1=0';
+    if (hasTable('b_disk_storage') && hasColumn('b_disk_storage', 'ENTITY_TYPE') && hasColumn('b_disk_storage', 'ENTITY_ID')) {
+        $storageFilter = "do.STORAGE_ID IN (SELECT s.ID FROM b_disk_storage s WHERE s.ENTITY_TYPE = 'USER' AND s.ENTITY_ID = {$userId})";
+    }
+
+    $connectorTaskFilter = "dao.ENTITY_TYPE LIKE '%Task%'";
+    $where = '(' . $authorFilter . ' OR ' . $storageFilter . ') AND ' . $connectorTaskFilter;
+
+    $sql = "
+        SELECT
+            COALESCE(f.ID, 0) AS FILE_ID,
+            f.FILE_NAME,
+            f.ORIGINAL_NAME,
+            COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
+            f.SUBDIR,
+            COALESCE(dao.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME,
+            t.ID AS TASK_ID,
+            t.TITLE AS TASK_TITLE,
+            t.CREATED_DATE,
+            t.CLOSED_DATE,
+            t.STATUS,
+            COALESCE(t.CHANGED_DATE, t.CREATED_DATE) AS USAGE_DATE,
+            'TASK' AS USAGE_TYPE
+        FROM b_disk_attached_object dao
+        INNER JOIN b_disk_object do ON do.ID = dao.OBJECT_ID
+        LEFT JOIN b_disk_version dv ON dv.ID = (
+            SELECT MAX(v.ID)
+            FROM b_disk_version v
+            WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
+        )
+        LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
+        INNER JOIN b_tasks t ON t.ID = dao.ENTITY_ID
+        WHERE {$where}
+          AND f.ID IS NOT NULL
+    ";
+
+    $result = $connection->query($sql);
+    while ($row = $result->fetch()) {
+        $fileId = (int)$row['FILE_ID'];
+        if ($fileId <= 0) {
+            continue;
+        }
+        $items[$fileId][] = [
+            'FILE_ID' => $fileId,
+            'FILE_NAME' => (string)$row['FILE_NAME'],
+            'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+            'FILE_SIZE' => (int)$row['FILE_SIZE'],
+            'SUBDIR' => (string)$row['SUBDIR'],
+            'TIMESTAMP_X' => (string)$row['FILE_TIME'],
+            'USAGE_TYPE' => (string)$row['USAGE_TYPE'],
+            'USAGE_DATE' => (string)$row['USAGE_DATE'],
+            'TASK_ID' => (int)$row['TASK_ID'],
+            'TASK_TITLE' => (string)$row['TASK_TITLE'],
+            'TASK_CREATED_DATE' => (string)$row['CREATED_DATE'],
+            'TASK_CLOSED_DATE' => (string)$row['CLOSED_DATE'],
+            'TASK_STATUS' => (int)$row['STATUS'],
+        ];
+    }
+
+    return $items;
+}
+
 function loadCommentFileUsages(int $userId): array
 {
     $connection = Application::getConnection();
@@ -397,6 +471,88 @@ function loadCommentFileUsages(int $userId): array
     return $items;
 }
 
+function loadCommentDiskAttachedUsages(int $userId): array
+{
+    if (
+        !hasTable('b_disk_attached_object')
+        || !hasTable('b_disk_object')
+        || !hasTable('b_disk_version')
+        || !hasTable('b_forum_message')
+        || !hasTable('b_forum_topic')
+    ) {
+        return [];
+    }
+
+    $connection = Application::getConnection();
+    $items = [];
+
+    $createdByColumn = hasColumn('b_disk_attached_object', 'CREATED_BY') ? 'dao.CREATED_BY' : null;
+    $authorFilter = $createdByColumn ? $createdByColumn . ' = ' . $userId : '1=0';
+
+    $storageFilter = '1=0';
+    if (hasTable('b_disk_storage') && hasColumn('b_disk_storage', 'ENTITY_TYPE') && hasColumn('b_disk_storage', 'ENTITY_ID')) {
+        $storageFilter = "do.STORAGE_ID IN (SELECT s.ID FROM b_disk_storage s WHERE s.ENTITY_TYPE = 'USER' AND s.ENTITY_ID = {$userId})";
+    }
+
+    $connectorCommentFilter = "dao.ENTITY_TYPE LIKE '%Comment%'";
+    $where = '(' . $authorFilter . ' OR ' . $storageFilter . ') AND ' . $connectorCommentFilter;
+
+    $sql = "
+        SELECT
+            COALESCE(f.ID, 0) AS FILE_ID,
+            f.FILE_NAME,
+            f.ORIGINAL_NAME,
+            COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
+            f.SUBDIR,
+            COALESCE(dao.CREATE_TIME, fm.POST_DATE, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME,
+            t.ID AS TASK_ID,
+            t.TITLE AS TASK_TITLE,
+            t.CREATED_DATE,
+            t.CLOSED_DATE,
+            t.STATUS,
+            fm.POST_DATE AS USAGE_DATE,
+            'COMMENT' AS USAGE_TYPE
+        FROM b_disk_attached_object dao
+        INNER JOIN b_disk_object do ON do.ID = dao.OBJECT_ID
+        LEFT JOIN b_disk_version dv ON dv.ID = (
+            SELECT MAX(v.ID)
+            FROM b_disk_version v
+            WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
+        )
+        LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
+        INNER JOIN b_forum_message fm ON fm.ID = dao.ENTITY_ID
+        INNER JOIN b_forum_topic ft ON ft.ID = fm.TOPIC_ID
+        INNER JOIN b_tasks t ON ft.XML_ID LIKE 'TASK_%' AND t.ID = CAST(SUBSTRING(ft.XML_ID, 6) AS UNSIGNED)
+        WHERE {$where}
+          AND f.ID IS NOT NULL
+    ";
+
+    $result = $connection->query($sql);
+    while ($row = $result->fetch()) {
+        $fileId = (int)$row['FILE_ID'];
+        if ($fileId <= 0) {
+            continue;
+        }
+        $items[$fileId][] = [
+            'FILE_ID' => $fileId,
+            'FILE_NAME' => (string)$row['FILE_NAME'],
+            'ORIGINAL_NAME' => (string)$row['ORIGINAL_NAME'],
+            'FILE_SIZE' => (int)$row['FILE_SIZE'],
+            'SUBDIR' => (string)$row['SUBDIR'],
+            'TIMESTAMP_X' => (string)$row['FILE_TIME'],
+            'USAGE_TYPE' => (string)$row['USAGE_TYPE'],
+            'USAGE_DATE' => (string)$row['USAGE_DATE'],
+            'TASK_ID' => (int)$row['TASK_ID'],
+            'TASK_TITLE' => (string)$row['TASK_TITLE'],
+            'TASK_CREATED_DATE' => (string)$row['CREATED_DATE'],
+            'TASK_CLOSED_DATE' => (string)$row['CLOSED_DATE'],
+            'TASK_STATUS' => (int)$row['STATUS'],
+        ];
+    }
+
+    return $items;
+}
+
 function loadStandaloneUserFiles(int $userId): array
 {
     if (!hasColumn('b_file', 'CREATED_BY')) {
@@ -458,13 +614,15 @@ function loadUserDiskFiles(int $userId): array
             FROM b_disk_storage s
             WHERE s.ENTITY_TYPE = 'USER'
               AND s.ENTITY_ID = {$userId}
-            LIMIT 1
         ";
-        $storageRow = $connection->query($storageSql)->fetch();
-        $storageId = $storageRow ? (int)$storageRow['ID'] : 0;
+        $storageIds = [];
+        $storageResult = $connection->query($storageSql);
+        while ($storageRow = $storageResult->fetch()) {
+            $storageIds[] = (int)$storageRow['ID'];
+        }
 
-        if ($storageId > 0) {
-            $scopeConditions = ['do.STORAGE_ID = ' . $storageId];
+        if (!empty($storageIds)) {
+            $scopeConditions = ['do.STORAGE_ID IN (' . implode(', ', array_unique($storageIds)) . ')'];
             if (hasColumn('b_disk_object', 'TYPE')) {
                 $scopeConditions[] = 'do.TYPE = 2';
             }
@@ -475,10 +633,10 @@ function loadUserDiskFiles(int $userId): array
             $scopeWhere = implode(' AND ', $scopeConditions);
             $scopeSql = "
                 SELECT
-                    f.ID AS FILE_ID,
-                    f.FILE_NAME,
-                    f.ORIGINAL_NAME,
-                    f.SUBDIR,
+                    COALESCE(f.ID, dv.FILE_ID, do.FILE_ID) AS FILE_ID,
+                    COALESCE(f.FILE_NAME, CONCAT('disk_object_', do.ID)) AS FILE_NAME,
+                    COALESCE(f.ORIGINAL_NAME, do.NAME, CONCAT('disk_object_', do.ID)) AS ORIGINAL_NAME,
+                    COALESCE(f.SUBDIR, '') AS SUBDIR,
                     COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
                     COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
                     COALESCE(do.UPDATE_TIME, do.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
@@ -488,15 +646,17 @@ function loadUserDiskFiles(int $userId): array
                     FROM b_disk_version v
                     WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
                 )
-                LEFT JOIN b_file f ON f.ID = dv.FILE_ID
+                LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
                 WHERE {$scopeWhere}
-                  AND f.ID IS NOT NULL
                 ORDER BY FILE_TIME DESC, f.ID DESC
             ";
 
             $scopeResult = $connection->query($scopeSql);
             while ($row = $scopeResult->fetch()) {
                 $fileId = (int)$row['FILE_ID'];
+                if ($fileId <= 0) {
+                    continue;
+                }
                 $items[$fileId] = [
                     'FILE_ID' => $fileId,
                     'FILE_NAME' => (string)$row['FILE_NAME'],
@@ -513,28 +673,30 @@ function loadUserDiskFiles(int $userId): array
     if (hasTable('b_disk_uploaded_file') && hasColumn('b_disk_uploaded_file', 'USER_ID')) {
         $sqlUploaded = "
             SELECT
-                f.ID AS FILE_ID,
-                f.FILE_NAME,
-                f.ORIGINAL_NAME,
-                f.SUBDIR,
+                COALESCE(f.ID, dv.FILE_ID, do.FILE_ID) AS FILE_ID,
+                COALESCE(f.FILE_NAME, CONCAT('disk_object_', do.ID)) AS FILE_NAME,
+                COALESCE(f.ORIGINAL_NAME, do.NAME, CONCAT('disk_object_', do.ID)) AS ORIGINAL_NAME,
+                COALESCE(f.SUBDIR, '') AS SUBDIR,
                 COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
                 COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
                 COALESCE(dv.CREATE_TIME, do.UPDATE_TIME, do.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
-            FROM b_disk_uploaded_file duf
+                FROM b_disk_uploaded_file duf
             INNER JOIN b_disk_object do ON do.ID = duf.OBJECT_ID
             LEFT JOIN b_disk_version dv ON dv.ID = (
                 SELECT MAX(v.ID)
                 FROM b_disk_version v
                 WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
             )
-            LEFT JOIN b_file f ON f.ID = dv.FILE_ID
+            LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
             WHERE duf.USER_ID = {$userId}
-              AND f.ID IS NOT NULL
         ";
 
         $uploadedResult = $connection->query($sqlUploaded);
         while ($row = $uploadedResult->fetch()) {
             $fileId = (int)$row['FILE_ID'];
+            if ($fileId <= 0) {
+                continue;
+            }
             if (isset($items[$fileId])) {
                 continue;
             }
@@ -567,10 +729,10 @@ function loadUserDiskFiles(int $userId): array
         $whereSql = implode(' AND ', $conditions);
         $sqlFallback = "
             SELECT
-                f.ID AS FILE_ID,
-                f.FILE_NAME,
-                f.ORIGINAL_NAME,
-                f.SUBDIR,
+                COALESCE(f.ID, dv.FILE_ID, do.FILE_ID) AS FILE_ID,
+                COALESCE(f.FILE_NAME, CONCAT('disk_object_', do.ID)) AS FILE_NAME,
+                COALESCE(f.ORIGINAL_NAME, do.NAME, CONCAT('disk_object_', do.ID)) AS ORIGINAL_NAME,
+                COALESCE(f.SUBDIR, '') AS SUBDIR,
                 COALESCE(dv.SIZE, f.FILE_SIZE, 0) AS FILE_SIZE,
                 COALESCE(do.NAME, f.ORIGINAL_NAME, f.FILE_NAME) AS DISK_NAME,
                 COALESCE(do.UPDATE_TIME, do.CREATE_TIME, dv.CREATE_TIME, f.TIMESTAMP_X) AS FILE_TIME
@@ -580,14 +742,16 @@ function loadUserDiskFiles(int $userId): array
                 FROM b_disk_version v
                 WHERE v.OBJECT_ID = COALESCE(do.REAL_OBJECT_ID, do.ID)
             )
-            LEFT JOIN b_file f ON f.ID = dv.FILE_ID
+            LEFT JOIN b_file f ON f.ID = COALESCE(dv.FILE_ID, do.FILE_ID)
             WHERE {$whereSql}
-              AND f.ID IS NOT NULL
         ";
 
         $fallbackResult = $connection->query($sqlFallback);
         while ($row = $fallbackResult->fetch()) {
             $fileId = (int)$row['FILE_ID'];
+            if ($fileId <= 0) {
+                continue;
+            }
             if (isset($items[$fileId])) {
                 continue;
             }
@@ -609,7 +773,9 @@ function loadUserDiskFiles(int $userId): array
 function buildRows(int $userId): array
 {
     $taskUsages = loadTaskFileUsages($userId);
+    $taskDiskUsages = loadTaskDiskAttachedUsages($userId);
     $commentUsages = loadCommentFileUsages($userId);
+    $commentDiskUsages = loadCommentDiskAttachedUsages($userId);
     $diskFiles = loadUserDiskFiles($userId);
     $standaloneFiles = loadStandaloneUserFiles($userId);
 
@@ -625,7 +791,7 @@ function buildRows(int $userId): array
         }
     }
 
-    foreach ([$taskUsages, $commentUsages] as $group) {
+    foreach ([$taskUsages, $taskDiskUsages, $commentUsages, $commentDiskUsages] as $group) {
         foreach ($group as $fileId => $usages) {
             foreach ($usages as $usage) {
                 if (!isset($byFile[$fileId])) {
@@ -662,6 +828,7 @@ function deleteFiles(array $fileIds): array
 {
     $deleted = [];
     $errors = [];
+    $diagnostics = [];
 
     foreach (array_unique(array_map('intval', $fileIds)) as $fileId) {
         if ($fileId <= 0) {
@@ -672,20 +839,75 @@ function deleteFiles(array $fileIds): array
             $deleted[] = $fileId;
         } else {
             $errors[] = $fileId;
+            $diagnostics[$fileId] = buildDeleteDiagnostic($fileId);
         }
     }
 
-    return ['deleted' => $deleted, 'errors' => $errors];
+    return ['deleted' => $deleted, 'errors' => $errors, 'diagnostics' => $diagnostics];
+}
+
+function buildDeleteDiagnostic(int $fileId): array
+{
+    $connection = Application::getConnection();
+    $diag = [
+        'FILE_ID' => $fileId,
+        'FILE_ROW_EXISTS' => false,
+        'FILE_PATH' => '',
+        'FILE_EXISTS_ON_DISK' => null,
+        'DISK_VERSION_LINKS' => null,
+        'DISK_OBJECT_LINKS' => null,
+        'TASK_LINKS' => null,
+        'FORUM_LINKS' => null,
+    ];
+
+    $fileRow = $connection->query("
+        SELECT ID, SUBDIR, FILE_NAME
+        FROM b_file
+        WHERE ID = {$fileId}
+        LIMIT 1
+    ")->fetch();
+
+    if ($fileRow) {
+        $diag['FILE_ROW_EXISTS'] = true;
+        $relativePath = '/upload/' . trim((string)$fileRow['SUBDIR'] . '/' . (string)$fileRow['FILE_NAME'], '/');
+        $diag['FILE_PATH'] = $relativePath;
+        $diag['FILE_EXISTS_ON_DISK'] = is_file($_SERVER['DOCUMENT_ROOT'] . $relativePath);
+    }
+
+    if (hasTable('b_disk_version') && hasColumn('b_disk_version', 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM b_disk_version WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['DISK_VERSION_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    if (hasTable('b_disk_object') && hasColumn('b_disk_object', 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM b_disk_object WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['DISK_OBJECT_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    $tasksFileTable = getTasksFileTable();
+    if ($tasksFileTable !== null && hasColumn($tasksFileTable, 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM {$tasksFileTable} WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['TASK_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    if (hasTable('b_forum_message') && hasColumn('b_forum_message', 'FILE_ID')) {
+        $row = $connection->query("SELECT COUNT(1) CNT FROM b_forum_message WHERE FILE_ID = {$fileId}")->fetch();
+        $diag['FORUM_LINKS'] = (int)($row['CNT'] ?? 0);
+    }
+
+    return $diag;
 }
 
 $selectedUserId = isset($_REQUEST['user_id']) ? (int)$_REQUEST['user_id'] : 0;
 $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
 $message = '';
+$deleteDiagnostics = [];
 
 if ($action === 'delete' && check_bitrix_sessid()) {
     $toDelete = isset($_POST['delete_files']) && is_array($_POST['delete_files']) ? $_POST['delete_files'] : [];
     $result = deleteFiles($toDelete);
     $message = sprintf('Удалено файлов: %d. Ошибок удаления: %d.', count($result['deleted']), count($result['errors']));
+    $deleteDiagnostics = $result['diagnostics'] ?? [];
 }
 
 $user = getUserById($selectedUserId);
@@ -725,6 +947,25 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
 
 <?php if ($message !== ''): ?>
     <div class="msg"><?= h($message) ?></div>
+<?php endif; ?>
+<?php if (!empty($deleteDiagnostics)): ?>
+    <div class="warn">
+        <strong>Диагностика ошибок удаления:</strong>
+        <ul>
+            <?php foreach ($deleteDiagnostics as $fileId => $diag): ?>
+                <li>
+                    <strong>Файл ID <?= (int)$fileId ?></strong>:
+                    b_file: <?= $diag['FILE_ROW_EXISTS'] ? 'есть запись' : 'запись не найдена' ?>;
+                    путь: <?= h((string)$diag['FILE_PATH']) ?: '—' ?>;
+                    на диске: <?= $diag['FILE_EXISTS_ON_DISK'] === null ? 'не проверено' : ($diag['FILE_EXISTS_ON_DISK'] ? 'да' : 'нет') ?>;
+                    ссылок disk_version: <?= $diag['DISK_VERSION_LINKS'] === null ? 'н/д' : (int)$diag['DISK_VERSION_LINKS'] ?>;
+                    ссылок disk_object: <?= $diag['DISK_OBJECT_LINKS'] === null ? 'н/д' : (int)$diag['DISK_OBJECT_LINKS'] ?>;
+                    ссылок tasks_file: <?= $diag['TASK_LINKS'] === null ? 'н/д' : (int)$diag['TASK_LINKS'] ?>;
+                    ссылок forum_message: <?= $diag['FORUM_LINKS'] === null ? 'н/д' : (int)$diag['FORUM_LINKS'] ?>.
+                </li>
+            <?php endforeach; ?>
+        </ul>
+    </div>
 <?php endif; ?>
 
 <?php if ($selectedUserId > 0): ?>
