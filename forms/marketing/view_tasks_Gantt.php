@@ -298,21 +298,23 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
  innerEls.forEach(e=>e.style.width=baseWidth+'px');
  if(body){const initialScroll=(defaultStart/daySpan)*baseWidth;body.scrollLeft=Math.max(0,initialScroll);header.scrollLeft=body.scrollLeft;}
 
- const monthVisitData = <?=CUtil::PhpToJSObject(array_map(static function($v) use ($getUserName){return ['ts'=>(string)$v['TIMESTAMP_X'],'uid'=>(int)($v['VISITOR_UID']??0),'name'=>$getUserName((int)($v['VISITOR_UID']??0))];}, $monthVisits))?>;
- const allVisitData = <?=CUtil::PhpToJSObject((function() use ($DB,$eventTypeSql,$itemSql,$getUserName){$items=[];$rs=$DB->Query("SELECT TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='".$eventTypeSql."' AND ITEM_ID='".$itemSql."' ORDER BY ID DESC");while($e=$rs->Fetch()){$uid=(int)$e['USER_ID'];if($uid<=0&&preg_match('/USER_ID=(\d+);/',(string)$e['DESCRIPTION'],$m)){$uid=(int)$m[1];}$items[]=['ts'=>(string)$e['TIMESTAMP_X'],'uid'=>$uid,'name'=>$getUserName($uid)];}return $items;})())?>;
+ const monthVisitData = <?= in_array($currentUserId, $statsViewerUserIds, true) ? CUtil::PhpToJSObject(array_map(static function($v) use ($getUserName){return ['ts'=>(string)$v['TIMESTAMP_X'],'uid'=>(int)($v['VISITOR_UID']??0),'name'=>$getUserName((int)($v['VISITOR_UID']??0))];}, $monthVisits)) : '[]' ?>;
+ const allVisitData = <?= in_array($currentUserId, $statsViewerUserIds, true) ? CUtil::PhpToJSObject((function() use ($DB,$eventTypeSql,$itemSql,$getUserName){$items=[];$rs=$DB->Query("SELECT TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='".$eventTypeSql."' AND ITEM_ID='".$itemSql."' ORDER BY ID DESC");while($e=$rs->Fetch()){$uid=(int)$e['USER_ID'];if($uid<=0&&preg_match('/USER_ID=(\d+);/',(string)$e['DESCRIPTION'],$m)){$uid=(int)$m[1];}$items[]=['ts'=>(string)$e['TIMESTAMP_X'],'uid'=>$uid,'name'=>$getUserName($uid)];}return $items;})()) : '[]' ?>;
  const visitsContainer = document.getElementById('statsUserVisits');
- function renderVisits(uid, period, page){
-   const perPage=20; const data=(period==='all'?allVisitData:monthVisitData).filter(v=>v.uid===uid);
-   const pages=Math.max(1,Math.ceil(data.length/perPage)); const p=Math.min(Math.max(page||1,1),pages);
-   const slice=data.slice((p-1)*perPage,p*perPage);
-   let html=`<b>Посещения пользователя: ${slice[0]?slice[0].name:'ID '+uid} (${period==='all'?'за все время':'за месяц'})</b>`;
-   html+=`<table style="width:100%;border-collapse:collapse;margin:8px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th></tr></thead><tbody>`;
-   slice.forEach(v=>{html+=`<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.ts}</td><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.name}</td></tr>`}); html+='</tbody></table><div>';
-   for(let i=1;i<=pages;i++){html+= i===p?`<b>${i}</b>`:`<a href="#" class="stats-page" data-user-id="${uid}" data-period="${period}" data-page="${i}">${i}</a>`; if(i<pages) html+=' | ';}
-   html+='</div>'; visitsContainer.innerHTML=html;
+ if (visitsContainer) {
+   function renderVisits(uid, period, page){
+     const perPage=20; const data=(period==='all'?allVisitData:monthVisitData).filter(v=>v.uid===uid);
+     const pages=Math.max(1,Math.ceil(data.length/perPage)); const p=Math.min(Math.max(page||1,1),pages);
+     const slice=data.slice((p-1)*perPage,p*perPage);
+     let html=`<b>Посещения пользователя: ${slice[0]?slice[0].name:'ID '+uid} (${period==='all'?'за все время':'за месяц'})</b>`;
+     html+=`<table style="width:100%;border-collapse:collapse;margin:8px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th></tr></thead><tbody>`;
+     slice.forEach(v=>{html+=`<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.ts}</td><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.name}</td></tr>`}); html+='</tbody></table><div>';
+     for(let i=1;i<=pages;i++){html+= i===p?`<b>${i}</b>`:`<a href="#" class="stats-page" data-user-id="${uid}" data-period="${period}" data-page="${i}">${i}</a>`; if(i<pages) html+=' | ';}
+     html+='</div>'; visitsContainer.innerHTML=html;
+   }
+   document.querySelectorAll('.stats-user-link').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();renderVisits(parseInt(a.dataset.userId,10),a.dataset.period,1);document.getElementById('statsBlock').open=true;}));
+   document.addEventListener('click',e=>{const t=e.target.closest('.stats-page'); if(!t) return; e.preventDefault(); renderVisits(parseInt(t.dataset.userId,10),t.dataset.period,parseInt(t.dataset.page,10));});
  }
- document.querySelectorAll('.stats-user-link').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();renderVisits(parseInt(a.dataset.userId,10),a.dataset.period,1);document.getElementById('statsBlock').open=true;}));
- document.addEventListener('click',e=>{const t=e.target.closest('.stats-page'); if(!t) return; e.preventDefault(); renderVisits(parseInt(t.dataset.userId,10),t.dataset.period,parseInt(t.dataset.page,10));});
 
 })();
 </script>
