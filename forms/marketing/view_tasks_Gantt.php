@@ -31,6 +31,7 @@ if ($currentUserId > 0) {
 }
 
 $sort = isset($_GET['sort']) ? (string)$_GET['sort'] : 'id';
+$sortDir = isset($_GET['sort_dir']) && $_GET['sort_dir'] === 'desc' ? 'desc' : 'asc';
 $sortOptions = ['id', 'deadline', 'created', 'title'];
 if (!in_array($sort, $sortOptions, true)) {
     $sort = 'id';
@@ -64,21 +65,21 @@ foreach ($tasksById as $id => $task) {
     }
 }
 
-$compareTasks = function (int $aId, int $bId) use (&$tasksById, $sort): int {
+$compareTasks = function (int $aId, int $bId) use (&$tasksById, $sort, $sortDir): int {
     $a = $tasksById[$aId];
     $b = $tasksById[$bId];
     if ($sort === 'title') {
-        return strnatcasecmp($a['TITLE'], $b['TITLE']) ?: ($a['ID'] <=> $b['ID']);
-    }
-    if ($sort === 'created') {
-        return ($a['CREATED_TS'] <=> $b['CREATED_TS']) ?: ($a['ID'] <=> $b['ID']);
-    }
-    if ($sort === 'deadline') {
+        $result = strnatcasecmp($a['TITLE'], $b['TITLE']) ?: ($a['ID'] <=> $b['ID']);
+    } elseif ($sort === 'created') {
+        $result = ($a['CREATED_TS'] <=> $b['CREATED_TS']) ?: ($a['ID'] <=> $b['ID']);
+    } elseif ($sort === 'deadline') {
         $ad = $a['DEADLINE_TS'] ?: PHP_INT_MAX;
         $bd = $b['DEADLINE_TS'] ?: PHP_INT_MAX;
-        return ($ad <=> $bd) ?: ($a['ID'] <=> $b['ID']);
+        $result = ($ad <=> $bd) ?: ($a['ID'] <=> $b['ID']);
+    } else {
+        $result = ((int)$a['ID'] <=> (int)$b['ID']);
     }
-    return ((int)$a['ID'] <=> (int)$b['ID']);
+    return $sortDir === 'desc' ? -$result : $result;
 };
 
 $sortTree = function (array &$nodeIds) use (&$sortTree, &$tasksById, $compareTasks): void {
@@ -132,7 +133,7 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
 </style>
 <div class="gantt-wrap">
     <form class="gantt-toolbar" method="get">
-        <div class="gantt-controls"><label for="sort">Сортировка:</label><select name="sort" id="sort" onchange="this.form.submit()"><option value="id" <?= $sort === 'id' ? 'selected' : '' ?>>По ID</option><option value="deadline" <?= $sort === 'deadline' ? 'selected' : '' ?>>По крайнему сроку</option><option value="created" <?= $sort === 'created' ? 'selected' : '' ?>>По дате создания</option><option value="title" <?= $sort === 'title' ? 'selected' : '' ?>>По алфавиту</option></select></div>
+        <div class="gantt-controls"><label for="sort">Сортировка:</label><select name="sort" id="sort" onchange="this.form.submit()"><option value="id" <?= $sort === 'id' ? 'selected' : '' ?>>ID</option><option value="deadline" <?= $sort === 'deadline' ? 'selected' : '' ?>>Крайний срок</option><option value="created" <?= $sort === 'created' ? 'selected' : '' ?>>Дата создания</option><option value="title" <?= $sort === 'title' ? 'selected' : '' ?>>Алфавит</option></select><select name="sort_dir" onchange="this.form.submit()"><option value="asc" <?= $sortDir === 'asc' ? 'selected' : '' ?>>По возрастанию</option><option value="desc" <?= $sortDir === 'desc' ? 'selected' : '' ?>>По убыванию</option></select></div>
         
     </form>
 
@@ -238,7 +239,9 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
         <div style="margin-bottom:6px;">Общее кол-во посещений (за все время): <b><?= $totalVisitsAll ?></b></div>
         <div style="margin-bottom:10px;">Посещений за месяц: <b><?= count($monthVisits) ?></b></div>
 
-        <div style="margin:10px 0 6px;"><b>Топ посетителей за месяц</b></div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
+        <div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px;">
+        <div style="margin:0 0 6px;"><b>Топ посетителей за месяц</b></div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
             <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Кол-во</th></tr></thead>
             <tbody>
@@ -250,8 +253,11 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
             <?php endforeach; ?>
             </tbody>
         </table>
+        <div id="statsUserVisitsMonth" style="margin-top:8px;"></div>
+        </div>
 
-        <div style="margin:10px 0 6px;"><b>Топ 10 посетителей за все время</b></div>
+        <div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px;">
+        <div style="margin:0 0 6px;"><b>Топ 10 посетителей за все время</b></div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
             <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Кол-во</th></tr></thead>
             <tbody>
@@ -263,9 +269,11 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
             <?php endforeach; ?>
             </tbody>
         </table>
-        <div id="statsUserVisits" style="margin:10px 0 6px;"></div>
+        <div id="statsUserVisitsAll" style="margin-top:8px;"></div>
+        </div>
 
-        <div style="margin:10px 0 6px;"><b>Последние 50 посещений за месяц</b></div>
+        <div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px;">
+        <div style="margin:0 0 6px;"><b>Последние 50 посещений за месяц</b></div>
         <table style="width:100%;border-collapse:collapse;">
             <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Описание</th></tr></thead>
             <tbody>
@@ -277,6 +285,8 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
             <?php endforeach; ?>
             </tbody>
         </table>
+        </div>
+        </div>
         </div>
     </details>
 <?php endif; ?>
@@ -300,9 +310,12 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
 
  const monthVisitData = <?= in_array($currentUserId, $statsViewerUserIds, true) ? CUtil::PhpToJSObject(array_map(static function($v) use ($getUserName){return ['ts'=>(string)$v['TIMESTAMP_X'],'uid'=>(int)($v['VISITOR_UID']??0),'name'=>$getUserName((int)($v['VISITOR_UID']??0))];}, $monthVisits)) : '[]' ?>;
  const allVisitData = <?= in_array($currentUserId, $statsViewerUserIds, true) ? CUtil::PhpToJSObject((function() use ($DB,$eventTypeSql,$itemSql,$getUserName){$items=[];$rs=$DB->Query("SELECT TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='".$eventTypeSql."' AND ITEM_ID='".$itemSql."' ORDER BY ID DESC");while($e=$rs->Fetch()){$uid=(int)$e['USER_ID'];if($uid<=0&&preg_match('/USER_ID=(\d+);/',(string)$e['DESCRIPTION'],$m)){$uid=(int)$m[1];}$items[]=['ts'=>(string)$e['TIMESTAMP_X'],'uid'=>$uid,'name'=>$getUserName($uid)];}return $items;})()) : '[]' ?>;
- const visitsContainer = document.getElementById('statsUserVisits');
- if (visitsContainer) {
+ const visitsContainerMonth = document.getElementById('statsUserVisitsMonth');
+ const visitsContainerAll = document.getElementById('statsUserVisitsAll');
+ if (visitsContainerMonth || visitsContainerAll) {
    function renderVisits(uid, period, page){
+     const visitsContainer = period === 'all' ? visitsContainerAll : visitsContainerMonth;
+     if (!visitsContainer) { return; }
      const perPage=20; const data=(period==='all'?allVisitData:monthVisitData).filter(v=>v.uid===uid);
      const pages=Math.max(1,Math.ceil(data.length/perPage)); const p=Math.min(Math.max(page||1,1),pages);
      const slice=data.slice((p-1)*perPage,p*perPage);
