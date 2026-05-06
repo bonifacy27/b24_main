@@ -18,7 +18,7 @@ $activeStatuses = [2, 3];
 $nowTs = time();
 
 $eventType = 'MARKETING_GANTT_VISIT';
-$targetStatsUserId = 3532;
+$statsViewerUserIds = [3532];
 $currentUserId = (int)$USER->GetID();
 if ($currentUserId > 0) {
     CEventLog::Add([
@@ -162,28 +162,62 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
     </div>
     <?php endif; ?>
 
-<?php if ($currentUserId === $targetStatsUserId): ?>
+<?php if (in_array($currentUserId, $statsViewerUserIds, true)): ?>
     <?php
-    $visits = [];
+    $monthStart = date('01.m.Y 00:00:00');
+    $monthVisits = [];
+    $topVisitors = [];
+    $totalVisitsAll = 0;
+
     $by = 'ID';
     $order = 'DESC';
-    $rsEvents = CEventLog::GetList($by, $order, [
+    $rsEventsAll = CEventLog::GetList($by, $order, [
         'AUDIT_TYPE_ID' => $eventType,
         'ITEM_ID' => 'forms/marketing/view_tasks_Gantt.php',
     ]);
-    while ($event = $rsEvents->Fetch()) {
-        if (strpos((string)$event['DESCRIPTION'], 'USER_ID=' . $targetStatsUserId . ';') === 0) {
-            $visits[] = $event;
-        }
+    while ($event = $rsEventsAll->Fetch()) {
+        $totalVisitsAll++;
     }
+
+    $rsEventsMonth = CEventLog::GetList($by, $order, [
+        'AUDIT_TYPE_ID' => $eventType,
+        'ITEM_ID' => 'forms/marketing/view_tasks_Gantt.php',
+        '>=TIMESTAMP_X' => $monthStart,
+    ]);
+
+    while ($event = $rsEventsMonth->Fetch()) {
+        if (preg_match('/USER_ID=(\d+);/', (string)$event['DESCRIPTION'], $m)) {
+            $uid = (int)$m[1];
+            if (!isset($topVisitors[$uid])) {
+                $topVisitors[$uid] = 0;
+            }
+            $topVisitors[$uid]++;
+        }
+        $monthVisits[] = $event;
+    }
+    arsort($topVisitors);
     ?>
     <div style="margin-top:24px;padding:12px;border:1px solid #d8dde6;border-radius:6px;background:#fff;">
-        <h3 style="margin:0 0 12px;">Статистика посещений пользователя #<?= $targetStatsUserId ?></h3>
-        <div style="margin-bottom:8px;">Всего входов: <b><?= count($visits) ?></b></div>
+        <h3 style="margin:0 0 12px;">Статистика посещений</h3>
+        <div style="margin-bottom:6px;">Период: текущий месяц (с <?= htmlspecialcharsbx($monthStart) ?>)</div>
+        <div style="margin-bottom:6px;">Общее кол-во посещений (за все время): <b><?= $totalVisitsAll ?></b></div>
+        <div style="margin-bottom:10px;">Посещений за месяц: <b><?= count($monthVisits) ?></b></div>
+
+        <div style="margin:10px 0 6px;"><b>Топ посетителей за месяц</b></div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+            <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">USER_ID</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Кол-во</th></tr></thead>
+            <tbody>
+            <?php foreach (array_slice($topVisitors, 0, 10, true) as $uid => $cnt): ?>
+                <tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= (int)$uid ?></td><td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= (int)$cnt ?></td></tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+
+        <div style="margin:10px 0 6px;"><b>Последние 50 посещений за месяц</b></div>
         <table style="width:100%;border-collapse:collapse;">
             <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Описание</th></tr></thead>
             <tbody>
-            <?php foreach (array_slice($visits, 0, 100) as $visit): ?>
+            <?php foreach (array_slice($monthVisits, 0, 50) as $visit): ?>
                 <tr>
                     <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= htmlspecialcharsbx((string)$visit['TIMESTAMP_X']) ?></td>
                     <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= htmlspecialcharsbx((string)$visit['DESCRIPTION']) ?></td>
