@@ -29,13 +29,14 @@ function cliErr(string $message): void { fwrite(STDERR, $message . PHP_EOL); }
 
 function parseArgs(array $argv): array
 {
-    $result = ['iblock' => 0, 'element' => 0, 'url' => '', 'comment' => '', 'as_admin' => false];
+    $result = ['iblock' => 0, 'element' => 0, 'url' => '', 'comment' => '', 'as_admin' => false, 'actor_user' => 0];
     foreach (array_slice($argv, 1) as $arg) {
         if (strpos($arg, '--iblock=') === 0) { $result['iblock'] = (int)substr($arg, 9); continue; }
         if (strpos($arg, '--element=') === 0) { $result['element'] = (int)substr($arg, 10); continue; }
         if (strpos($arg, '--url=') === 0) { $result['url'] = trim((string)substr($arg, 6)); continue; }
         if (strpos($arg, '--comment=') === 0) { $result['comment'] = trim((string)substr($arg, 10)); continue; }
         if ($arg === '--as-admin' || $arg === '--admin') { $result['as_admin'] = true; continue; }
+        if (strpos($arg, '--actor-user=') === 0) { $result['actor_user'] = (int)substr($arg, 13); continue; }
     }
     return $result;
 }
@@ -101,14 +102,28 @@ function collectUserCandidates(array $task): array
     $paramsRaw = $task['PARAMETERS'] ?? [];
     $params = is_array($paramsRaw) ? $paramsRaw : @unserialize((string)$paramsRaw, ['allowed_classes' => false]);
     if (!is_array($params)) { $params = []; }
-    array_walk_recursive($params, static function ($value) use (&$candidates) {
-        if (!is_scalar($value)) { return; }
-        $str = (string)$value;
-        if (preg_match('/^user_(\d+)$/i', trim($str), $m) || preg_match('/^(\d+)$/', trim($str), $m)) {
+    $walker = static function ($node, $key = '') use (&$walker, &$candidates) {
+        if (is_array($node)) {
+            foreach ($node as $k => $v) {
+                $walker($v, is_string($k) ? $k : (string)$k);
+            }
+            return;
+        }
+
+        if (!is_scalar($node)) { return; }
+        $str = trim((string)$node);
+        if (preg_match('/^user_(\d+)$/i', $str, $m)) {
             $id = (int)$m[1];
             if ($id > 0) { $candidates[] = $id; }
+            return;
         }
-    });
+
+        if ($key !== '' && preg_match('/user|respons|approv|delegat|actor|owner|author|creator/i', $key) && preg_match('/^(\d+)$/', $str, $m)) {
+            $id = (int)$m[1];
+            if ($id > 0 && $id < 1000000) { $candidates[] = $id; }
+        }
+    };
+    $walker($params);
 
     return array_values(array_unique(array_filter(array_map('intval', $candidates))));
 }
@@ -171,7 +186,7 @@ function getApproveActionCodes(int $taskId): array
     return array_values(array_unique($codes));
 }
 
-function completeTaskApprove(array $task, int $primaryUserId, string $comment = '', bool $asAdmin = false): array
+function completeTaskApprove(array $task, int $primaryUserId, string $comment = '', bool $asAdmin = false, int $forcedActorUserId = 0): array
 {
     $taskId = (int)($task['ID'] ?? 0);
     if ($taskId <= 0 || $primaryUserId <= 0) {
@@ -183,6 +198,10 @@ function completeTaskApprove(array $task, int $primaryUserId, string $comment = 
     $userCandidates = collectUserCandidates($task);
     array_unshift($userCandidates, $primaryUserId);
     $userCandidates = array_values(array_unique(array_filter(array_map('intval', $userCandidates))));
+    if ($forcedActorUserId > 0) {
+        array_unshift($userCandidates, $forcedActorUserId);
+        $userCandidates = array_values(array_unique(array_filter(array_map('intval', $userCandidates))));
+    }
     if ($asAdmin) {
         array_unshift($userCandidates, 1);
         $userCandidates = array_values(array_unique(array_filter(array_map('intval', $userCandidates))));
@@ -264,7 +283,7 @@ if (($iblockId <= 0 || $elementId <= 0) && $args['url'] !== '') {
 }
 
 if ($iblockId <= 0 || $elementId <= 0) {
-    cliErr('Использование: php test_bp_approve.php --iblock=391 --element=3586572 [--comment="..."] [--as-admin]');
+    cliErr('Использование: php test_bp_approve.php --iblock=391 --element=3586572 [--comment="..."] [--as-admin] [--actor-user=3532]');
     cliErr('Или:         php test_bp_approve.php --url="https://.../lists/391/element/0/3586572/"');
     exit(1);
 }
@@ -283,10 +302,12 @@ cliOut('  NAME: ' . (string)($task['NAME'] ?? ''));
 cliOut('  ACTIVITY: ' . (string)($task['ACTIVITY_NAME'] ?? $task['ACTIVITY'] ?? ''));
 cliOut('  USER_ID: ' . $userId);
 $candidatesForLog = collectUserCandidates($task);
-if (!empty($args['as_admin'])) { array_unshift($candidatesForLog, 1); $candidatesForLog = array_values(array_unique($candidatesForLog)); }
+if ((int)$args['actor_user'] > 0) { array_unshift($candidatesForLog, (int)$args['actor_user']); }
+if (!empty($args['as_admin'])) { array_unshift($candidatesForLog, 1); }
+$candidatesForLog = array_values(array_unique(array_filter(array_map('intval', $candidatesForLog))));
 cliOut('  USER_CANDIDATES: ' . implode(', ', $candidatesForLog));
 
-$result = completeTaskApprove($task, $userId, (string)$args['comment'], (bool)$args['as_admin']);
+$result = completeTaskApprove($task, $userId, (string)$args['comment'], (bool)$args['as_admin'], (int)$args['actor_user']);
 if (!$result['OK']) {
     cliErr('Ошибка завершения задания: ' . (string)$result['ERROR']);
     exit(4);
