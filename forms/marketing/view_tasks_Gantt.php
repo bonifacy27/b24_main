@@ -102,63 +102,56 @@ $appendRows = function (int $taskId, int $level = 0, ?int $parentId = null) use 
 foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
 ?>
 <style>
-.gantt-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 0 12px}.gantt-controls{display:flex;gap:8px;align-items:center}.gantt-zoom{width:32px;height:32px;border:1px solid #ccd4e0;background:#fff;border-radius:4px;cursor:pointer;font-size:18px}.gantt-wrap{font-family:Arial,sans-serif;font-size:14px}.gantt-header,.gantt-row{display:grid;grid-template-columns:42% 58%;gap:16px}.gantt-header{font-weight:700;margin-bottom:8px}.gantt-right-scroll{overflow-x:auto;overflow-y:hidden}.gantt-right-inner{min-width:1000px}.gantt-scale{position:relative;height:32px;border:1px solid #d8dde6;background:#f7f9fc;overflow:hidden}.gantt-month{position:absolute;top:0;bottom:0;border-right:1px solid #d8dde6;font-size:12px;color:#5d6472;display:flex;align-items:center;padding-left:4px;box-sizing:border-box}.gantt-row{margin-bottom:8px}.gantt-title{padding:8px 10px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;line-height:1.4}.gantt-line{position:relative;border:1px solid #e2e8f0;background:#fff;border-radius:4px;min-height:40px}.gantt-bar{position:absolute;top:10px;height:20px;background:#4f8df7;border-radius:10px;opacity:.85}.gantt-milestone{position:absolute;top:6px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:14px solid #e74c3c;transform:translateX(-8px)}.toggle{display:inline-block;width:18px;cursor:pointer;color:#5d6472;font-weight:700}.toggle.empty{cursor:default;color:transparent}
+.gantt-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 0 12px}.gantt-controls{display:flex;gap:8px;align-items:center}.gantt-zoom{width:32px;height:32px;border:1px solid #ccd4e0;background:#fff;border-radius:4px;cursor:pointer;font-size:18px}.gantt-wrap{font-family:Arial,sans-serif;font-size:14px}.gantt-layout{display:grid;grid-template-columns:42% 58%;gap:16px}.gantt-left-col{min-width:0}.gantt-right-col{min-width:0}.gantt-left-header{font-weight:700;margin-bottom:8px;padding-top:6px}.gantt-right-scroll{overflow-x:auto;overflow-y:hidden}.gantt-right-inner{min-width:1000px}.gantt-scale{position:relative;height:32px;border:1px solid #d8dde6;background:#f7f9fc;overflow:hidden;margin-bottom:8px}.gantt-month{position:absolute;top:0;bottom:0;border-right:1px solid #d8dde6;font-size:12px;color:#5d6472;display:flex;align-items:center;padding-left:4px;box-sizing:border-box}.task-row{margin-bottom:8px;min-height:40px;display:flex;align-items:center}.gantt-title{padding:8px 10px;border:1px solid #e2e8f0;background:#fff;border-radius:4px;line-height:1.4;width:100%;box-sizing:border-box}.gantt-line{position:relative;border:1px solid #e2e8f0;background:#fff;border-radius:4px;min-height:40px;width:100%}.gantt-bar{position:absolute;top:10px;height:20px;background:#4f8df7;border-radius:10px;opacity:.85}.gantt-milestone{position:absolute;top:6px;width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:14px solid #e74c3c;transform:translateX(-8px)}.toggle{display:inline-block;width:18px;cursor:pointer;color:#5d6472;font-weight:700}.toggle.empty{cursor:default;color:transparent}
 </style>
 <div class="gantt-wrap">
     <form class="gantt-toolbar" method="get">
-        <div class="gantt-controls">
-            <label for="sort">Сортировка:</label>
-            <select name="sort" id="sort" onchange="this.form.submit()">
-                <option value="id" <?= $sort === 'id' ? 'selected' : '' ?>>По ID</option>
-                <option value="deadline" <?= $sort === 'deadline' ? 'selected' : '' ?>>По крайнему сроку</option>
-                <option value="created" <?= $sort === 'created' ? 'selected' : '' ?>>По дате создания</option>
-                <option value="title" <?= $sort === 'title' ? 'selected' : '' ?>>По алфавиту</option>
-            </select>
-        </div>
-        <div class="gantt-controls">
-            <button type="button" class="gantt-zoom" id="zoomOut" title="Уменьшить">−</button>
-            <button type="button" class="gantt-zoom" id="zoomIn" title="Увеличить">+</button>
-        </div>
+        <div class="gantt-controls"><label for="sort">Сортировка:</label><select name="sort" id="sort" onchange="this.form.submit()"><option value="id" <?= $sort === 'id' ? 'selected' : '' ?>>По ID</option><option value="deadline" <?= $sort === 'deadline' ? 'selected' : '' ?>>По крайнему сроку</option><option value="created" <?= $sort === 'created' ? 'selected' : '' ?>>По дате создания</option><option value="title" <?= $sort === 'title' ? 'selected' : '' ?>>По алфавиту</option></select></div>
+        <div class="gantt-controls"><button type="button" class="gantt-zoom" id="zoomOut" title="Уменьшить">−</button><button type="button" class="gantt-zoom" id="zoomIn" title="Увеличить">+</button></div>
     </form>
-    <div class="gantt-header">
-        <div>Задача</div>
-        <div class="gantt-right-scroll" id="ganttScrollHeader"><div class="gantt-right-inner" id="ganttInnerHeader"><div class="gantt-scale">
-            <?php foreach ($months as $month): ?><div class="gantt-month" style="left:<?= $month['left'] ?>%; width:<?= $month['width'] ?>%;"><?= htmlspecialcharsbx($month['label']) ?></div><?php endforeach; ?>
-        </div></div></div>
-    </div>
+
     <?php if (empty($flatRows)): ?>
         <div>Задач со статусами «Ждет выполнения» или «Выполняется» в группе #<?= (int)$groupId ?> не найдено.</div>
     <?php else: ?>
-        <div class="gantt-right-scroll" id="ganttScrollBody"><div class="gantt-right-inner" id="ganttInnerBody">
-        <?php foreach ($flatRows as $row): $task = $row['task']; $level = $row['level'];
-            $leftDays=max(0,(int)floor(($task['CREATED_TS']-$timelineStart)/86400)); $rightDays=max($leftDays+1,(int)ceil(($nowTs-$timelineStart)/86400));
-            $barLeft=($leftDays/$daySpan)*100; $barWidth=(max(1,$rightDays-$leftDays)/$daySpan)*100; $milestoneLeft=null;
-            if ($task['DEADLINE_TS']) {$deadlineOffset=(int)floor(($task['DEADLINE_TS']-$timelineStart)/86400);$milestoneLeft=max(0,min(100,($deadlineOffset/$daySpan)*100));} ?>
-            <div class="gantt-row" data-id="<?= (int)$task['ID'] ?>" data-parent-id="<?= (int)$row['parentId'] ?>">
-                <div class="gantt-title" style="padding-left: <?= 10 + (16 * $level) ?>px;"><?php if ($row['hasChildren']): ?><span class="toggle" data-expanded="1">▾</span><?php else: ?><span class="toggle empty">•</span><?php endif; ?><?= htmlspecialcharsbx($task['TITLE']) ?></div>
-                <div class="gantt-line"><div class="gantt-bar" style="left:<?= $barLeft ?>%;width:<?= $barWidth ?>%;"></div><?php if ($milestoneLeft !== null): ?><div class="gantt-milestone" style="left:<?= $milestoneLeft ?>%;" title="Дедлайн: <?= htmlspecialcharsbx(FormatDate('d.m.Y', $task['DEADLINE_TS'])) ?>"></div><?php endif; ?></div>
-            </div>
-        <?php endforeach; ?>
-        </div></div>
+    <div class="gantt-layout">
+        <div class="gantt-left-col">
+            <div class="gantt-left-header">Задача</div>
+            <?php foreach ($flatRows as $row): $task = $row['task']; $level = $row['level']; ?>
+                <div class="task-row title-row" data-id="<?= (int)$task['ID'] ?>" data-parent-id="<?= (int)$row['parentId'] ?>">
+                    <div class="gantt-title" style="padding-left: <?= 10 + (16 * $level) ?>px;"><?php if ($row['hasChildren']): ?><span class="toggle" data-expanded="1">▾</span><?php else: ?><span class="toggle empty">•</span><?php endif; ?><?= htmlspecialcharsbx($task['TITLE']) ?></div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <div class="gantt-right-col">
+            <div class="gantt-right-scroll" id="ganttScrollHeader"><div class="gantt-right-inner" id="ganttInnerHeader"><div class="gantt-scale"><?php foreach ($months as $month): ?><div class="gantt-month" style="left:<?= $month['left'] ?>%; width:<?= $month['width'] ?>%;"><?= htmlspecialcharsbx($month['label']) ?></div><?php endforeach; ?></div></div></div>
+            <div class="gantt-right-scroll" id="ganttScrollBody"><div class="gantt-right-inner" id="ganttInnerBody">
+                <?php foreach ($flatRows as $row): $task = $row['task'];
+                    $leftDays=max(0,(int)floor(($task['CREATED_TS']-$timelineStart)/86400)); $rightDays=max($leftDays+1,(int)ceil(($nowTs-$timelineStart)/86400));
+                    $barLeft=($leftDays/$daySpan)*100; $barWidth=(max(1,$rightDays-$leftDays)/$daySpan)*100; $milestoneLeft=null;
+                    if ($task['DEADLINE_TS']) {$deadlineOffset=(int)floor(($task['DEADLINE_TS']-$timelineStart)/86400);$milestoneLeft=max(0,min(100,($deadlineOffset/$daySpan)*100));} ?>
+                    <div class="task-row line-row" data-id="<?= (int)$task['ID'] ?>" data-parent-id="<?= (int)$row['parentId'] ?>"><div class="gantt-line"><div class="gantt-bar" style="left:<?= $barLeft ?>%;width:<?= $barWidth ?>%;"></div><?php if ($milestoneLeft !== null): ?><div class="gantt-milestone" style="left:<?= $milestoneLeft ?>%;" title="Дедлайн: <?= htmlspecialcharsbx(FormatDate('d.m.Y', $task['DEADLINE_TS'])) ?>"></div><?php endif; ?></div></div>
+                <?php endforeach; ?>
+            </div></div>
+        </div>
+    </div>
     <?php endif; ?>
 </div>
 <script>
 (function(){
  const header=document.getElementById('ganttScrollHeader'), body=document.getElementById('ganttScrollBody');
- if(body&&header){body.addEventListener('scroll',()=>header.scrollLeft=body.scrollLeft);header.addEventListener('scroll',()=>body.scrollLeft=header.scrollLeft);}
- const rows=[...document.querySelectorAll('.gantt-row')], byParent=new Map();
- rows.forEach(r=>{const p=r.dataset.parentId;if(p&&p!=='0'){if(!byParent.has(p))byParent.set(p,[]);byParent.get(p).push(r);}});
- function setVisibility(parentId, visible){(byParent.get(String(parentId))||[]).forEach(child=>{child.style.display=visible?'grid':'none';const t=child.querySelector('.toggle');setVisibility(child.dataset.id, visible && t && t.dataset.expanded==='1');});}
- document.querySelectorAll('.toggle:not(.empty)').forEach(t=>t.addEventListener('click',()=>{const row=t.closest('.gantt-row'),exp=t.dataset.expanded==='1';t.dataset.expanded=exp?'0':'1';t.textContent=exp?'▸':'▾';setVisibility(row.dataset.id,!exp);}));
+ if(body&&header){body.addEventListener('scroll',()=>header.scrollLeft=body.scrollLeft);header.addEventListener('scroll',()=>body.scrollLeft=header.scrollLeft);} 
+ const titleRows=[...document.querySelectorAll('.title-row')], lineRows=[...document.querySelectorAll('.line-row')];
+ const lineById=new Map(lineRows.map(r=>[r.dataset.id,r]));
+ const byParent=new Map();
+ titleRows.forEach(r=>{const p=r.dataset.parentId;if(p&&p!=='0'){if(!byParent.has(p))byParent.set(p,[]);byParent.get(p).push(r.dataset.id);}});
+ function setVisibility(parentId, visible){(byParent.get(String(parentId))||[]).forEach(id=>{const tr=document.querySelector('.title-row[data-id="'+id+'"]');const lr=lineById.get(id);if(tr)tr.style.display=visible?'flex':'none';if(lr)lr.style.display=visible?'flex':'none';const t=tr?tr.querySelector('.toggle'):null;setVisibility(id, visible && t && t.dataset.expanded==='1');});}
+ document.querySelectorAll('.toggle:not(.empty)').forEach(t=>t.addEventListener('click',()=>{const row=t.closest('.title-row'),exp=t.dataset.expanded==='1';t.dataset.expanded=exp?'0':'1';t.textContent=exp?'▸':'▾';setVisibility(row.dataset.id,!exp);}));
  const innerEls=[document.getElementById('ganttInnerHeader'),document.getElementById('ganttInnerBody')].filter(Boolean);
- let scale=1, baseWidth=1200;
- const daySpan=<?=$daySpan?>, defaultDays=<?=$defaultViewDays?>, defaultStart=<?=max(0,(int)floor(($defaultViewStartTs-$timelineStart)/86400))?>;
+ let scale=1, baseWidth=1200; const daySpan=<?=$daySpan?>, defaultDays=<?=$defaultViewDays?>, defaultStart=<?=max(0,(int)floor(($defaultViewStartTs-$timelineStart)/86400))?>;
  if(defaultDays>0){baseWidth=Math.max(1200,Math.round((daySpan/defaultDays)*window.innerWidth*0.58));}
  function applyZoom(){const w=Math.round(baseWidth*scale);innerEls.forEach(e=>e.style.width=w+'px');}
- applyZoom();
- if(body){const initialScroll=(defaultStart/daySpan)*(baseWidth*scale);body.scrollLeft=Math.max(0,initialScroll);header.scrollLeft=body.scrollLeft;}
- document.getElementById('zoomIn')?.addEventListener('click',()=>{scale=Math.min(5,scale*1.2);applyZoom();});
- document.getElementById('zoomOut')?.addEventListener('click',()=>{scale=Math.max(0.4,scale/1.2);applyZoom();});
+ applyZoom(); if(body){const initialScroll=(defaultStart/daySpan)*(baseWidth*scale);body.scrollLeft=Math.max(0,initialScroll);header.scrollLeft=body.scrollLeft;}
+ document.getElementById('zoomIn')?.addEventListener('click',()=>{scale=Math.min(5,scale*1.2);applyZoom();}); document.getElementById('zoomOut')?.addEventListener('click',()=>{scale=Math.max(0.4,scale/1.2);applyZoom();});
 })();
 </script>
 <?php require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php'); ?>
