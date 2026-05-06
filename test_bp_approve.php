@@ -29,12 +29,13 @@ function cliErr(string $message): void { fwrite(STDERR, $message . PHP_EOL); }
 
 function parseArgs(array $argv): array
 {
-    $result = ['iblock' => 0, 'element' => 0, 'url' => '', 'comment' => ''];
+    $result = ['iblock' => 0, 'element' => 0, 'url' => '', 'comment' => '', 'as_admin' => false];
     foreach (array_slice($argv, 1) as $arg) {
         if (strpos($arg, '--iblock=') === 0) { $result['iblock'] = (int)substr($arg, 9); continue; }
         if (strpos($arg, '--element=') === 0) { $result['element'] = (int)substr($arg, 10); continue; }
         if (strpos($arg, '--url=') === 0) { $result['url'] = trim((string)substr($arg, 6)); continue; }
         if (strpos($arg, '--comment=') === 0) { $result['comment'] = trim((string)substr($arg, 10)); continue; }
+        if ($arg === '--as-admin' || $arg === '--admin') { $result['as_admin'] = true; continue; }
     }
     return $result;
 }
@@ -170,7 +171,7 @@ function getApproveActionCodes(int $taskId): array
     return array_values(array_unique($codes));
 }
 
-function completeTaskApprove(array $task, int $primaryUserId, string $comment = ''): array
+function completeTaskApprove(array $task, int $primaryUserId, string $comment = '', bool $asAdmin = false): array
 {
     $taskId = (int)($task['ID'] ?? 0);
     if ($taskId <= 0 || $primaryUserId <= 0) {
@@ -182,6 +183,10 @@ function completeTaskApprove(array $task, int $primaryUserId, string $comment = 
     $userCandidates = collectUserCandidates($task);
     array_unshift($userCandidates, $primaryUserId);
     $userCandidates = array_values(array_unique(array_filter(array_map('intval', $userCandidates))));
+    if ($asAdmin) {
+        array_unshift($userCandidates, 1);
+        $userCandidates = array_values(array_unique(array_filter(array_map('intval', $userCandidates))));
+    }
 
     foreach ($userCandidates as $actorUserId) {
         foreach ($approveCodes as $approveCode) {
@@ -259,7 +264,7 @@ if (($iblockId <= 0 || $elementId <= 0) && $args['url'] !== '') {
 }
 
 if ($iblockId <= 0 || $elementId <= 0) {
-    cliErr('Использование: php test_bp_approve.php --iblock=391 --element=3586572 [--comment="..."]');
+    cliErr('Использование: php test_bp_approve.php --iblock=391 --element=3586572 [--comment="..."] [--as-admin]');
     cliErr('Или:         php test_bp_approve.php --url="https://.../lists/391/element/0/3586572/"');
     exit(1);
 }
@@ -277,9 +282,11 @@ cliOut('  TASK_ID: ' . (int)$task['ID']);
 cliOut('  NAME: ' . (string)($task['NAME'] ?? ''));
 cliOut('  ACTIVITY: ' . (string)($task['ACTIVITY_NAME'] ?? $task['ACTIVITY'] ?? ''));
 cliOut('  USER_ID: ' . $userId);
-cliOut('  USER_CANDIDATES: ' . implode(', ', collectUserCandidates($task)));
+$candidatesForLog = collectUserCandidates($task);
+if (!empty($args['as_admin'])) { array_unshift($candidatesForLog, 1); $candidatesForLog = array_values(array_unique($candidatesForLog)); }
+cliOut('  USER_CANDIDATES: ' . implode(', ', $candidatesForLog));
 
-$result = completeTaskApprove($task, $userId, (string)$args['comment']);
+$result = completeTaskApprove($task, $userId, (string)$args['comment'], (bool)$args['as_admin']);
 if (!$result['OK']) {
     cliErr('Ошибка завершения задания: ' . (string)$result['ERROR']);
     exit(4);
