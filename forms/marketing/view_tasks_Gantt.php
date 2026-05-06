@@ -170,11 +170,6 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
     $topVisitorsAll = [];
     $totalVisitsAll = 0;
 
-    $selectedStatsUser = isset($_GET['stats_user']) ? (int)$_GET['stats_user'] : 0;
-    $selectedStatsPeriod = isset($_GET['stats_period']) && $_GET['stats_period'] === 'all' ? 'all' : 'month';
-    $page = max(1, (int)($_GET['stats_page'] ?? 1));
-    $perPage = 20;
-
     $userNameCache = [];
     $getUserName = static function (int $userId) use (&$userNameCache): string {
         if ($userId <= 0) {
@@ -235,33 +230,10 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
 
     arsort($topVisitorsMonth);
     arsort($topVisitorsAll);
-
-    $selectedVisits = [];
-    if ($selectedStatsUser > 0) {
-        $baseSql = "SELECT ID, TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='" . $eventTypeSql . "' AND ITEM_ID='" . $itemSql . "'";
-        if ($selectedStatsPeriod === 'month') {
-            $baseSql .= " AND TIMESTAMP_X >= '" . $DB->ForSql($periodMonthStartSql) . "'";
-        }
-        $baseSql .= " ORDER BY ID DESC";
-        $rsSelected = $DB->Query($baseSql);
-        while ($event = $rsSelected->Fetch()) {
-            $uid = (int)$event['USER_ID'];
-            if ($uid <= 0 && preg_match('/USER_ID=(\d+);/', (string)$event['DESCRIPTION'], $m)) {
-                $uid = (int)$m[1];
-            }
-            if ($uid === $selectedStatsUser) {
-                $selectedVisits[] = $event;
-            }
-        }
-    }
-
-    $selectedTotal = count($selectedVisits);
-    $selectedOffset = ($page - 1) * $perPage;
-    $selectedPageVisits = array_slice($selectedVisits, $selectedOffset, $perPage);
-    $selectedPages = max(1, (int)ceil($selectedTotal / $perPage));
     ?>
-    <div style="margin-top:24px;padding:12px;border:1px solid #d8dde6;border-radius:6px;background:#fff;">
-        <h3 style="margin:0 0 12px;">Статистика посещений</h3>
+    <details id="statsBlock" style="margin-top:24px;border:1px solid #d8dde6;border-radius:6px;background:#fff;">
+        <summary style="cursor:pointer;padding:12px;font-weight:700;">Статистика посещений</summary>
+        <div style="padding:0 12px 12px;">
         <div style="margin-bottom:6px;">Период «за месяц»: с <?= htmlspecialcharsbx($periodMonthStartSql) ?> по сегодня</div>
         <div style="margin-bottom:6px;">Общее кол-во посещений (за все время): <b><?= $totalVisitsAll ?></b></div>
         <div style="margin-bottom:10px;">Посещений за месяц: <b><?= count($monthVisits) ?></b></div>
@@ -272,7 +244,7 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
             <tbody>
             <?php foreach (array_slice($topVisitorsMonth, 0, 10, true) as $uid => $cnt): ?>
                 <tr>
-                    <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><a href="?<?= htmlspecialcharsbx(http_build_query(array_merge($_GET, ['stats_user' => (int)$uid, 'stats_period' => 'month', 'stats_page' => 1])) ) ?>"><?= htmlspecialcharsbx($getUserName((int)$uid)) ?></a></td>
+                    <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><a href="#" class="stats-user-link" data-user-id="<?= (int)$uid ?>" data-period="month"><?= htmlspecialcharsbx($getUserName((int)$uid)) ?></a></td>
                     <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= (int)$cnt ?></td>
                 </tr>
             <?php endforeach; ?>
@@ -285,32 +257,13 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
             <tbody>
             <?php foreach (array_slice($topVisitorsAll, 0, 10, true) as $uid => $cnt): ?>
                 <tr>
-                    <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><a href="?<?= htmlspecialcharsbx(http_build_query(array_merge($_GET, ['stats_user' => (int)$uid, 'stats_period' => 'all', 'stats_page' => 1])) ) ?>"><?= htmlspecialcharsbx($getUserName((int)$uid)) ?></a></td>
+                    <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><a href="#" class="stats-user-link" data-user-id="<?= (int)$uid ?>" data-period="all"><?= htmlspecialcharsbx($getUserName((int)$uid)) ?></a></td>
                     <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= (int)$cnt ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
         </table>
-
-        <?php if ($selectedStatsUser > 0): ?>
-            <div style="margin:10px 0 6px;"><b>Посещения пользователя: <?= htmlspecialcharsbx($getUserName($selectedStatsUser)) ?> (<?= $selectedStatsPeriod === 'month' ? 'за месяц' : 'за все время' ?>)</b></div>
-            <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
-                <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th></tr></thead>
-                <tbody>
-                <?php foreach ($selectedPageVisits as $visit): ?>
-                    <tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= htmlspecialcharsbx((string)$visit['TIMESTAMP_X']) ?></td><td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= htmlspecialcharsbx($getUserName($selectedStatsUser)) ?></td></tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-            <div>
-                <?php for ($i = 1; $i <= $selectedPages; $i++): ?>
-                    <?php if ($i === $page): ?><b><?= $i ?></b>
-                    <?php else: ?><a href="?<?= htmlspecialcharsbx(http_build_query(array_merge($_GET, ['stats_user' => $selectedStatsUser, 'stats_period' => $selectedStatsPeriod, 'stats_page' => $i])) ) ?>"><?= $i ?></a>
-                    <?php endif; ?>
-                    <?= $i < $selectedPages ? ' | ' : '' ?>
-                <?php endfor; ?>
-            </div>
-        <?php endif; ?>
+        <div id="statsUserVisits" style="margin:10px 0 6px;"></div>
 
         <div style="margin:10px 0 6px;"><b>Последние 50 посещений за месяц</b></div>
         <table style="width:100%;border-collapse:collapse;">
@@ -324,7 +277,8 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
             <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
+        </div>
+    </details>
 <?php endif; ?>
 
 </div>
@@ -343,6 +297,23 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
  if(defaultDays>0){baseWidth=Math.max(1200,Math.round((daySpan/defaultDays)*window.innerWidth*0.58));}
  innerEls.forEach(e=>e.style.width=baseWidth+'px');
  if(body){const initialScroll=(defaultStart/daySpan)*baseWidth;body.scrollLeft=Math.max(0,initialScroll);header.scrollLeft=body.scrollLeft;}
+
+ const monthVisitData = <?=CUtil::PhpToJSObject(array_map(static function($v) use ($getUserName){return ['ts'=>(string)$v['TIMESTAMP_X'],'uid'=>(int)($v['VISITOR_UID']??0),'name'=>$getUserName((int)($v['VISITOR_UID']??0))];}, $monthVisits))?>;
+ const allVisitData = <?=CUtil::PhpToJSObject((function() use ($DB,$eventTypeSql,$itemSql,$getUserName){$items=[];$rs=$DB->Query("SELECT TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='".$eventTypeSql."' AND ITEM_ID='".$itemSql."' ORDER BY ID DESC");while($e=$rs->Fetch()){$uid=(int)$e['USER_ID'];if($uid<=0&&preg_match('/USER_ID=(\d+);/',(string)$e['DESCRIPTION'],$m)){$uid=(int)$m[1];}$items[]=['ts'=>(string)$e['TIMESTAMP_X'],'uid'=>$uid,'name'=>$getUserName($uid)];}return $items;})())?>;
+ const visitsContainer = document.getElementById('statsUserVisits');
+ function renderVisits(uid, period, page){
+   const perPage=20; const data=(period==='all'?allVisitData:monthVisitData).filter(v=>v.uid===uid);
+   const pages=Math.max(1,Math.ceil(data.length/perPage)); const p=Math.min(Math.max(page||1,1),pages);
+   const slice=data.slice((p-1)*perPage,p*perPage);
+   let html=`<b>Посещения пользователя: ${slice[0]?slice[0].name:'ID '+uid} (${period==='all'?'за все время':'за месяц'})</b>`;
+   html+=`<table style="width:100%;border-collapse:collapse;margin:8px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th></tr></thead><tbody>`;
+   slice.forEach(v=>{html+=`<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.ts}</td><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.name}</td></tr>`}); html+='</tbody></table><div>';
+   for(let i=1;i<=pages;i++){html+= i===p?`<b>${i}</b>`:`<a href="#" class="stats-page" data-user-id="${uid}" data-period="${period}" data-page="${i}">${i}</a>`; if(i<pages) html+=' | ';}
+   html+='</div>'; visitsContainer.innerHTML=html;
+ }
+ document.querySelectorAll('.stats-user-link').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();renderVisits(parseInt(a.dataset.userId,10),a.dataset.period,1);document.getElementById('statsBlock').open=true;}));
+ document.addEventListener('click',e=>{const t=e.target.closest('.stats-page'); if(!t) return; e.preventDefault(); renderVisits(parseInt(t.dataset.userId,10),t.dataset.period,parseInt(t.dataset.page,10));});
+
 })();
 </script>
 <?php require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php'); ?>
