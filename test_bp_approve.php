@@ -11,6 +11,7 @@
 define('NO_KEEP_STATISTIC', true);
 define('NO_AGENT_STATISTIC', true);
 define('NO_AGENT_CHECK', true);
+define('NOT_CHECK_PERMISSIONS', true);
 
 if (PHP_SAPI !== 'cli') {
     fwrite(STDERR, "Ошибка: скрипт можно запускать только из CLI.\n");
