@@ -14,12 +14,12 @@ if (!Loader::includeModule('tasks')) {
 }
 
 $groupId = 163;
-$inProgressStatus = 3;
+$activeStatuses = [2, 3];
 $nowTs = time();
 
 $rows = TaskTable::getList([
     'select' => ['ID', 'TITLE', 'CREATED_DATE', 'DEADLINE', 'PARENT_ID', 'GROUP_ID', 'STATUS'],
-    'filter' => ['=GROUP_ID' => $groupId, '=STATUS' => $inProgressStatus],
+    'filter' => ['=GROUP_ID' => $groupId, '@STATUS' => $activeStatuses],
     'order' => ['CREATED_DATE' => 'ASC', 'ID' => 'ASC'],
 ])->fetchAll();
 
@@ -96,7 +96,7 @@ foreach ($rootTasks as $taskId) {
     </div>
 
     <?php if (empty($flatRows)): ?>
-        <div>Задач со статусом «В работе» в группе #<?= (int)$groupId ?> не найдено.</div>
+        <div>Задач со статусами «Ждет выполнения» или «Выполняется» в группе #<?= (int)$groupId ?> не найдено.</div>
     <?php else: ?>
         <?php foreach ($flatRows as $row): ?>
             <?php
