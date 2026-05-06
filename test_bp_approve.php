@@ -63,7 +63,7 @@ function extractNumericUserId($raw): int
 
 function findWaitingTaskByDocument(int $iblockId, int $elementId): ?array
 {
-    $select = ['ID', 'NAME', 'DOCUMENT_ID', 'WORKFLOW_ID', 'ACTIVITY_NAME', 'ACTIVITY', 'USER_ID', 'USERS', 'PARAMETERS', 'STATUS'];
+    $select = ['ID', 'NAME', 'DOCUMENT_ID', 'WORKFLOW_ID', 'ACTIVITY_NAME', 'ACTIVITY', 'USER_ID', 'USERS', 'PARAMETERS', 'STATUS', 'CREATED_BY', 'MODIFIED_BY', 'OVERDUE_DATE'];
     $docCandidates = [
         ['lists', 'BizprocDocument', 'lists_' . $iblockId . '_' . $elementId],
         ['iblock', 'CIBlockDocument', 'iblock_' . $iblockId . '_' . $elementId],
@@ -77,6 +77,39 @@ function findWaitingTaskByDocument(int $iblockId, int $elementId): ?array
         }
     }
     return null;
+}
+
+
+function collectUserCandidates(array $task): array
+{
+    $candidates = [];
+    foreach (['USER_ID', 'CREATED_BY', 'MODIFIED_BY'] as $key) {
+        $id = extractNumericUserId($task[$key] ?? 0);
+        if ($id > 0) { $candidates[] = $id; }
+    }
+
+    $users = $task['USERS'] ?? [];
+    if (!is_array($users)) {
+        $users = preg_split('/[,\s;|]+/u', (string)$users) ?: [];
+    }
+    foreach ($users as $u) {
+        $id = extractNumericUserId($u);
+        if ($id > 0) { $candidates[] = $id; }
+    }
+
+    $paramsRaw = $task['PARAMETERS'] ?? [];
+    $params = is_array($paramsRaw) ? $paramsRaw : @unserialize((string)$paramsRaw, ['allowed_classes' => false]);
+    if (!is_array($params)) { $params = []; }
+    array_walk_recursive($params, static function ($value) use (&$candidates) {
+        if (!is_scalar($value)) { return; }
+        $str = (string)$value;
+        if (preg_match('/^user_(\d+)$/i', trim($str), $m) || preg_match('/^(\d+)$/', trim($str), $m)) {
+            $id = (int)$m[1];
+            if ($id > 0) { $candidates[] = $id; }
+        }
+    });
+
+    return array_values(array_unique(array_filter(array_map('intval', $candidates))));
 }
 
 function taskIsRunning(int $taskId): bool
@@ -137,37 +170,41 @@ function getApproveActionCodes(int $taskId): array
     return array_values(array_unique($codes));
 }
 
-function completeTaskApprove(array $task, int $userId, string $comment = ''): array
+function completeTaskApprove(array $task, int $primaryUserId, string $comment = ''): array
 {
     $taskId = (int)($task['ID'] ?? 0);
-    if ($taskId <= 0 || $userId <= 0) {
+    if ($taskId <= 0 || $primaryUserId <= 0) {
         return ['OK' => false, 'ERROR' => 'Некорректные taskId/userId'];
     }
 
     $errors = [];
     $approveCodes = getApproveActionCodes($taskId);
+    $userCandidates = collectUserCandidates($task);
+    array_unshift($userCandidates, $primaryUserId);
+    $userCandidates = array_values(array_unique(array_filter(array_map('intval', $userCandidates))));
 
-    foreach ($approveCodes as $approveCode) {
-        $requestFields = [
-            'USER_ID' => $userId,
-            'REAL_USER_ID' => $userId,
-            'COMMENT' => $comment,
-            'task_comment' => $comment,
-            'ACTION' => $approveCode,
-            $approveCode => 'Y',
-        ];
+    foreach ($userCandidates as $actorUserId) {
+        foreach ($approveCodes as $approveCode) {
+            $requestFields = [
+                'USER_ID' => $actorUserId,
+                'REAL_USER_ID' => $actorUserId,
+                'COMMENT' => $comment,
+                'task_comment' => $comment,
+                'ACTION' => $approveCode,
+                $approveCode => 'Y',
+            ];
+            if ($approveCode !== 'approve') {
+                $requestFields['approve'] = 'Y';
+            }
 
-        if ($approveCode !== 'approve') {
-            $requestFields['approve'] = 'Y';
-        }
-
-        try {
-            $tmpErr = [];
-            CBPDocument::PostTaskForm($taskId, $userId, $requestFields, $tmpErr, '', $userId);
-            if (!empty($tmpErr)) { $errors = array_merge($errors, $tmpErr); }
-            if (!taskIsRunning($taskId)) { return ['OK' => true, 'ERROR' => '']; }
-        } catch (\Throwable $e) {
-            $errors[] = ['message' => $e->getMessage()];
+            try {
+                $tmpErr = [];
+                CBPDocument::PostTaskForm($taskId, $actorUserId, $requestFields, $tmpErr, '', $actorUserId);
+                if (!empty($tmpErr)) { $errors = array_merge($errors, $tmpErr); }
+                if (!taskIsRunning($taskId)) { return ['OK' => true, 'ERROR' => '']; }
+            } catch (\Throwable $e) {
+                $errors[] = ['message' => $e->getMessage()];
+            }
         }
     }
 
@@ -175,13 +212,15 @@ function completeTaskApprove(array $task, int $userId, string $comment = ''): ar
         $workflowId = (string)($task['WORKFLOW_ID'] ?? '');
         $activity = (string)($task['ACTIVITY_NAME'] ?? $task['ACTIVITY'] ?? '');
         if ($workflowId !== '' && $activity !== '' && class_exists('CBPRuntime') && method_exists('CBPRuntime', 'SendExternalEvent')) {
-            CBPRuntime::SendExternalEvent($workflowId, $activity, [
-                'USER_ID' => $userId,
-                'REAL_USER_ID' => $userId,
-                'COMMENT' => $comment,
-                'APPROVE' => true,
-            ]);
-            if (!taskIsRunning($taskId)) { return ['OK' => true, 'ERROR' => '']; }
+            foreach ($userCandidates as $actorUserId) {
+                CBPRuntime::SendExternalEvent($workflowId, $activity, [
+                    'USER_ID' => $actorUserId,
+                    'REAL_USER_ID' => $actorUserId,
+                    'COMMENT' => $comment,
+                    'APPROVE' => true,
+                ]);
+                if (!taskIsRunning($taskId)) { return ['OK' => true, 'ERROR' => '']; }
+            }
         }
     } catch (\Throwable $e) {
         $errors[] = ['message' => $e->getMessage()];
@@ -190,8 +229,15 @@ function completeTaskApprove(array $task, int $userId, string $comment = ''): ar
     try {
         if (method_exists('CBPTaskService', 'DoTask')) {
             foreach ($approveCodes as $approveCode) {
-                CBPTaskService::DoTask($taskId, $userId, ['ACTION' => $approveCode, $approveCode => 'Y', 'COMMENT' => $comment, 'task_comment' => $comment]);
-                if (!taskIsRunning($taskId)) { return ['OK' => true, 'ERROR' => '']; }
+                foreach ($userCandidates as $actorUserId) {
+                    CBPTaskService::DoTask($taskId, $actorUserId, [
+                        'ACTION' => $approveCode,
+                        $approveCode => 'Y',
+                        'COMMENT' => $comment,
+                        'task_comment' => $comment,
+                    ]);
+                    if (!taskIsRunning($taskId)) { return ['OK' => true, 'ERROR' => '']; }
+                }
             }
         }
     } catch (\Throwable $e) {
@@ -201,6 +247,7 @@ function completeTaskApprove(array $task, int $userId, string $comment = ''): ar
     $flat = flattenErrors($errors);
     return ['OK' => false, 'ERROR' => $flat !== '' ? $flat : 'Задание осталось в статусе Running'];
 }
+
 
 $args = parseArgs($argv);
 $iblockId = (int)$args['iblock'];
@@ -230,6 +277,7 @@ cliOut('  TASK_ID: ' . (int)$task['ID']);
 cliOut('  NAME: ' . (string)($task['NAME'] ?? ''));
 cliOut('  ACTIVITY: ' . (string)($task['ACTIVITY_NAME'] ?? $task['ACTIVITY'] ?? ''));
 cliOut('  USER_ID: ' . $userId);
+cliOut('  USER_CANDIDATES: ' . implode(', ', collectUserCandidates($task)));
 
 $result = completeTaskApprove($task, $userId, (string)$args['comment']);
 if (!$result['OK']) {
