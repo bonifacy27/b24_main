@@ -16,6 +16,20 @@ if (!Loader::includeModule('tasks')) {
 $groupId = 163;
 $activeStatuses = [2, 3];
 $nowTs = time();
+
+$eventType = 'MARKETING_GANTT_VISIT';
+$targetStatsUserId = 3532;
+$currentUserId = (int)$USER->GetID();
+if ($currentUserId > 0) {
+    CEventLog::Add([
+        'SEVERITY' => 'SECURITY',
+        'AUDIT_TYPE_ID' => $eventType,
+        'MODULE_ID' => 'main',
+        'ITEM_ID' => 'forms/marketing/view_tasks_Gantt.php',
+        'DESCRIPTION' => sprintf('USER_ID=%d; GROUP_ID=%d; URI=%s', $currentUserId, $groupId, (string)($_SERVER['REQUEST_URI'] ?? '')),
+    ]);
+}
+
 $sort = isset($_GET['sort']) ? (string)$_GET['sort'] : 'id';
 $sortOptions = ['id', 'deadline', 'created', 'title'];
 if (!in_array($sort, $sortOptions, true)) {
@@ -147,6 +161,39 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
         </div>
     </div>
     <?php endif; ?>
+
+<?php if ($currentUserId === $targetStatsUserId): ?>
+    <?php
+    $visits = [];
+    $by = 'ID';
+    $order = 'DESC';
+    $rsEvents = CEventLog::GetList($by, $order, [
+        'AUDIT_TYPE_ID' => $eventType,
+        'ITEM_ID' => 'forms/marketing/view_tasks_Gantt.php',
+    ]);
+    while ($event = $rsEvents->Fetch()) {
+        if (strpos((string)$event['DESCRIPTION'], 'USER_ID=' . $targetStatsUserId . ';') === 0) {
+            $visits[] = $event;
+        }
+    }
+    ?>
+    <div style="margin-top:24px;padding:12px;border:1px solid #d8dde6;border-radius:6px;background:#fff;">
+        <h3 style="margin:0 0 12px;">Статистика посещений пользователя #<?= $targetStatsUserId ?></h3>
+        <div style="margin-bottom:8px;">Всего входов: <b><?= count($visits) ?></b></div>
+        <table style="width:100%;border-collapse:collapse;">
+            <thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Описание</th></tr></thead>
+            <tbody>
+            <?php foreach (array_slice($visits, 0, 100) as $visit): ?>
+                <tr>
+                    <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= htmlspecialcharsbx((string)$visit['TIMESTAMP_X']) ?></td>
+                    <td style="border-bottom:1px solid #f1f5f9;padding:6px;"><?= htmlspecialcharsbx((string)$visit['DESCRIPTION']) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+<?php endif; ?>
+
 </div>
 <script>
 (function(){
