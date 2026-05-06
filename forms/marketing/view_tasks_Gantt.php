@@ -164,30 +164,28 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
 
 <?php if (in_array($currentUserId, $statsViewerUserIds, true)): ?>
     <?php
-    $monthStart = date('01.m.Y 00:00:00');
+    $monthStartSql = date('Y-m-01 00:00:00');
     $monthVisits = [];
     $topVisitors = [];
     $totalVisitsAll = 0;
 
-    $by = 'ID';
-    $order = 'DESC';
-    $rsEventsAll = CEventLog::GetList($by, $order, [
-        'AUDIT_TYPE_ID' => $eventType,
-        'ITEM_ID' => 'forms/marketing/view_tasks_Gantt.php',
-    ]);
-    while ($event = $rsEventsAll->Fetch()) {
-        $totalVisitsAll++;
+    $eventTypeSql = $DB->ForSql($eventType);
+    $itemSql = $DB->ForSql('forms/marketing/view_tasks_Gantt.php');
+
+    $sqlTotal = "SELECT COUNT(1) AS CNT FROM b_event_log WHERE AUDIT_TYPE_ID='" . $eventTypeSql . "' AND ITEM_ID='" . $itemSql . "'";
+    $rsTotal = $DB->Query($sqlTotal);
+    if ($rowTotal = $rsTotal->Fetch()) {
+        $totalVisitsAll = (int)$rowTotal['CNT'];
     }
 
-    $rsEventsMonth = CEventLog::GetList($by, $order, [
-        'AUDIT_TYPE_ID' => $eventType,
-        'ITEM_ID' => 'forms/marketing/view_tasks_Gantt.php',
-        '>=TIMESTAMP_X' => $monthStart,
-    ]);
-
-    while ($event = $rsEventsMonth->Fetch()) {
-        if (preg_match('/USER_ID=(\d+);/', (string)$event['DESCRIPTION'], $m)) {
+    $sqlMonth = "SELECT ID, TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='" . $eventTypeSql . "' AND ITEM_ID='" . $itemSql . "' AND TIMESTAMP_X >= '" . $DB->ForSql($monthStartSql) . "' ORDER BY ID DESC";
+    $rsMonth = $DB->Query($sqlMonth);
+    while ($event = $rsMonth->Fetch()) {
+        $uid = (int)$event['USER_ID'];
+        if ($uid <= 0 && preg_match('/USER_ID=(\d+);/', (string)$event['DESCRIPTION'], $m)) {
             $uid = (int)$m[1];
+        }
+        if ($uid > 0) {
             if (!isset($topVisitors[$uid])) {
                 $topVisitors[$uid] = 0;
             }
@@ -199,7 +197,7 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
     ?>
     <div style="margin-top:24px;padding:12px;border:1px solid #d8dde6;border-radius:6px;background:#fff;">
         <h3 style="margin:0 0 12px;">Статистика посещений</h3>
-        <div style="margin-bottom:6px;">Период: текущий месяц (с <?= htmlspecialcharsbx($monthStart) ?>)</div>
+        <div style="margin-bottom:6px;">Период: текущий месяц (с <?= htmlspecialcharsbx($monthStartSql) ?>)</div>
         <div style="margin-bottom:6px;">Общее кол-во посещений (за все время): <b><?= $totalVisitsAll ?></b></div>
         <div style="margin-bottom:10px;">Посещений за месяц: <b><?= count($monthVisits) ?></b></div>
 
