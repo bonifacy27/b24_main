@@ -316,10 +316,12 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
    function renderVisits(uid, period, page){
      const visitsContainer = period === 'all' ? visitsContainerAll : visitsContainerMonth;
      if (!visitsContainer) { return; }
-     const perPage=20; const data=(period==='all'?allVisitData:monthVisitData).filter(v=>v.uid===uid);
+     const perPage=20; const normalizedUid = Number(uid);
+     const data=(period==='all'?allVisitData:monthVisitData).filter(v=>Number(v.uid)===normalizedUid);
      const pages=Math.max(1,Math.ceil(data.length/perPage)); const p=Math.min(Math.max(page||1,1),pages);
      const slice=data.slice((p-1)*perPage,p*perPage);
-     let html=`<b>Посещения пользователя: ${slice[0]?slice[0].name:'ID '+uid} (${period==='all'?'за все время':'за месяц'})</b>`;
+     const displayName = data[0] && data[0].name ? data[0].name : ('ID ' + normalizedUid);
+     let html=`<b>Посещения пользователя: ${displayName} (${period==='all'?'за все время':'за месяц'})</b>`;
      html+=`<table style="width:100%;border-collapse:collapse;margin:8px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Дата/время</th><th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:6px;">Пользователь</th></tr></thead><tbody>`;
      slice.forEach(v=>{html+=`<tr><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.ts}</td><td style="border-bottom:1px solid #f1f5f9;padding:6px;">${v.name}</td></tr>`}); html+='</tbody></table><div>';
      for(let i=1;i<=pages;i++){html+= i===p?`<b>${i}</b>`:`<a href="#" class="stats-page" data-user-id="${uid}" data-period="${period}" data-page="${i}">${i}</a>`; if(i<pages) html+=' | ';}
