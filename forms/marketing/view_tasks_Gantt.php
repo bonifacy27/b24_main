@@ -19,8 +19,9 @@ $nowTs = time();
 
 $eventType = 'MARKETING_GANTT_VISIT';
 $statsViewerUserIds = [3532];
+$skipLoggingUserIds = [3532];
 $currentUserId = (int)$USER->GetID();
-if ($currentUserId > 0) {
+if ($currentUserId > 0 && !in_array($currentUserId, $skipLoggingUserIds, true)) {
     CEventLog::Add([
         'SEVERITY' => 'SECURITY',
         'AUDIT_TYPE_ID' => $eventType,
