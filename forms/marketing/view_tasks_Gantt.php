@@ -302,12 +302,24 @@ foreach ($rootTasks as $taskId) $appendRows($taskId, 0, null);
  const byParent=new Map();
  titleRows.forEach(r=>{const p=r.dataset.parentId;if(p&&p!=='0'){if(!byParent.has(p))byParent.set(p,[]);byParent.get(p).push(r.dataset.id);}});
  function setVisibility(parentId, visible){(byParent.get(String(parentId))||[]).forEach(id=>{const tr=document.querySelector('.title-row[data-id="'+id+'"]');const lr=lineById.get(id);if(tr)tr.style.display=visible?'flex':'none';if(lr)lr.style.display=visible?'flex':'none';const t=tr?tr.querySelector('.toggle'):null;setVisibility(id, visible && t && t.dataset.expanded==='1');});}
- document.querySelectorAll('.toggle:not(.empty)').forEach(t=>t.addEventListener('click',()=>{const row=t.closest('.title-row'),exp=t.dataset.expanded==='1';t.dataset.expanded=exp?'0':'1';t.textContent=exp?'▸':'▾';setVisibility(row.dataset.id,!exp);}));
+ function syncRowHeights(){
+   titleRows.forEach(tr=>{
+     const lr=lineById.get(tr.dataset.id);
+     if(!lr){return;}
+     tr.style.height='auto'; lr.style.height='auto';
+     if (tr.style.display === 'none' || lr.style.display === 'none') { return; }
+     const h=Math.max(tr.offsetHeight, lr.offsetHeight, 40);
+     tr.style.height=h+'px'; lr.style.height=h+'px';
+   });
+ }
+ document.querySelectorAll('.toggle:not(.empty)').forEach(t=>t.addEventListener('click',()=>{const row=t.closest('.title-row'),exp=t.dataset.expanded==='1';t.dataset.expanded=exp?'0':'1';t.textContent=exp?'▸':'▾';setVisibility(row.dataset.id,!exp);syncRowHeights();}));
  const innerEls=[document.getElementById('ganttInnerHeader'),document.getElementById('ganttInnerBody')].filter(Boolean);
  let baseWidth=1200; const daySpan=<?=$daySpan?>, defaultDays=<?=$defaultViewDays?>, defaultStart=<?=max(0,(int)floor(($defaultViewStartTs-$timelineStart)/86400))?>;
  if(defaultDays>0){baseWidth=Math.max(1200,Math.round((daySpan/defaultDays)*window.innerWidth*0.58));}
  innerEls.forEach(e=>e.style.width=baseWidth+'px');
  if(body){const initialScroll=(defaultStart/daySpan)*baseWidth;body.scrollLeft=Math.max(0,initialScroll);header.scrollLeft=body.scrollLeft;}
+ syncRowHeights();
+ window.addEventListener('resize', syncRowHeights);
 
  const monthVisitData = <?= in_array($currentUserId, $statsViewerUserIds, true) ? CUtil::PhpToJSObject(array_map(static function($v) use ($getUserName){return ['ts'=>(string)$v['TIMESTAMP_X'],'uid'=>(int)($v['VISITOR_UID']??0),'name'=>$getUserName((int)($v['VISITOR_UID']??0))];}, $monthVisits)) : '[]' ?>;
  const allVisitData = <?= in_array($currentUserId, $statsViewerUserIds, true) ? CUtil::PhpToJSObject((function() use ($DB,$eventTypeSql,$itemSql,$getUserName){$items=[];$rs=$DB->Query("SELECT TIMESTAMP_X, USER_ID, DESCRIPTION FROM b_event_log WHERE AUDIT_TYPE_ID='".$eventTypeSql."' AND ITEM_ID='".$itemSql."' ORDER BY ID DESC");while($e=$rs->Fetch()){$uid=(int)$e['USER_ID'];if($uid<=0&&preg_match('/USER_ID=(\d+);/',(string)$e['DESCRIPTION'],$m)){$uid=(int)$m[1];}$items[]=['ts'=>(string)$e['TIMESTAMP_X'],'uid'=>$uid,'name'=>$getUserName($uid)];}return $items;})()) : '[]' ?>;
