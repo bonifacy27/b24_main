@@ -32,4 +32,4 @@ $MESS["BPAR_PD_COMMENT_REQUIRED_YR"] = "Только при отклонении
 $MESS["BPAR_PD_DELEGATION_TYPE"] = "Тип делегирования";
 
 $MESS["BPAR_PD_TASK_BUTTON3_MESSAGE"] = "Текст кнопки при доработке";
-?>
+$MESS["BPAR_PD_SHOW_TASK_LINK_IN_EMAIL"] = "Отображать ссылку в e-mail";
