@@ -399,7 +399,7 @@ function loadCommentFileUsages(int $userId): array
         INNER JOIN b_tasks t ON ft.XML_ID LIKE 'TASK_%' AND t.ID = CAST(SUBSTRING(ft.XML_ID, 6) AS UNSIGNED)
         INNER JOIN b_file f ON f.ID = utm.VALUE_INT
         WHERE uf.ENTITY_ID = 'FORUM_MESSAGE'
-          AND uf.FIELD_NAME = 'UF_FORUM_MESSAGE_DOC'
+          AND uf.FIELD_NAME IN ('UF_FORUM_MESSAGE_DOC', 'UF_FORUM_MESSAGE_DOCS')
           AND {$filter}
     ";
 
@@ -494,7 +494,7 @@ function loadCommentDiskAttachedUsages(int $userId): array
         $storageFilter = "do.STORAGE_ID IN (SELECT s.ID FROM b_disk_storage s WHERE s.ENTITY_TYPE = 'USER' AND s.ENTITY_ID = {$userId})";
     }
 
-    $connectorCommentFilter = "dao.ENTITY_TYPE LIKE '%Comment%'";
+    $connectorCommentFilter = "(dao.ENTITY_TYPE LIKE '%Comment%' OR dao.ENTITY_TYPE LIKE '%ForumMessage%')";
     $where = '(' . $authorFilter . ' OR ' . $storageFilter . ') AND ' . $connectorCommentFilter;
 
     $sql = "
