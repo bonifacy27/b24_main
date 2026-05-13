@@ -120,8 +120,38 @@ function sortLink(string $column, string $title, int $selectedUserId, string $cu
 {
     $nextDir = ($currentSort === $column && $currentDir === 'ASC') ? 'DESC' : 'ASC';
     $arrow = $currentSort === $column ? ($currentDir === 'ASC' ? ' ▲' : ' ▼') : '';
-    $url = '?user_id=' . $selectedUserId . '&sort=' . urlencode($column) . '&dir=' . urlencode($nextDir);
+    $url = '?user_id=' . $selectedUserId . '&sort=' . urlencode($column) . '&dir=' . urlencode($nextDir) . '&page=1';
     return '<a href="' . h($url) . '">' . h($title . $arrow) . '</a>';
+}
+
+function renderPagination(int $selectedUserId, string $sort, string $dir, int $currentPage, int $totalPages): string
+{
+    if ($totalPages <= 1) {
+        return '';
+    }
+
+    $buildUrl = static function (int $page) use ($selectedUserId, $sort, $dir): string {
+        return '?user_id=' . $selectedUserId . '&sort=' . urlencode($sort) . '&dir=' . urlencode($dir) . '&page=' . $page;
+    };
+
+    $html = '<div class="pagination">';
+    if ($currentPage > 1) {
+        $html .= '<a href="' . h($buildUrl($currentPage - 1)) . '">← Назад</a> ';
+    }
+
+    for ($page = 1; $page <= $totalPages; $page++) {
+        if ($page === $currentPage) {
+            $html .= '<strong>' . $page . '</strong> ';
+        } else {
+            $html .= '<a href="' . h($buildUrl($page)) . '">' . $page . '</a> ';
+        }
+    }
+
+    if ($currentPage < $totalPages) {
+        $html .= '<a href="' . h($buildUrl($currentPage + 1)) . '">Вперёд →</a>';
+    }
+
+    return $html . '</div>';
 }
 
 function buildUserFilter(string $fileAlias, array $candidates, int $fallbackUserId): string
@@ -966,6 +996,15 @@ $user = getUserById($selectedUserId);
 $sortParams = getSortParams($_GET);
 $rows = $selectedUserId > 0 ? buildRows($selectedUserId) : [];
 $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
+$pageSize = 50;
+$currentPage = isset($_REQUEST['page']) ? max(1, (int)$_REQUEST['page']) : 1;
+$totalItems = count($rows);
+$totalPages = max(1, (int)ceil($totalItems / $pageSize));
+if ($currentPage > $totalPages) {
+    $currentPage = $totalPages;
+}
+$offset = ($currentPage - 1) * $pageSize;
+$rowsPage = array_slice($rows, $offset, $pageSize, true);
 \CJSCore::Init(['ui.entity-selector']);
 ?>
 <!doctype html>
@@ -983,6 +1022,8 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
         .warn { padding: 10px; background: #fff8e1; border: 1px solid #f0d68a; margin: 12px 0; }
         .controls { margin-top: 10px; }
         .nowrap { white-space: nowrap; }
+        .pagination { margin: 12px 0; }
+        .pagination a, .pagination strong { margin-right: 8px; }
     </style>
 </head>
 <body>
@@ -1025,10 +1066,15 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
         <?= bitrix_sessid_post() ?>
         <input type="hidden" name="action" value="delete">
         <input type="hidden" name="user_id" value="<?= (int)$selectedUserId ?>">
+        <input type="hidden" name="sort" value="<?= h($sortParams['sort']) ?>">
+        <input type="hidden" name="dir" value="<?= h($sortParams['dir']) ?>">
+        <input type="hidden" name="page" value="<?= (int)$currentPage ?>">
 
         <div class="controls">
             <button type="submit" onclick="return confirm('Удалить выбранные файлы? Действие необратимо.');">Удалить выбранные файлы</button>
         </div>
+        <div class="muted">Всего файлов: <?= (int)$totalItems ?>. Страница <?= (int)$currentPage ?> из <?= (int)$totalPages ?>.</div>
+        <?= renderPagination($selectedUserId, $sortParams['sort'], $sortParams['dir'], $currentPage, $totalPages) ?>
 
         <table>
             <thead>
@@ -1044,10 +1090,10 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
             </tr>
             </thead>
             <tbody>
-            <?php if (empty($rows)): ?>
+            <?php if (empty($rowsPage)): ?>
                 <tr><td colspan="8" class="muted">Ничего не найдено для выбранного пользователя.</td></tr>
             <?php else: ?>
-                <?php foreach ($rows as $fileBlock): ?>
+                <?php foreach ($rowsPage as $fileBlock): ?>
                     <?php
                     $file = $fileBlock['FILE'];
                     $displayName = $file['ORIGINAL_NAME'] !== '' ? $file['ORIGINAL_NAME'] : $file['FILE_NAME'];
@@ -1085,6 +1131,7 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
             <?php endif; ?>
             </tbody>
         </table>
+        <?= renderPagination($selectedUserId, $sortParams['sort'], $sortParams['dir'], $currentPage, $totalPages) ?>
     </form>
 <?php endif; ?>
 <script>
