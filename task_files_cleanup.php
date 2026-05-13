@@ -88,6 +88,22 @@ function getSortParams(array $request): array
     return ['sort' => $sort, 'dir' => $dir];
 }
 
+function getFilterParams(array $request): array
+{
+    $status = isset($request['task_status']) ? (int)$request['task_status'] : 0;
+    $dateFrom = isset($request['usage_date_from']) ? trim((string)$request['usage_date_from']) : '';
+    $dateTo = isset($request['usage_date_to']) ? trim((string)$request['usage_date_to']) : '';
+
+    if ($dateFrom !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+        $dateFrom = '';
+    }
+    if ($dateTo !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+        $dateTo = '';
+    }
+
+    return ['task_status' => $status, 'usage_date_from' => $dateFrom, 'usage_date_to' => $dateTo];
+}
+
 function sortRows(array $rows, string $sort, string $dir): array
 {
     $multiplier = $dir === 'ASC' ? 1 : -1;
@@ -118,9 +134,16 @@ function sortRows(array $rows, string $sort, string $dir): array
 
 function sortLink(string $column, string $title, int $selectedUserId, string $currentSort, string $currentDir): string
 {
+    $filters = getFilterParams($_GET);
     $nextDir = ($currentSort === $column && $currentDir === 'ASC') ? 'DESC' : 'ASC';
     $arrow = $currentSort === $column ? ($currentDir === 'ASC' ? ' ▲' : ' ▼') : '';
-    $url = '?user_id=' . $selectedUserId . '&sort=' . urlencode($column) . '&dir=' . urlencode($nextDir) . '&page=1';
+    $url = '?user_id=' . $selectedUserId
+        . '&sort=' . urlencode($column)
+        . '&dir=' . urlencode($nextDir)
+        . '&task_status=' . (int)$filters['task_status']
+        . '&usage_date_from=' . urlencode($filters['usage_date_from'])
+        . '&usage_date_to=' . urlencode($filters['usage_date_to'])
+        . '&page=1';
     return '<a href="' . h($url) . '">' . h($title . $arrow) . '</a>';
 }
 
@@ -130,8 +153,15 @@ function renderPagination(int $selectedUserId, string $sort, string $dir, int $c
         return '';
     }
 
-    $buildUrl = static function (int $page) use ($selectedUserId, $sort, $dir): string {
-        return '?user_id=' . $selectedUserId . '&sort=' . urlencode($sort) . '&dir=' . urlencode($dir) . '&page=' . $page;
+    $filterParams = getFilterParams($_GET);
+    $buildUrl = static function (int $page) use ($selectedUserId, $sort, $dir, $filterParams): string {
+        return '?user_id=' . $selectedUserId
+            . '&sort=' . urlencode($sort)
+            . '&dir=' . urlencode($dir)
+            . '&task_status=' . (int)$filterParams['task_status']
+            . '&usage_date_from=' . urlencode($filterParams['usage_date_from'])
+            . '&usage_date_to=' . urlencode($filterParams['usage_date_to'])
+            . '&page=' . $page;
     };
 
     $html = '<div class="pagination">';
@@ -152,6 +182,45 @@ function renderPagination(int $selectedUserId, string $sort, string $dir, int $c
     }
 
     return $html . '</div>';
+}
+
+function applyRowsFilter(array $rows, array $filters): array
+{
+    $status = (int)($filters['task_status'] ?? 0);
+    $dateFrom = (string)($filters['usage_date_from'] ?? '');
+    $dateTo = (string)($filters['usage_date_to'] ?? '');
+    $dateFromTs = $dateFrom !== '' ? strtotime($dateFrom . ' 00:00:00') : null;
+    $dateToTs = $dateTo !== '' ? strtotime($dateTo . ' 23:59:59') : null;
+
+    $filtered = [];
+    foreach ($rows as $fileId => $fileBlock) {
+        $matchedUsages = [];
+        foreach (($fileBlock['USAGES'] ?? []) as $usage) {
+            if ($status > 0 && (int)($usage['TASK_STATUS'] ?? 0) !== $status) {
+                continue;
+            }
+            if ($dateFromTs !== null || $dateToTs !== null) {
+                $usageTs = strtotime((string)($usage['USAGE_DATE'] ?? ''));
+                if ($usageTs === false) {
+                    continue;
+                }
+                if ($dateFromTs !== null && $usageTs < $dateFromTs) {
+                    continue;
+                }
+                if ($dateToTs !== null && $usageTs > $dateToTs) {
+                    continue;
+                }
+            }
+            $matchedUsages[] = $usage;
+        }
+
+        if (!empty($matchedUsages) || ($status === 0 && $dateFromTs === null && $dateToTs === null)) {
+            $fileBlock['USAGES'] = !empty($matchedUsages) ? $matchedUsages : ($fileBlock['USAGES'] ?? []);
+            $filtered[$fileId] = $fileBlock;
+        }
+    }
+
+    return $filtered;
 }
 
 function buildUserFilter(string $fileAlias, array $candidates, int $fallbackUserId): string
@@ -994,7 +1063,9 @@ if ($action === 'delete' && check_bitrix_sessid()) {
 
 $user = getUserById($selectedUserId);
 $sortParams = getSortParams($_GET);
+$filterParams = getFilterParams($_GET);
 $rows = $selectedUserId > 0 ? buildRows($selectedUserId) : [];
+$rows = applyRowsFilter($rows, $filterParams);
 $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
 $pageSize = 50;
 $currentPage = isset($_REQUEST['page']) ? max(1, (int)$_REQUEST['page']) : 1;
@@ -1035,6 +1106,17 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
     <input type="number" id="user_id_manual" value="<?= (int)$selectedUserId ?>" min="1" placeholder="ID пользователя" style="width: 140px;">
     <button type="button" id="user_picker_btn">Выбрать пользователя</button>
     <span id="user_picker_label" class="muted"><?= $user ? h($user['LABEL']) : 'Не выбран' ?></span>
+    <label for="task_status"><strong>Статус:</strong></label>
+    <select name="task_status" id="task_status">
+        <option value="0">Все</option>
+        <?php foreach ($statusMap as $statusId => $statusTitle): ?>
+            <option value="<?= (int)$statusId ?>" <?= (int)$filterParams['task_status'] === (int)$statusId ? 'selected' : '' ?>><?= h($statusTitle) ?></option>
+        <?php endforeach; ?>
+    </select>
+    <label for="usage_date_from"><strong>Использование с:</strong></label>
+    <input type="date" name="usage_date_from" id="usage_date_from" value="<?= h($filterParams['usage_date_from']) ?>">
+    <label for="usage_date_to"><strong>по:</strong></label>
+    <input type="date" name="usage_date_to" id="usage_date_to" value="<?= h($filterParams['usage_date_to']) ?>">
     <button type="submit">Сканировать</button>
 </form>
 
@@ -1069,9 +1151,14 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
         <input type="hidden" name="sort" value="<?= h($sortParams['sort']) ?>">
         <input type="hidden" name="dir" value="<?= h($sortParams['dir']) ?>">
         <input type="hidden" name="page" value="<?= (int)$currentPage ?>">
+        <input type="hidden" name="task_status" value="<?= (int)$filterParams['task_status'] ?>">
+        <input type="hidden" name="usage_date_from" value="<?= h($filterParams['usage_date_from']) ?>">
+        <input type="hidden" name="usage_date_to" value="<?= h($filterParams['usage_date_to']) ?>">
 
         <div class="controls">
             <button type="submit" onclick="return confirm('Удалить выбранные файлы? Действие необратимо.');">Удалить выбранные файлы</button>
+            <button type="button" id="check_all_page">Отметить все на странице</button>
+            <button type="button" id="uncheck_all_page">Снять все на странице</button>
         </div>
         <div class="muted">Всего файлов: <?= (int)$totalItems ?>. Страница <?= (int)$currentPage ?> из <?= (int)$totalPages ?>.</div>
         <?= renderPagination($selectedUserId, $sortParams['sort'], $sortParams['dir'], $currentPage, $totalPages) ?>
@@ -1113,7 +1200,7 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
                     ?>
                     <?php foreach ($usages as $usage): ?>
                         <tr>
-                            <td class="nowrap"><label><input type="checkbox" name="delete_files[]" value="<?= (int)$file['FILE_ID'] ?>"> ID <?= (int)$file['FILE_ID'] ?></label></td>
+                            <td class="nowrap"><label><input type="checkbox" class="file-checkbox" name="delete_files[]" value="<?= (int)$file['FILE_ID'] ?>"> ID <?= (int)$file['FILE_ID'] ?></label></td>
                             <td>
                                 <div><strong><?= h($displayName) ?></strong></div>
                                 <div class="muted"><?= h($path) ?></div>
@@ -1189,3 +1276,17 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
 </script>
 </body>
 </html>
+    const pageCheckboxes = document.querySelectorAll('.file-checkbox');
+    const checkAllBtn = document.getElementById('check_all_page');
+    const uncheckAllBtn = document.getElementById('uncheck_all_page');
+
+    if (checkAllBtn) {
+        checkAllBtn.addEventListener('click', function () {
+            pageCheckboxes.forEach(function (cb) { cb.checked = true; });
+        });
+    }
+    if (uncheckAllBtn) {
+        uncheckAllBtn.addEventListener('click', function () {
+            pageCheckboxes.forEach(function (cb) { cb.checked = false; });
+        });
+    }
