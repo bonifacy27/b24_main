@@ -1274,8 +1274,8 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
     });
 })();
 </script>
-</body>
-</html>
+<script>
+(function () {
     const pageCheckboxes = document.querySelectorAll('.file-checkbox');
     const checkAllBtn = document.getElementById('check_all_page');
     const uncheckAllBtn = document.getElementById('uncheck_all_page');
@@ -1290,3 +1290,7 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
             pageCheckboxes.forEach(function (cb) { cb.checked = false; });
         });
     }
+})();
+</script>
+</body>
+</html>
