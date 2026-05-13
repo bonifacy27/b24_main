@@ -835,15 +835,67 @@ function deleteFiles(array $fileIds): array
             continue;
         }
 
+        cleanupTaskAttachmentLinksByFileId($fileId);
+
         if (\CFile::Delete($fileId)) {
             $deleted[] = $fileId;
         } else {
+            $diag = buildDeleteDiagnostic($fileId);
+
+            // Для "битых" файлов (запись в b_file уже отсутствует) считаем операцию успешной,
+            // если удалось очистить оставшиеся привязки к Disk-объектам/версиям.
+            if (!$diag['FILE_ROW_EXISTS'] && (int)($diag['DISK_VERSION_LINKS'] ?? 0) === 0 && (int)($diag['DISK_OBJECT_LINKS'] ?? 0) === 0) {
+                $deleted[] = $fileId;
+                continue;
+            }
+
             $errors[] = $fileId;
-            $diagnostics[$fileId] = buildDeleteDiagnostic($fileId);
+            $diagnostics[$fileId] = $diag;
         }
     }
 
     return ['deleted' => $deleted, 'errors' => $errors, 'diagnostics' => $diagnostics];
+}
+
+function cleanupTaskAttachmentLinksByFileId(int $fileId): void
+{
+    if ($fileId <= 0 || !hasTable('b_disk_attached_object') || !hasTable('b_disk_object')) {
+        return;
+    }
+
+    $connection = Application::getConnection();
+    $objectIds = [];
+
+    if (hasColumn('b_disk_object', 'FILE_ID')) {
+        $res = $connection->query("SELECT ID FROM b_disk_object WHERE FILE_ID = {$fileId}");
+        while ($row = $res->fetch()) {
+            $objectIds[] = (int)$row['ID'];
+        }
+    }
+
+    if (hasTable('b_disk_version') && hasColumn('b_disk_version', 'FILE_ID') && hasColumn('b_disk_version', 'OBJECT_ID')) {
+        $res = $connection->query("SELECT OBJECT_ID FROM b_disk_version WHERE FILE_ID = {$fileId}");
+        while ($row = $res->fetch()) {
+            $objectIds[] = (int)$row['OBJECT_ID'];
+        }
+    }
+
+    $objectIds = array_values(array_unique(array_filter($objectIds)));
+    if (empty($objectIds)) {
+        return;
+    }
+
+    $idsSql = implode(',', array_map('intval', $objectIds));
+    $entityFilter = "(ENTITY_TYPE LIKE '%Task%' OR ENTITY_TYPE LIKE '%Comment%' OR ENTITY_TYPE LIKE '%ForumMessage%')";
+    $connection->queryExecute("DELETE FROM b_disk_attached_object WHERE OBJECT_ID IN ({$idsSql}) AND {$entityFilter}");
+
+    if (hasTable('b_disk_version') && hasColumn('b_disk_version', 'OBJECT_ID') && hasColumn('b_disk_version', 'FILE_ID')) {
+        $connection->queryExecute("DELETE FROM b_disk_version WHERE OBJECT_ID IN ({$idsSql}) AND FILE_ID = {$fileId}");
+    }
+
+    if (hasColumn('b_disk_object', 'FILE_ID')) {
+        $connection->queryExecute("DELETE FROM b_disk_object WHERE ID IN ({$idsSql}) AND FILE_ID = {$fileId}");
+    }
 }
 
 function buildDeleteDiagnostic(int $fileId): array
