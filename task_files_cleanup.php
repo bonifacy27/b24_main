@@ -88,6 +88,22 @@ function getSortParams(array $request): array
     return ['sort' => $sort, 'dir' => $dir];
 }
 
+function getFilterParams(array $request): array
+{
+    $status = isset($request['task_status']) ? (int)$request['task_status'] : 0;
+    $dateFrom = isset($request['usage_date_from']) ? trim((string)$request['usage_date_from']) : '';
+    $dateTo = isset($request['usage_date_to']) ? trim((string)$request['usage_date_to']) : '';
+
+    if ($dateFrom !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+        $dateFrom = '';
+    }
+    if ($dateTo !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+        $dateTo = '';
+    }
+
+    return ['task_status' => $status, 'usage_date_from' => $dateFrom, 'usage_date_to' => $dateTo];
+}
+
 function sortRows(array $rows, string $sort, string $dir): array
 {
     $multiplier = $dir === 'ASC' ? 1 : -1;
@@ -118,10 +134,93 @@ function sortRows(array $rows, string $sort, string $dir): array
 
 function sortLink(string $column, string $title, int $selectedUserId, string $currentSort, string $currentDir): string
 {
+    $filters = getFilterParams($_GET);
     $nextDir = ($currentSort === $column && $currentDir === 'ASC') ? 'DESC' : 'ASC';
     $arrow = $currentSort === $column ? ($currentDir === 'ASC' ? ' ▲' : ' ▼') : '';
-    $url = '?user_id=' . $selectedUserId . '&sort=' . urlencode($column) . '&dir=' . urlencode($nextDir);
+    $url = '?user_id=' . $selectedUserId
+        . '&sort=' . urlencode($column)
+        . '&dir=' . urlencode($nextDir)
+        . '&task_status=' . (int)$filters['task_status']
+        . '&usage_date_from=' . urlencode($filters['usage_date_from'])
+        . '&usage_date_to=' . urlencode($filters['usage_date_to'])
+        . '&page=1';
     return '<a href="' . h($url) . '">' . h($title . $arrow) . '</a>';
+}
+
+function renderPagination(int $selectedUserId, string $sort, string $dir, int $currentPage, int $totalPages): string
+{
+    if ($totalPages <= 1) {
+        return '';
+    }
+
+    $filterParams = getFilterParams($_GET);
+    $buildUrl = static function (int $page) use ($selectedUserId, $sort, $dir, $filterParams): string {
+        return '?user_id=' . $selectedUserId
+            . '&sort=' . urlencode($sort)
+            . '&dir=' . urlencode($dir)
+            . '&task_status=' . (int)$filterParams['task_status']
+            . '&usage_date_from=' . urlencode($filterParams['usage_date_from'])
+            . '&usage_date_to=' . urlencode($filterParams['usage_date_to'])
+            . '&page=' . $page;
+    };
+
+    $html = '<div class="pagination">';
+    if ($currentPage > 1) {
+        $html .= '<a href="' . h($buildUrl($currentPage - 1)) . '">← Назад</a> ';
+    }
+
+    for ($page = 1; $page <= $totalPages; $page++) {
+        if ($page === $currentPage) {
+            $html .= '<strong>' . $page . '</strong> ';
+        } else {
+            $html .= '<a href="' . h($buildUrl($page)) . '">' . $page . '</a> ';
+        }
+    }
+
+    if ($currentPage < $totalPages) {
+        $html .= '<a href="' . h($buildUrl($currentPage + 1)) . '">Вперёд →</a>';
+    }
+
+    return $html . '</div>';
+}
+
+function applyRowsFilter(array $rows, array $filters): array
+{
+    $status = (int)($filters['task_status'] ?? 0);
+    $dateFrom = (string)($filters['usage_date_from'] ?? '');
+    $dateTo = (string)($filters['usage_date_to'] ?? '');
+    $dateFromTs = $dateFrom !== '' ? strtotime($dateFrom . ' 00:00:00') : null;
+    $dateToTs = $dateTo !== '' ? strtotime($dateTo . ' 23:59:59') : null;
+
+    $filtered = [];
+    foreach ($rows as $fileId => $fileBlock) {
+        $matchedUsages = [];
+        foreach (($fileBlock['USAGES'] ?? []) as $usage) {
+            if ($status > 0 && (int)($usage['TASK_STATUS'] ?? 0) !== $status) {
+                continue;
+            }
+            if ($dateFromTs !== null || $dateToTs !== null) {
+                $usageTs = strtotime((string)($usage['USAGE_DATE'] ?? ''));
+                if ($usageTs === false) {
+                    continue;
+                }
+                if ($dateFromTs !== null && $usageTs < $dateFromTs) {
+                    continue;
+                }
+                if ($dateToTs !== null && $usageTs > $dateToTs) {
+                    continue;
+                }
+            }
+            $matchedUsages[] = $usage;
+        }
+
+        if (!empty($matchedUsages) || ($status === 0 && $dateFromTs === null && $dateToTs === null)) {
+            $fileBlock['USAGES'] = !empty($matchedUsages) ? $matchedUsages : ($fileBlock['USAGES'] ?? []);
+            $filtered[$fileId] = $fileBlock;
+        }
+    }
+
+    return $filtered;
 }
 
 function buildUserFilter(string $fileAlias, array $candidates, int $fallbackUserId): string
@@ -399,7 +498,7 @@ function loadCommentFileUsages(int $userId): array
         INNER JOIN b_tasks t ON ft.XML_ID LIKE 'TASK_%' AND t.ID = CAST(SUBSTRING(ft.XML_ID, 6) AS UNSIGNED)
         INNER JOIN b_file f ON f.ID = utm.VALUE_INT
         WHERE uf.ENTITY_ID = 'FORUM_MESSAGE'
-          AND uf.FIELD_NAME = 'UF_FORUM_MESSAGE_DOC'
+          AND uf.FIELD_NAME IN ('UF_FORUM_MESSAGE_DOC', 'UF_FORUM_MESSAGE_DOCS')
           AND {$filter}
     ";
 
@@ -494,7 +593,7 @@ function loadCommentDiskAttachedUsages(int $userId): array
         $storageFilter = "do.STORAGE_ID IN (SELECT s.ID FROM b_disk_storage s WHERE s.ENTITY_TYPE = 'USER' AND s.ENTITY_ID = {$userId})";
     }
 
-    $connectorCommentFilter = "dao.ENTITY_TYPE LIKE '%Comment%'";
+    $connectorCommentFilter = "(dao.ENTITY_TYPE LIKE '%Comment%' OR dao.ENTITY_TYPE LIKE '%ForumMessage%')";
     $where = '(' . $authorFilter . ' OR ' . $storageFilter . ') AND ' . $connectorCommentFilter;
 
     $sql = "
@@ -835,15 +934,67 @@ function deleteFiles(array $fileIds): array
             continue;
         }
 
+        cleanupTaskAttachmentLinksByFileId($fileId);
+
         if (\CFile::Delete($fileId)) {
             $deleted[] = $fileId;
         } else {
+            $diag = buildDeleteDiagnostic($fileId);
+
+            // Для "битых" файлов (запись в b_file уже отсутствует) считаем операцию успешной,
+            // если удалось очистить оставшиеся привязки к Disk-объектам/версиям.
+            if (!$diag['FILE_ROW_EXISTS'] && (int)($diag['DISK_VERSION_LINKS'] ?? 0) === 0 && (int)($diag['DISK_OBJECT_LINKS'] ?? 0) === 0) {
+                $deleted[] = $fileId;
+                continue;
+            }
+
             $errors[] = $fileId;
-            $diagnostics[$fileId] = buildDeleteDiagnostic($fileId);
+            $diagnostics[$fileId] = $diag;
         }
     }
 
     return ['deleted' => $deleted, 'errors' => $errors, 'diagnostics' => $diagnostics];
+}
+
+function cleanupTaskAttachmentLinksByFileId(int $fileId): void
+{
+    if ($fileId <= 0 || !hasTable('b_disk_attached_object') || !hasTable('b_disk_object')) {
+        return;
+    }
+
+    $connection = Application::getConnection();
+    $objectIds = [];
+
+    if (hasColumn('b_disk_object', 'FILE_ID')) {
+        $res = $connection->query("SELECT ID FROM b_disk_object WHERE FILE_ID = {$fileId}");
+        while ($row = $res->fetch()) {
+            $objectIds[] = (int)$row['ID'];
+        }
+    }
+
+    if (hasTable('b_disk_version') && hasColumn('b_disk_version', 'FILE_ID') && hasColumn('b_disk_version', 'OBJECT_ID')) {
+        $res = $connection->query("SELECT OBJECT_ID FROM b_disk_version WHERE FILE_ID = {$fileId}");
+        while ($row = $res->fetch()) {
+            $objectIds[] = (int)$row['OBJECT_ID'];
+        }
+    }
+
+    $objectIds = array_values(array_unique(array_filter($objectIds)));
+    if (empty($objectIds)) {
+        return;
+    }
+
+    $idsSql = implode(',', array_map('intval', $objectIds));
+    $entityFilter = "(ENTITY_TYPE LIKE '%Task%' OR ENTITY_TYPE LIKE '%Comment%' OR ENTITY_TYPE LIKE '%ForumMessage%')";
+    $connection->queryExecute("DELETE FROM b_disk_attached_object WHERE OBJECT_ID IN ({$idsSql}) AND {$entityFilter}");
+
+    if (hasTable('b_disk_version') && hasColumn('b_disk_version', 'OBJECT_ID') && hasColumn('b_disk_version', 'FILE_ID')) {
+        $connection->queryExecute("DELETE FROM b_disk_version WHERE OBJECT_ID IN ({$idsSql}) AND FILE_ID = {$fileId}");
+    }
+
+    if (hasColumn('b_disk_object', 'FILE_ID')) {
+        $connection->queryExecute("DELETE FROM b_disk_object WHERE ID IN ({$idsSql}) AND FILE_ID = {$fileId}");
+    }
 }
 
 function buildDeleteDiagnostic(int $fileId): array
@@ -912,8 +1063,19 @@ if ($action === 'delete' && check_bitrix_sessid()) {
 
 $user = getUserById($selectedUserId);
 $sortParams = getSortParams($_GET);
+$filterParams = getFilterParams($_GET);
 $rows = $selectedUserId > 0 ? buildRows($selectedUserId) : [];
+$rows = applyRowsFilter($rows, $filterParams);
 $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
+$pageSize = 50;
+$currentPage = isset($_REQUEST['page']) ? max(1, (int)$_REQUEST['page']) : 1;
+$totalItems = count($rows);
+$totalPages = max(1, (int)ceil($totalItems / $pageSize));
+if ($currentPage > $totalPages) {
+    $currentPage = $totalPages;
+}
+$offset = ($currentPage - 1) * $pageSize;
+$rowsPage = array_slice($rows, $offset, $pageSize, true);
 \CJSCore::Init(['ui.entity-selector']);
 ?>
 <!doctype html>
@@ -931,6 +1093,8 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
         .warn { padding: 10px; background: #fff8e1; border: 1px solid #f0d68a; margin: 12px 0; }
         .controls { margin-top: 10px; }
         .nowrap { white-space: nowrap; }
+        .pagination { margin: 12px 0; }
+        .pagination a, .pagination strong { margin-right: 8px; }
     </style>
 </head>
 <body>
@@ -942,6 +1106,17 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
     <input type="number" id="user_id_manual" value="<?= (int)$selectedUserId ?>" min="1" placeholder="ID пользователя" style="width: 140px;">
     <button type="button" id="user_picker_btn">Выбрать пользователя</button>
     <span id="user_picker_label" class="muted"><?= $user ? h($user['LABEL']) : 'Не выбран' ?></span>
+    <label for="task_status"><strong>Статус:</strong></label>
+    <select name="task_status" id="task_status">
+        <option value="0">Все</option>
+        <?php foreach ($statusMap as $statusId => $statusTitle): ?>
+            <option value="<?= (int)$statusId ?>" <?= (int)$filterParams['task_status'] === (int)$statusId ? 'selected' : '' ?>><?= h($statusTitle) ?></option>
+        <?php endforeach; ?>
+    </select>
+    <label for="usage_date_from"><strong>Использование с:</strong></label>
+    <input type="date" name="usage_date_from" id="usage_date_from" value="<?= h($filterParams['usage_date_from']) ?>">
+    <label for="usage_date_to"><strong>по:</strong></label>
+    <input type="date" name="usage_date_to" id="usage_date_to" value="<?= h($filterParams['usage_date_to']) ?>">
     <button type="submit">Сканировать</button>
 </form>
 
@@ -973,10 +1148,20 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
         <?= bitrix_sessid_post() ?>
         <input type="hidden" name="action" value="delete">
         <input type="hidden" name="user_id" value="<?= (int)$selectedUserId ?>">
+        <input type="hidden" name="sort" value="<?= h($sortParams['sort']) ?>">
+        <input type="hidden" name="dir" value="<?= h($sortParams['dir']) ?>">
+        <input type="hidden" name="page" value="<?= (int)$currentPage ?>">
+        <input type="hidden" name="task_status" value="<?= (int)$filterParams['task_status'] ?>">
+        <input type="hidden" name="usage_date_from" value="<?= h($filterParams['usage_date_from']) ?>">
+        <input type="hidden" name="usage_date_to" value="<?= h($filterParams['usage_date_to']) ?>">
 
         <div class="controls">
             <button type="submit" onclick="return confirm('Удалить выбранные файлы? Действие необратимо.');">Удалить выбранные файлы</button>
+            <button type="button" id="check_all_page">Отметить все на странице</button>
+            <button type="button" id="uncheck_all_page">Снять все на странице</button>
         </div>
+        <div class="muted">Всего файлов: <?= (int)$totalItems ?>. Страница <?= (int)$currentPage ?> из <?= (int)$totalPages ?>.</div>
+        <?= renderPagination($selectedUserId, $sortParams['sort'], $sortParams['dir'], $currentPage, $totalPages) ?>
 
         <table>
             <thead>
@@ -992,10 +1177,10 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
             </tr>
             </thead>
             <tbody>
-            <?php if (empty($rows)): ?>
+            <?php if (empty($rowsPage)): ?>
                 <tr><td colspan="8" class="muted">Ничего не найдено для выбранного пользователя.</td></tr>
             <?php else: ?>
-                <?php foreach ($rows as $fileBlock): ?>
+                <?php foreach ($rowsPage as $fileBlock): ?>
                     <?php
                     $file = $fileBlock['FILE'];
                     $displayName = $file['ORIGINAL_NAME'] !== '' ? $file['ORIGINAL_NAME'] : $file['FILE_NAME'];
@@ -1015,7 +1200,7 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
                     ?>
                     <?php foreach ($usages as $usage): ?>
                         <tr>
-                            <td class="nowrap"><label><input type="checkbox" name="delete_files[]" value="<?= (int)$file['FILE_ID'] ?>"> ID <?= (int)$file['FILE_ID'] ?></label></td>
+                            <td class="nowrap"><label><input type="checkbox" class="file-checkbox" name="delete_files[]" value="<?= (int)$file['FILE_ID'] ?>"> ID <?= (int)$file['FILE_ID'] ?></label></td>
                             <td>
                                 <div><strong><?= h($displayName) ?></strong></div>
                                 <div class="muted"><?= h($path) ?></div>
@@ -1033,6 +1218,7 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
             <?php endif; ?>
             </tbody>
         </table>
+        <?= renderPagination($selectedUserId, $sortParams['sort'], $sortParams['dir'], $currentPage, $totalPages) ?>
     </form>
 <?php endif; ?>
 <script>
@@ -1090,3 +1276,17 @@ $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
 </script>
 </body>
 </html>
+    const pageCheckboxes = document.querySelectorAll('.file-checkbox');
+    const checkAllBtn = document.getElementById('check_all_page');
+    const uncheckAllBtn = document.getElementById('uncheck_all_page');
+
+    if (checkAllBtn) {
+        checkAllBtn.addEventListener('click', function () {
+            pageCheckboxes.forEach(function (cb) { cb.checked = true; });
+        });
+    }
+    if (uncheckAllBtn) {
+        uncheckAllBtn.addEventListener('click', function () {
+            pageCheckboxes.forEach(function (cb) { cb.checked = false; });
+        });
+    }
