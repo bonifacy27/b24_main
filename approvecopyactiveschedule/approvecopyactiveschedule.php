@@ -109,6 +109,7 @@ class CBPapprovecopyactiveschedule
 			"TaskId" => 0,
 			"NotifyText" => "",
 			"NotifySubject" => "",
+			"ShowTaskLinkInEmail" => "Y",
 			"Reminder3Text" => "",
 			"Reminder2Text" => "",
 			"Reminder1Text" => "",
@@ -281,6 +282,7 @@ class CBPapprovecopyactiveschedule
 		try
 		{
 			$notifyText = (string)$this->NotifyText;
+			$showTaskLinkInEmail = !$this->IsPropertyExists("ShowTaskLinkInEmail") || (string)$this->ShowTaskLinkInEmail !== "N";
 			$taskLink = 'https://ourtricolortv.nsc.ru/company/personal/bizproc/' . intval($this->taskId) . '/';
 			if (!empty($arUsers))
 			{
@@ -294,11 +296,15 @@ class CBPapprovecopyactiveschedule
 						$email = trim($arU['EMAIL']);
 						if ($email <> '')
 						{
+							$mailBody = $notifyText;
+							if ($showTaskLinkInEmail)
+							{
+								$mailBody = ($mailBody ? $mailBody."\n" : '') . 'Ссылка на задание: ' . $taskLink;
+							}
 							\Bitrix\Main\Mail\Mail::send(array(
 								'TO' => $email,
 								'SUBJECT' => ($this->NotifySubject !== '' ? $this->NotifySubject : ($this->Name ? $this->Name : 'Business Process Task')),
-								'BODY' => ($notifyText ? $notifyText."
-" : '') . 'Ссылка на задание: ' . $taskLink,
+								'BODY' => $mailBody,
 								'HEADER' => array('Precedence' => 'bulk')
 							));
 						}
@@ -855,6 +861,7 @@ $this->WriteToTrackingService(
 		$arMap = array(
 			"NotifySubject" => "notify_subject",
 			"NotifyText" => "notify_text",
+			"ShowTaskLinkInEmail" => "show_task_link_in_email",
 			"Reminder1Hours" => "rem1_hours",
 			"Reminder2Hours" => "rem2_hours",
 			"Reminder3Hours" => "rem3_hours",
@@ -954,6 +961,8 @@ $this->WriteToTrackingService(
 		}
 		if ($arCurrentValues['status_message'] == '')
 			$arCurrentValues['status_message'] = GetMessage("BPAA_ACT_INFO");
+		if (!array_key_exists("show_task_link_in_email", $arCurrentValues) || $arCurrentValues["show_task_link_in_email"] == '')
+			$arCurrentValues["show_task_link_in_email"] = "Y";
 		if ($arCurrentValues['task_button1_message'] == '')
 			$arCurrentValues['task_button1_message'] = GetMessage("BPAA_ACT_BUTTON1");
 		if ($arCurrentValues['task_button2_message'] == '')
@@ -983,6 +992,7 @@ $this->WriteToTrackingService(
 		$arMap = array(
 			"notify_subject" => "NotifySubject",
 			"notify_text" => "NotifyText",
+			"show_task_link_in_email" => "ShowTaskLinkInEmail",
 			"rem1_hours" => "Reminder1Hours",
 			"rem2_hours" => "Reminder2Hours",
 			"rem3_hours" => "Reminder3Hours",

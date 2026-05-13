@@ -15,6 +15,15 @@ if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true)die();
 	<td align="right" width="40%"><?= GetMessage("BPAA_NOTIFY_TEXT") ?>:</td>
 	<td width="60%"><textarea name="notify_text" rows="4" cols="50"><?= htmlspecialcharsbx($arCurrentValues["notify_text"]) ?></textarea></td>
 </tr>
+<tr>
+	<td align="right" width="40%"><?= GetMessage("BPAR_PD_SHOW_TASK_LINK_IN_EMAIL") ?>:</td>
+	<td width="60%">
+		<select name="show_task_link_in_email">
+			<option value="Y"<?= $arCurrentValues["show_task_link_in_email"] != "N" ? " selected" : "" ?>><?= GetMessage("BPAA_PD_YES") ?></option>
+			<option value="N"<?= $arCurrentValues["show_task_link_in_email"] == "N" ? " selected" : "" ?>><?= GetMessage("BPAA_PD_NO") ?></option>
+		</select>
+	</td>
+</tr>
 <tr><td colspan="2"><b>Напоминания о задании</b></td></tr>
 <tr>
 	<td align="right" width="40%">Напоминание 1 (часов):</td>
