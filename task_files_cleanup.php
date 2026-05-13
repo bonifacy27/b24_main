@@ -88,7 +88,7 @@ function getSortParams(array $request): array
     return ['sort' => $sort, 'dir' => $dir];
 }
 
-function getFilterParams(array $request): array
+function getCleanupFilterParams(array $request): array
 {
     $status = isset($request['task_status']) ? (int)$request['task_status'] : 0;
     $dateFrom = isset($request['usage_date_from']) ? trim((string)$request['usage_date_from']) : '';
@@ -134,7 +134,7 @@ function sortRows(array $rows, string $sort, string $dir): array
 
 function sortLink(string $column, string $title, int $selectedUserId, string $currentSort, string $currentDir): string
 {
-    $filters = getFilterParams($_GET);
+    $filters = getCleanupFilterParams($_GET);
     $nextDir = ($currentSort === $column && $currentDir === 'ASC') ? 'DESC' : 'ASC';
     $arrow = $currentSort === $column ? ($currentDir === 'ASC' ? ' ▲' : ' ▼') : '';
     $url = '?user_id=' . $selectedUserId
@@ -153,7 +153,7 @@ function renderPagination(int $selectedUserId, string $sort, string $dir, int $c
         return '';
     }
 
-    $filterParams = getFilterParams($_GET);
+    $filterParams = getCleanupFilterParams($_GET);
     $buildUrl = static function (int $page) use ($selectedUserId, $sort, $dir, $filterParams): string {
         return '?user_id=' . $selectedUserId
             . '&sort=' . urlencode($sort)
@@ -1063,7 +1063,7 @@ if ($action === 'delete' && check_bitrix_sessid()) {
 
 $user = getUserById($selectedUserId);
 $sortParams = getSortParams($_GET);
-$filterParams = getFilterParams($_GET);
+$filterParams = getCleanupFilterParams($_GET);
 $rows = $selectedUserId > 0 ? buildRows($selectedUserId) : [];
 $rows = applyRowsFilter($rows, $filterParams);
 $rows = sortRows($rows, $sortParams['sort'], $sortParams['dir']);
@@ -1272,6 +1272,24 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
     btn.addEventListener('click', function () {
         dialog.show();
     });
+})();
+</script>
+<script>
+(function () {
+    const pageCheckboxes = document.querySelectorAll('.file-checkbox');
+    const checkAllBtn = document.getElementById('check_all_page');
+    const uncheckAllBtn = document.getElementById('uncheck_all_page');
+
+    if (checkAllBtn) {
+        checkAllBtn.addEventListener('click', function () {
+            pageCheckboxes.forEach(function (cb) { cb.checked = true; });
+        });
+    }
+    if (uncheckAllBtn) {
+        uncheckAllBtn.addEventListener('click', function () {
+            pageCheckboxes.forEach(function (cb) { cb.checked = false; });
+        });
+    }
 })();
 </script>
 </body>
