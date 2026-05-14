@@ -91,8 +91,12 @@ function getSortParams(array $request): array
 function getCleanupFilterParams(array $request): array
 {
     $status = isset($request['task_status']) ? (int)$request['task_status'] : 0;
+    $attachmentType = isset($request['attachment_type']) ? strtoupper(trim((string)$request['attachment_type'])) : '';
     $dateFrom = isset($request['usage_date_from']) ? trim((string)$request['usage_date_from']) : '';
     $dateTo = isset($request['usage_date_to']) ? trim((string)$request['usage_date_to']) : '';
+    if (!in_array($attachmentType, ['TASK', 'COMMENT'], true)) {
+        $attachmentType = '';
+    }
 
     if ($dateFrom !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
         $dateFrom = '';
@@ -101,7 +105,7 @@ function getCleanupFilterParams(array $request): array
         $dateTo = '';
     }
 
-    return ['task_status' => $status, 'usage_date_from' => $dateFrom, 'usage_date_to' => $dateTo];
+    return ['task_status' => $status, 'attachment_type' => $attachmentType, 'usage_date_from' => $dateFrom, 'usage_date_to' => $dateTo];
 }
 
 function sortRows(array $rows, string $sort, string $dir): array
@@ -141,6 +145,7 @@ function sortLink(string $column, string $title, int $selectedUserId, string $cu
         . '&sort=' . urlencode($column)
         . '&dir=' . urlencode($nextDir)
         . '&task_status=' . (int)$filters['task_status']
+        . '&attachment_type=' . urlencode($filters['attachment_type'])
         . '&usage_date_from=' . urlencode($filters['usage_date_from'])
         . '&usage_date_to=' . urlencode($filters['usage_date_to'])
         . '&page=1';
@@ -159,6 +164,7 @@ function renderPagination(int $selectedUserId, string $sort, string $dir, int $c
             . '&sort=' . urlencode($sort)
             . '&dir=' . urlencode($dir)
             . '&task_status=' . (int)$filterParams['task_status']
+            . '&attachment_type=' . urlencode($filterParams['attachment_type'])
             . '&usage_date_from=' . urlencode($filterParams['usage_date_from'])
             . '&usage_date_to=' . urlencode($filterParams['usage_date_to'])
             . '&page=' . $page;
@@ -187,6 +193,7 @@ function renderPagination(int $selectedUserId, string $sort, string $dir, int $c
 function applyRowsFilter(array $rows, array $filters): array
 {
     $status = (int)($filters['task_status'] ?? 0);
+    $attachmentType = (string)($filters['attachment_type'] ?? '');
     $dateFrom = (string)($filters['usage_date_from'] ?? '');
     $dateTo = (string)($filters['usage_date_to'] ?? '');
     $dateFromTs = $dateFrom !== '' ? strtotime($dateFrom . ' 00:00:00') : null;
@@ -197,6 +204,9 @@ function applyRowsFilter(array $rows, array $filters): array
         $matchedUsages = [];
         foreach (($fileBlock['USAGES'] ?? []) as $usage) {
             if ($status > 0 && (int)($usage['TASK_STATUS'] ?? 0) !== $status) {
+                continue;
+            }
+            if ($attachmentType !== '' && (string)($usage['USAGE_TYPE'] ?? '') !== $attachmentType) {
                 continue;
             }
             if ($dateFromTs !== null || $dateToTs !== null) {
@@ -214,7 +224,10 @@ function applyRowsFilter(array $rows, array $filters): array
             $matchedUsages[] = $usage;
         }
 
-        if (!empty($matchedUsages) || ($status === 0 && $dateFromTs === null && $dateToTs === null)) {
+        if (
+            !empty($matchedUsages)
+            || ($status === 0 && $attachmentType === '' && $dateFromTs === null && $dateToTs === null)
+        ) {
             $fileBlock['USAGES'] = !empty($matchedUsages) ? $matchedUsages : ($fileBlock['USAGES'] ?? []);
             $filtered[$fileId] = $fileBlock;
         }
@@ -1113,6 +1126,12 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
             <option value="<?= (int)$statusId ?>" <?= (int)$filterParams['task_status'] === (int)$statusId ? 'selected' : '' ?>><?= h($statusTitle) ?></option>
         <?php endforeach; ?>
     </select>
+    <label for="attachment_type"><strong>Тип прикрепления:</strong></label>
+    <select name="attachment_type" id="attachment_type">
+        <option value="" <?= $filterParams['attachment_type'] === '' ? 'selected' : '' ?>>Все</option>
+        <option value="TASK" <?= $filterParams['attachment_type'] === 'TASK' ? 'selected' : '' ?>>К задаче (TASK)</option>
+        <option value="COMMENT" <?= $filterParams['attachment_type'] === 'COMMENT' ? 'selected' : '' ?>>К комментарию (COMMENT)</option>
+    </select>
     <label for="usage_date_from"><strong>Использование с:</strong></label>
     <input type="date" name="usage_date_from" id="usage_date_from" value="<?= h($filterParams['usage_date_from']) ?>">
     <label for="usage_date_to"><strong>по:</strong></label>
@@ -1152,6 +1171,7 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
         <input type="hidden" name="dir" value="<?= h($sortParams['dir']) ?>">
         <input type="hidden" name="page" value="<?= (int)$currentPage ?>">
         <input type="hidden" name="task_status" value="<?= (int)$filterParams['task_status'] ?>">
+        <input type="hidden" name="attachment_type" value="<?= h($filterParams['attachment_type']) ?>">
         <input type="hidden" name="usage_date_from" value="<?= h($filterParams['usage_date_from']) ?>">
         <input type="hidden" name="usage_date_to" value="<?= h($filterParams['usage_date_to']) ?>">
 
