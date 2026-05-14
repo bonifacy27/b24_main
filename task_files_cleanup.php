@@ -1314,17 +1314,3 @@ $rowsPage = array_slice($rows, $offset, $pageSize, true);
 </script>
 </body>
 </html>
-    const pageCheckboxes = document.querySelectorAll('.file-checkbox');
-    const checkAllBtn = document.getElementById('check_all_page');
-    const uncheckAllBtn = document.getElementById('uncheck_all_page');
-
-    if (checkAllBtn) {
-        checkAllBtn.addEventListener('click', function () {
-            pageCheckboxes.forEach(function (cb) { cb.checked = true; });
-        });
-    }
-    if (uncheckAllBtn) {
-        uncheckAllBtn.addEventListener('click', function () {
-            pageCheckboxes.forEach(function (cb) { cb.checked = false; });
-        });
-    }
