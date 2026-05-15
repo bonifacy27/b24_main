@@ -113,17 +113,29 @@ if (!empty($headToDepartment)) {
     $rsUsers = \CUser::GetList(
         $by = 'id',
         $order = 'asc',
-        ['ACTIVE' => 'Y', '!UF_HEAD' => false],
-        ['SELECT' => ['UF_HEAD', 'UF_CABINET'], 'FIELDS' => ['ID', 'UF_HEAD', 'UF_CABINET']]
+        ['ACTIVE' => 'Y'],
+        ['SELECT' => ['UF_HEAD', 'UF_CABINET'], 'FIELDS' => ['ID', 'LOGIN']]
     );
 
     while ($user = $rsUsers->Fetch()) {
         $userHeads = $user['UF_HEAD'];
         if (!is_array($userHeads)) {
-            if ((string)$userHeads === '' || (int)$userHeads <= 0) {
+            $userHeads = trim((string)$userHeads);
+            if ($userHeads === '') {
                 continue;
             }
-            $userHeads = [(int)$userHeads];
+
+            if (strpos($userHeads, ',') !== false) {
+                $userHeads = array_map('intval', array_filter(array_map('trim', explode(',', $userHeads)), 'strlen'));
+            } else {
+                $headId = (int)$userHeads;
+                if ($headId <= 0) {
+                    continue;
+                }
+                $userHeads = [$headId];
+            }
+        } else {
+            $userHeads = array_map('intval', $userHeads);
         }
 
         $cabinet = trim((string)$user['UF_CABINET']);
