@@ -56,6 +56,7 @@ while ($section = $rsSections->Fetch()) {
         'ID' => $departmentId,
         'NAME' => (string)$section['NAME'],
         'SORT' => (int)$section['SORT'],
+        'IBLOCK_SECTION_ID' => (int)$section['IBLOCK_SECTION_ID'],
         'LEFT_MARGIN' => (int)$section['LEFT_MARGIN'],
         'DEPTH_LEVEL' => (int)$section['DEPTH_LEVEL'],
         'UF_HEAD' => (int)$section['UF_HEAD'],
@@ -98,93 +99,111 @@ if (!empty($headIds)) {
 }
 
 $departmentEmployees = [];
+$departmentChildren = [];
 foreach ($departments as $departmentId => $_department) {
     $departmentEmployees[$departmentId] = [
         'TOTAL' => 0,
         'CABINETS' => [],
     ];
+    $departmentChildren[$departmentId] = [];
 }
 
-$headToDepartment = [];
 foreach ($departments as $departmentId => $department) {
-    if ($department['UF_HEAD'] > 0) {
-        $headId = (int)$department['UF_HEAD'];
-        if (!isset($headToDepartment[$headId])) {
-            $headToDepartment[$headId] = [];
-        }
-        $headToDepartment[$headId][] = $departmentId;
+    $parentId = (int)$department['IBLOCK_SECTION_ID'];
+    if ($parentId > 0 && isset($departmentChildren[$parentId])) {
+        $departmentChildren[$parentId][] = $departmentId;
     }
 }
 
-if (!empty($headToDepartment)) {
-    $rsUsers = \CUser::GetList(
-        $by = 'id',
-        $order = 'asc',
-        ['ACTIVE' => 'Y'],
-        ['SELECT' => ['UF_HEAD', 'UF_CABINET'], 'FIELDS' => ['ID', 'LOGIN', 'UF_HEAD', 'UF_CABINET']]
-    );
+$descendantsMap = [];
+$getDescendants = static function (int $rootId) use (&$getDescendants, &$descendantsMap, $departmentChildren): array {
+    if (isset($descendantsMap[$rootId])) {
+        return $descendantsMap[$rootId];
+    }
 
-    while ($user = $rsUsers->Fetch()) {
-        $rawUserHeads = $user['UF_HEAD'];
-        $userHeads = [];
+    $result = [];
+    foreach ($departmentChildren[$rootId] as $childId) {
+        $result[] = $childId;
+        $result = array_merge($result, $getDescendants($childId));
+    }
 
-        if (is_array($rawUserHeads)) {
-            foreach ($rawUserHeads as $rawValue) {
-                if (preg_match_all('/\d+/', (string)$rawValue, $matches)) {
-                    foreach ($matches[0] as $idValue) {
-                        $idValue = (int)$idValue;
-                        if ($idValue > 0) {
-                            $userHeads[$idValue] = true;
-                        }
-                    }
-                }
-            }
-        } else {
-            if (preg_match_all('/\d+/', (string)$rawUserHeads, $matches)) {
-                foreach ($matches[0] as $idValue) {
-                    $idValue = (int)$idValue;
-                    if ($idValue > 0) {
-                        $userHeads[$idValue] = true;
-                    }
-                }
-            }
+    $descendantsMap[$rootId] = $result;
+
+    return $result;
+};
+
+$targetDepartments = [];
+foreach ($departments as $departmentId => $department) {
+    if ((int)$department['UF_HEAD'] <= 0) {
+        continue;
+    }
+    $targetDepartments[$departmentId] = $getDescendants($departmentId);
+}
+
+$rsUsers = \CUser::GetList(
+    $by = 'id',
+    $order = 'asc',
+    ['ACTIVE' => 'Y'],
+    ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET'], 'FIELDS' => ['ID', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]
+);
+
+while ($user = $rsUsers->Fetch()) {
+    $userDepartments = $user['UF_DEPARTMENT'];
+    if (!is_array($userDepartments)) {
+        $userDepartments = [(int)$userDepartments];
+    }
+
+    $userDepartmentSet = [];
+    foreach ($userDepartments as $userDepartmentId) {
+        $userDepartmentId = (int)$userDepartmentId;
+        if ($userDepartmentId > 0) {
+            $userDepartmentSet[$userDepartmentId] = true;
         }
+    }
 
-        if (empty($userHeads)) {
+    if (empty($userDepartmentSet)) {
+        continue;
+    }
+
+    $cabinet = trim((string)$user['UF_CABINET']);
+    if ($cabinet === '') {
+        $cabinet = 'Не указан';
+    }
+
+    foreach ($targetDepartments as $departmentId => $descendantIds) {
+        if (empty($descendantIds)) {
             continue;
         }
 
-        $cabinet = trim((string)$user['UF_CABINET']);
-        if ($cabinet === '') {
-            $cabinet = 'Не указан';
+        $matchedDepartmentId = 0;
+        foreach ($descendantIds as $descendantId) {
+            if (isset($userDepartmentSet[$descendantId])) {
+                $matchedDepartmentId = $descendantId;
+                break;
+            }
         }
 
-        foreach (array_keys($userHeads) as $headId) {
-            if (!isset($headToDepartment[$headId])) {
-                continue;
+        if ($matchedDepartmentId <= 0) {
+            continue;
+        }
+
+        $departmentEmployees[$departmentId]['TOTAL']++;
+        if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
+            $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
+        }
+        $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
+
+        if ($diagnosticDepartmentId > 0 && $departmentId === $diagnosticDepartmentId) {
+            if (!isset($diagnostics[$departmentId])) {
+                $diagnostics[$departmentId] = [];
             }
-
-            foreach ($headToDepartment[$headId] as $departmentId) {
-                $departmentEmployees[$departmentId]['TOTAL']++;
-
-                if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
-                    $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
-                }
-                $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
-
-                if ($diagnosticDepartmentId > 0 && $departmentId === $diagnosticDepartmentId) {
-                    if (!isset($diagnostics[$departmentId])) {
-                        $diagnostics[$departmentId] = [];
-                    }
-                    $diagnostics[$departmentId][] = [
-                        'USER_ID' => (int)$user['ID'],
-                        'LOGIN' => (string)$user['LOGIN'],
-                        'RAW_UF_HEAD' => $rawUserHeads,
-                        'PARSED_HEADS' => array_keys($userHeads),
-                        'CABINET' => $cabinet,
-                    ];
-                }
-            }
+            $diagnostics[$departmentId][] = [
+                'USER_ID' => (int)$user['ID'],
+                'LOGIN' => (string)$user['LOGIN'],
+                'RAW_UF_DEPARTMENT' => $user['UF_DEPARTMENT'],
+                'MATCHED_DESCENDANT_ID' => $matchedDepartmentId,
+                'CABINET' => $cabinet,
+            ];
         }
     }
 }
@@ -221,6 +240,7 @@ header('Content-Type: text/html; charset=UTF-8');
         ?>
         <div><strong>Подразделение:</strong> <?= htmlspecialcharsbx($departments[$diagnosticDepartmentId]['NAME']) ?></div>
         <div><strong>UF_HEAD подразделения:</strong> <?= $diagHeadId ?> (<?= htmlspecialcharsbx($diagHeadName) ?>)</div>
+        <div><strong>Подчиненные ищутся по вложенным подразделениям (ниже по оргструктуре).</strong></div>
         <div><strong>Найдено подчиненных:</strong> <?= count($diagRows) ?></div>
 
         <?php if (!empty($diagRows)): ?>
@@ -229,8 +249,8 @@ header('Content-Type: text/html; charset=UTF-8');
                 <tr>
                     <th>User ID</th>
                     <th>Login</th>
-                    <th>RAW UF_HEAD</th>
-                    <th>Parsed IDs</th>
+                    <th>RAW UF_DEPARTMENT</th>
+                    <th>Matched descendant dept</th>
                     <th>UF_CABINET</th>
                 </tr>
                 </thead>
@@ -239,15 +259,15 @@ header('Content-Type: text/html; charset=UTF-8');
                     <tr>
                         <td><?= (int)$row['USER_ID'] ?></td>
                         <td><?= htmlspecialcharsbx($row['LOGIN']) ?></td>
-                        <td><pre style="margin:0;white-space:pre-wrap;"><?= htmlspecialcharsbx(print_r($row['RAW_UF_HEAD'], true)) ?></pre></td>
-                        <td><?= htmlspecialcharsbx(implode(', ', $row['PARSED_HEADS'])) ?></td>
+                        <td><pre style="margin:0;white-space:pre-wrap;"><?= htmlspecialcharsbx(print_r($row['RAW_UF_DEPARTMENT'], true)) ?></pre></td>
+                        <td><?= (int)$row['MATCHED_DESCENDANT_ID'] ?></td>
                         <td><?= htmlspecialcharsbx($row['CABINET']) ?></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
             </table>
         <?php else: ?>
-            <div class="muted" style="margin-bottom:20px;">Совпадений не найдено. Проверьте формат пользовательского поля UF_HEAD у сотрудников.</div>
+            <div class="muted" style="margin-bottom:20px;">Совпадений не найдено по вложенным подразделениям. Проверьте привязку сотрудников к UF_DEPARTMENT.</div>
         <?php endif; ?>
     <?php endif; ?>
 <?php endif; ?>
