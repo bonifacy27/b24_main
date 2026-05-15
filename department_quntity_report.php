@@ -314,6 +314,9 @@ header('Content-Type: text/html; charset=UTF-8');
         .muted { color: #6f7c8a; }
         .department { white-space: nowrap; }
         ul { margin: 6px 0 0 18px; padding: 0; }
+        .delta-negative { background: #ffd9d9; }
+        .delta-zero { background: #fff6bf; }
+        .delta-positive { background: #d9f7d9; }
     </style>
 </head>
 <body>
@@ -427,13 +430,14 @@ header('Content-Type: text/html; charset=UTF-8');
         sort($departmentNames, SORT_NATURAL | SORT_FLAG_CASE);
         $departmentsLabel = empty($departmentNames) ? '—' : implode(', ', $departmentNames);
         $delta = $workplaces - $userCount;
+        $deltaClass = $delta < 0 ? 'delta-negative' : ($delta > 0 ? 'delta-positive' : 'delta-zero');
         ?>
         <tr>
             <td><?= htmlspecialcharsbx($cabinetTitle) ?></td>
             <td><?= htmlspecialcharsbx($departmentsLabel) ?></td>
             <td><?= $userCount ?></td>
             <td><?= $workplaces ?></td>
-            <td><?= $delta ?></td>
+            <td class="<?= $deltaClass ?>"><?= $delta ?></td>
         </tr>
     <?php endforeach; ?>
     </tbody>
