@@ -102,39 +102,49 @@ foreach ($departments as $departmentId => $_department) {
     ];
 }
 
-$rsUsers = \CUser::GetList(
-    $by = 'id',
-    $order = 'asc',
-    ['ACTIVE' => 'Y', '!UF_DEPARTMENT' => false],
-    ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET'], 'FIELDS' => ['ID', 'UF_DEPARTMENT', 'UF_CABINET']]
-);
-
-while ($user = $rsUsers->Fetch()) {
-    $userDepartments = $user['UF_DEPARTMENT'];
-    if (!is_array($userDepartments)) {
-        if ((string)$userDepartments === '' || (int)$userDepartments <= 0) {
-            continue;
-        }
-        $userDepartments = [(int)$userDepartments];
+$headToDepartment = [];
+foreach ($departments as $departmentId => $department) {
+    if ($department['UF_HEAD'] > 0) {
+        $headToDepartment[$department['UF_HEAD']] = $departmentId;
     }
+}
 
-    $cabinet = trim((string)$user['UF_CABINET']);
-    if ($cabinet === '') {
-        $cabinet = 'Не указан';
-    }
+if (!empty($headToDepartment)) {
+    $rsUsers = \CUser::GetList(
+        $by = 'id',
+        $order = 'asc',
+        ['ACTIVE' => 'Y', '!UF_HEAD' => false],
+        ['SELECT' => ['UF_HEAD', 'UF_CABINET'], 'FIELDS' => ['ID', 'UF_HEAD', 'UF_CABINET']]
+    );
 
-    foreach ($userDepartments as $departmentId) {
-        $departmentId = (int)$departmentId;
-        if (!isset($departmentEmployees[$departmentId])) {
-            continue;
+    while ($user = $rsUsers->Fetch()) {
+        $userHeads = $user['UF_HEAD'];
+        if (!is_array($userHeads)) {
+            if ((string)$userHeads === '' || (int)$userHeads <= 0) {
+                continue;
+            }
+            $userHeads = [(int)$userHeads];
         }
 
-        $departmentEmployees[$departmentId]['TOTAL']++;
-
-        if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
-            $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
+        $cabinet = trim((string)$user['UF_CABINET']);
+        if ($cabinet === '') {
+            $cabinet = 'Не указан';
         }
-        $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
+
+        foreach ($userHeads as $headId) {
+            $headId = (int)$headId;
+            if (!isset($headToDepartment[$headId])) {
+                continue;
+            }
+
+            $departmentId = $headToDepartment[$headId];
+            $departmentEmployees[$departmentId]['TOTAL']++;
+
+            if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
+                $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
+            }
+            $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
+        }
     }
 }
 
@@ -168,6 +178,7 @@ header('Content-Type: text/html; charset=UTF-8');
     </thead>
     <tbody>
     <?php foreach ($departments as $departmentId => $department): ?>
+        <?php if ((int)$department['UF_HEAD'] <= 0) { continue; } ?>
         <?php
         $depthPrefix = str_repeat('— ', max(0, (int)$department['DEPTH_LEVEL'] - 1));
         $headName = isset($headsMap[$department['UF_HEAD']]) ? $headsMap[$department['UF_HEAD']] : 'Не назначен';
