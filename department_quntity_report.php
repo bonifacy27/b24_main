@@ -32,6 +32,12 @@ if (!Loader::includeModule('main')) {
     exit;
 }
 
+if (!Loader::includeModule('highloadblock')) {
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo 'Ошибка: не удалось подключить модуль highloadblock.';
+    exit;
+}
+
 $iblockId = (int)\COption::GetOptionInt('intranet', 'iblock_structure', 0);
 if ($iblockId <= 0) {
     header('Content-Type: text/plain; charset=UTF-8');
@@ -129,6 +135,62 @@ $assignResponsibleHead = static function (int $departmentId, int $inheritedHeadD
     }
 };
 
+$normalizeCabinet = static function (string $cabinetRaw): string {
+    $value = trim(mb_strtolower($cabinetRaw));
+    if ($value === '') {
+        return '';
+    }
+
+    if (!preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+        return '';
+    }
+
+    $cabinetCode = str_replace([' ', ','], '', $match[1]);
+    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
+
+    if (mb_strpos($value, 'москов') !== false) {
+        return 'moskovskiy|' . $cabinetCode;
+    }
+    if (mb_strpos($value, 'новоладож') !== false) {
+        return 'novoladozhskaya|' . $cabinetCode;
+    }
+    if (mb_strpos($value, 'рентген') !== false) {
+        return 'rentgena|' . $cabinetCode;
+    }
+
+    return 'other|' . $cabinetCode;
+};
+
+$normalizeDirectoryCabinet = static function (string $cabinetName): string {
+    $value = trim(mb_strtolower($cabinetName));
+    if ($value === '') {
+        return '';
+    }
+
+    $parts = array_map('trim', explode(',', $value, 2));
+    if (count($parts) < 2) {
+        return '';
+    }
+
+    $location = $parts[0];
+    $cabinetCode = str_replace([' ', ','], '', $parts[1]);
+    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
+
+    if (mb_strpos($location, 'москов') !== false) {
+        return 'moskovskiy|' . $cabinetCode;
+    }
+    if (mb_strpos($location, 'новоладож') !== false) {
+        return 'novoladozhskaya|' . $cabinetCode;
+    }
+    if (mb_strpos($location, 'рентген') !== false) {
+        return 'rentgena|' . $cabinetCode;
+    }
+
+    return 'other|' . $cabinetCode;
+};
+
+$cabinetUsageTotals = [];
+
 foreach ($departments as $departmentId => $department) {
     $parentId = (int)$department['IBLOCK_SECTION_ID'];
     if ($parentId <= 0 || !isset($departments[$parentId])) {
@@ -182,6 +244,14 @@ while ($user = $rsUsers->Fetch()) {
         }
         $departmentEmployees[$headDepartmentId]['CABINETS'][$cabinet]++;
 
+        $normalizedCabinet = $normalizeCabinet($cabinet);
+        if ($normalizedCabinet !== '') {
+            if (!isset($cabinetUsageTotals[$normalizedCabinet])) {
+                $cabinetUsageTotals[$normalizedCabinet] = ['count' => 0, 'sample' => $cabinet];
+            }
+            $cabinetUsageTotals[$normalizedCabinet]['count']++;
+        }
+
         if ($diagnosticDepartmentId > 0 && $headDepartmentId === $diagnosticDepartmentId) {
             if (!isset($diagnostics[$headDepartmentId])) {
                 $diagnostics[$headDepartmentId] = [];
@@ -194,6 +264,31 @@ while ($user = $rsUsers->Fetch()) {
                 'CABINET' => $cabinet,
             ];
         }
+    }
+}
+
+$cabinetDirectory = [];
+$hlBlockId = 74;
+$hlBlock = \Bitrix\Highloadblock\HighloadBlockTable::getById($hlBlockId)->fetch();
+if ($hlBlock) {
+    $entity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($hlBlock);
+    $entityClass = $entity->getDataClass();
+    $rsCabinets = $entityClass::getList([
+        'select' => ['ID', 'UF_NAME', 'UF_WORKPLACES'],
+        'order' => ['UF_NAME' => 'ASC'],
+    ]);
+
+    while ($cabinetRow = $rsCabinets->fetch()) {
+        $dirName = trim((string)$cabinetRow['UF_NAME']);
+        $normalizedKey = $normalizeDirectoryCabinet($dirName);
+        if ($normalizedKey === '') {
+            continue;
+        }
+
+        $cabinetDirectory[$normalizedKey] = [
+            'name' => $dirName,
+            'workplaces' => (int)$cabinetRow['UF_WORKPLACES'],
+        ];
     }
 }
 
@@ -294,6 +389,40 @@ header('Content-Type: text/html; charset=UTF-8');
                     <div class="muted">Сотрудники не найдены</div>
                 <?php endif; ?>
             </td>
+        </tr>
+    <?php endforeach; ?>
+    </tbody>
+</table>
+
+<h2>Сводка по кабинетам</h2>
+<table>
+    <thead>
+    <tr>
+        <th>Кабинет (справочник)</th>
+        <th>Пользователей</th>
+        <th>Мест по справочнику</th>
+        <th>Разница (места - пользователи)</th>
+    </tr>
+    </thead>
+    <tbody>
+    <?php
+    $summaryKeys = array_unique(array_merge(array_keys($cabinetUsageTotals), array_keys($cabinetDirectory)));
+    sort($summaryKeys, SORT_NATURAL | SORT_FLAG_CASE);
+    ?>
+    <?php foreach ($summaryKeys as $summaryKey): ?>
+        <?php
+        $userCount = isset($cabinetUsageTotals[$summaryKey]) ? (int)$cabinetUsageTotals[$summaryKey]['count'] : 0;
+        $workplaces = isset($cabinetDirectory[$summaryKey]) ? (int)$cabinetDirectory[$summaryKey]['workplaces'] : 0;
+        $cabinetTitle = isset($cabinetDirectory[$summaryKey])
+            ? $cabinetDirectory[$summaryKey]['name']
+            : ('Не найден в справочнике: ' . (isset($cabinetUsageTotals[$summaryKey]) ? $cabinetUsageTotals[$summaryKey]['sample'] : $summaryKey));
+        $delta = $workplaces - $userCount;
+        ?>
+        <tr>
+            <td><?= htmlspecialcharsbx($cabinetTitle) ?></td>
+            <td><?= $userCount ?></td>
+            <td><?= $workplaces ?></td>
+            <td><?= $delta ?></td>
         </tr>
     <?php endforeach; ?>
     </tbody>
