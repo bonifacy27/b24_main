@@ -105,7 +105,11 @@ foreach ($departments as $departmentId => $_department) {
 $headToDepartment = [];
 foreach ($departments as $departmentId => $department) {
     if ($department['UF_HEAD'] > 0) {
-        $headToDepartment[$department['UF_HEAD']] = $departmentId;
+        $headId = (int)$department['UF_HEAD'];
+        if (!isset($headToDepartment[$headId])) {
+            $headToDepartment[$headId] = [];
+        }
+        $headToDepartment[$headId][] = $departmentId;
     }
 }
 
@@ -118,24 +122,33 @@ if (!empty($headToDepartment)) {
     );
 
     while ($user = $rsUsers->Fetch()) {
-        $userHeads = $user['UF_HEAD'];
-        if (!is_array($userHeads)) {
-            $userHeads = trim((string)$userHeads);
-            if ($userHeads === '') {
-                continue;
-            }
+        $rawUserHeads = $user['UF_HEAD'];
+        $userHeads = [];
 
-            if (strpos($userHeads, ',') !== false) {
-                $userHeads = array_map('intval', array_filter(array_map('trim', explode(',', $userHeads)), 'strlen'));
-            } else {
-                $headId = (int)$userHeads;
-                if ($headId <= 0) {
-                    continue;
+        if (is_array($rawUserHeads)) {
+            foreach ($rawUserHeads as $rawValue) {
+                if (preg_match_all('/\d+/', (string)$rawValue, $matches)) {
+                    foreach ($matches[0] as $idValue) {
+                        $idValue = (int)$idValue;
+                        if ($idValue > 0) {
+                            $userHeads[$idValue] = true;
+                        }
+                    }
                 }
-                $userHeads = [$headId];
             }
         } else {
-            $userHeads = array_map('intval', $userHeads);
+            if (preg_match_all('/\d+/', (string)$rawUserHeads, $matches)) {
+                foreach ($matches[0] as $idValue) {
+                    $idValue = (int)$idValue;
+                    if ($idValue > 0) {
+                        $userHeads[$idValue] = true;
+                    }
+                }
+            }
+        }
+
+        if (empty($userHeads)) {
+            continue;
         }
 
         $cabinet = trim((string)$user['UF_CABINET']);
@@ -143,19 +156,19 @@ if (!empty($headToDepartment)) {
             $cabinet = 'Не указан';
         }
 
-        foreach ($userHeads as $headId) {
-            $headId = (int)$headId;
+        foreach (array_keys($userHeads) as $headId) {
             if (!isset($headToDepartment[$headId])) {
                 continue;
             }
 
-            $departmentId = $headToDepartment[$headId];
-            $departmentEmployees[$departmentId]['TOTAL']++;
+            foreach ($headToDepartment[$headId] as $departmentId) {
+                $departmentEmployees[$departmentId]['TOTAL']++;
 
-            if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
-                $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
+                if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
+                    $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
+                }
+                $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
             }
-            $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
         }
     }
 }
