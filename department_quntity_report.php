@@ -68,6 +68,9 @@ if (empty($departments)) {
     exit;
 }
 
+$diagnosticDepartmentId = isset($_GET['diagnostic_department_id']) ? (int)$_GET['diagnostic_department_id'] : 0;
+$diagnostics = [];
+
 $headIds = [];
 foreach ($departments as $department) {
     if ($department['UF_HEAD'] > 0) {
@@ -118,7 +121,7 @@ if (!empty($headToDepartment)) {
         $by = 'id',
         $order = 'asc',
         ['ACTIVE' => 'Y'],
-        ['SELECT' => ['UF_HEAD', 'UF_CABINET'], 'FIELDS' => ['ID', 'LOGIN']]
+        ['SELECT' => ['UF_HEAD', 'UF_CABINET'], 'FIELDS' => ['ID', 'LOGIN', 'UF_HEAD', 'UF_CABINET']]
     );
 
     while ($user = $rsUsers->Fetch()) {
@@ -168,6 +171,19 @@ if (!empty($headToDepartment)) {
                     $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
                 }
                 $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
+
+                if ($diagnosticDepartmentId > 0 && $departmentId === $diagnosticDepartmentId) {
+                    if (!isset($diagnostics[$departmentId])) {
+                        $diagnostics[$departmentId] = [];
+                    }
+                    $diagnostics[$departmentId][] = [
+                        'USER_ID' => (int)$user['ID'],
+                        'LOGIN' => (string)$user['LOGIN'],
+                        'RAW_UF_HEAD' => $rawUserHeads,
+                        'PARSED_HEADS' => array_keys($userHeads),
+                        'CABINET' => $cabinet,
+                    ];
+                }
             }
         }
     }
@@ -193,6 +209,49 @@ header('Content-Type: text/html; charset=UTF-8');
 </head>
 <body>
 <h1>Отчет по подразделениям</h1>
+<?php if ($diagnosticDepartmentId > 0): ?>
+    <h2>Диагностика для подразделения ID <?= (int)$diagnosticDepartmentId ?></h2>
+    <?php if (!isset($departments[$diagnosticDepartmentId])): ?>
+        <div class="muted">Подразделение с таким ID не найдено в структуре.</div>
+    <?php else: ?>
+        <?php
+        $diagHeadId = (int)$departments[$diagnosticDepartmentId]['UF_HEAD'];
+        $diagHeadName = isset($headsMap[$diagHeadId]) ? $headsMap[$diagHeadId] : 'Не найден';
+        $diagRows = isset($diagnostics[$diagnosticDepartmentId]) ? $diagnostics[$diagnosticDepartmentId] : [];
+        ?>
+        <div><strong>Подразделение:</strong> <?= htmlspecialcharsbx($departments[$diagnosticDepartmentId]['NAME']) ?></div>
+        <div><strong>UF_HEAD подразделения:</strong> <?= $diagHeadId ?> (<?= htmlspecialcharsbx($diagHeadName) ?>)</div>
+        <div><strong>Найдено подчиненных:</strong> <?= count($diagRows) ?></div>
+
+        <?php if (!empty($diagRows)): ?>
+            <table style="margin-top:10px; margin-bottom:20px;">
+                <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>Login</th>
+                    <th>RAW UF_HEAD</th>
+                    <th>Parsed IDs</th>
+                    <th>UF_CABINET</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($diagRows as $row): ?>
+                    <tr>
+                        <td><?= (int)$row['USER_ID'] ?></td>
+                        <td><?= htmlspecialcharsbx($row['LOGIN']) ?></td>
+                        <td><pre style="margin:0;white-space:pre-wrap;"><?= htmlspecialcharsbx(print_r($row['RAW_UF_HEAD'], true)) ?></pre></td>
+                        <td><?= htmlspecialcharsbx(implode(', ', $row['PARSED_HEADS'])) ?></td>
+                        <td><?= htmlspecialcharsbx($row['CABINET']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php else: ?>
+            <div class="muted" style="margin-bottom:20px;">Совпадений не найдено. Проверьте формат пользовательского поля UF_HEAD у сотрудников.</div>
+        <?php endif; ?>
+    <?php endif; ?>
+<?php endif; ?>
+
 <table>
     <thead>
     <tr>
