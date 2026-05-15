@@ -115,29 +115,25 @@ foreach ($departments as $departmentId => $department) {
     }
 }
 
-$descendantsMap = [];
-$getDescendants = static function (int $rootId) use (&$getDescendants, &$descendantsMap, $departmentChildren): array {
-    if (isset($descendantsMap[$rootId])) {
-        return $descendantsMap[$rootId];
+$departmentResponsibleHead = [];
+$assignResponsibleHead = static function (int $departmentId, int $inheritedHeadDepartmentId = 0) use (&$assignResponsibleHead, &$departmentResponsibleHead, $departments, $departmentChildren): void {
+    $currentHeadDepartmentId = $inheritedHeadDepartmentId;
+    if ((int)$departments[$departmentId]['UF_HEAD'] > 0) {
+        $currentHeadDepartmentId = $departmentId;
     }
 
-    $result = [];
-    foreach ($departmentChildren[$rootId] as $childId) {
-        $result[] = $childId;
-        $result = array_merge($result, $getDescendants($childId));
+    $departmentResponsibleHead[$departmentId] = $currentHeadDepartmentId;
+
+    foreach ($departmentChildren[$departmentId] as $childDepartmentId) {
+        $assignResponsibleHead($childDepartmentId, $currentHeadDepartmentId);
     }
-
-    $descendantsMap[$rootId] = $result;
-
-    return $result;
 };
 
-$targetDepartments = [];
 foreach ($departments as $departmentId => $department) {
-    if ((int)$department['UF_HEAD'] <= 0) {
-        continue;
+    $parentId = (int)$department['IBLOCK_SECTION_ID'];
+    if ($parentId <= 0 || !isset($departments[$parentId])) {
+        $assignResponsibleHead($departmentId, 0);
     }
-    $targetDepartments[$departmentId] = $getDescendants($departmentId);
 }
 
 $rsUsers = \CUser::GetList(
@@ -153,15 +149,20 @@ while ($user = $rsUsers->Fetch()) {
         $userDepartments = [(int)$userDepartments];
     }
 
-    $userDepartmentSet = [];
+    $targetHeadDepartments = [];
     foreach ($userDepartments as $userDepartmentId) {
         $userDepartmentId = (int)$userDepartmentId;
-        if ($userDepartmentId > 0) {
-            $userDepartmentSet[$userDepartmentId] = true;
+        if ($userDepartmentId <= 0 || !isset($departmentResponsibleHead[$userDepartmentId])) {
+            continue;
+        }
+
+        $headDepartmentId = (int)$departmentResponsibleHead[$userDepartmentId];
+        if ($headDepartmentId > 0) {
+            $targetHeadDepartments[$headDepartmentId] = $userDepartmentId;
         }
     }
 
-    if (empty($userDepartmentSet)) {
+    if (empty($targetHeadDepartments)) {
         continue;
     }
 
@@ -170,34 +171,22 @@ while ($user = $rsUsers->Fetch()) {
         $cabinet = 'Не указан';
     }
 
-    foreach ($targetDepartments as $departmentId => $descendantIds) {
-        if (empty($descendantIds)) {
+    foreach ($targetHeadDepartments as $headDepartmentId => $matchedDepartmentId) {
+        if (!isset($departments[$headDepartmentId]) || (int)$departments[$headDepartmentId]['UF_HEAD'] <= 0) {
             continue;
         }
 
-        $matchedDepartmentId = 0;
-        foreach ($descendantIds as $descendantId) {
-            if (isset($userDepartmentSet[$descendantId])) {
-                $matchedDepartmentId = $descendantId;
-                break;
+        $departmentEmployees[$headDepartmentId]['TOTAL']++;
+        if (!isset($departmentEmployees[$headDepartmentId]['CABINETS'][$cabinet])) {
+            $departmentEmployees[$headDepartmentId]['CABINETS'][$cabinet] = 0;
+        }
+        $departmentEmployees[$headDepartmentId]['CABINETS'][$cabinet]++;
+
+        if ($diagnosticDepartmentId > 0 && $headDepartmentId === $diagnosticDepartmentId) {
+            if (!isset($diagnostics[$headDepartmentId])) {
+                $diagnostics[$headDepartmentId] = [];
             }
-        }
-
-        if ($matchedDepartmentId <= 0) {
-            continue;
-        }
-
-        $departmentEmployees[$departmentId]['TOTAL']++;
-        if (!isset($departmentEmployees[$departmentId]['CABINETS'][$cabinet])) {
-            $departmentEmployees[$departmentId]['CABINETS'][$cabinet] = 0;
-        }
-        $departmentEmployees[$departmentId]['CABINETS'][$cabinet]++;
-
-        if ($diagnosticDepartmentId > 0 && $departmentId === $diagnosticDepartmentId) {
-            if (!isset($diagnostics[$departmentId])) {
-                $diagnostics[$departmentId] = [];
-            }
-            $diagnostics[$departmentId][] = [
+            $diagnostics[$headDepartmentId][] = [
                 'USER_ID' => (int)$user['ID'],
                 'LOGIN' => (string)$user['LOGIN'],
                 'RAW_UF_DEPARTMENT' => $user['UF_DEPARTMENT'],
@@ -240,7 +229,7 @@ header('Content-Type: text/html; charset=UTF-8');
         ?>
         <div><strong>Подразделение:</strong> <?= htmlspecialcharsbx($departments[$diagnosticDepartmentId]['NAME']) ?></div>
         <div><strong>UF_HEAD подразделения:</strong> <?= $diagHeadId ?> (<?= htmlspecialcharsbx($diagHeadName) ?>)</div>
-        <div><strong>Подчиненные ищутся по вложенным подразделениям (ниже по оргструктуре).</strong></div>
+        <div><strong>Подчиненные ищутся как непосредственные: сотрудник относится к ближайшему сверху подразделению с назначенным руководителем.</strong></div>
         <div><strong>Найдено подчиненных:</strong> <?= count($diagRows) ?></div>
 
         <?php if (!empty($diagRows)): ?>
@@ -267,7 +256,7 @@ header('Content-Type: text/html; charset=UTF-8');
                 </tbody>
             </table>
         <?php else: ?>
-            <div class="muted" style="margin-bottom:20px;">Совпадений не найдено по вложенным подразделениям. Проверьте привязку сотрудников к UF_DEPARTMENT.</div>
+            <div class="muted" style="margin-bottom:20px;">Совпадений не найдено. Проверьте привязку сотрудников к UF_DEPARTMENT и назначение руководителей в цепочке подразделений.</div>
         <?php endif; ?>
     <?php endif; ?>
 <?php endif; ?>
