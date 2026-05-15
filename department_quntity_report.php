@@ -190,6 +190,7 @@ $normalizeDirectoryCabinet = static function (string $cabinetName): string {
 };
 
 $cabinetUsageTotals = [];
+$cabinetDepartmentNames = [];
 
 foreach ($departments as $departmentId => $department) {
     $parentId = (int)$department['IBLOCK_SECTION_ID'];
@@ -250,6 +251,11 @@ while ($user = $rsUsers->Fetch()) {
                 $cabinetUsageTotals[$normalizedCabinet] = ['count' => 0, 'sample' => $cabinet];
             }
             $cabinetUsageTotals[$normalizedCabinet]['count']++;
+
+            if (!isset($cabinetDepartmentNames[$normalizedCabinet])) {
+                $cabinetDepartmentNames[$normalizedCabinet] = [];
+            }
+            $cabinetDepartmentNames[$normalizedCabinet][$departments[$headDepartmentId]['NAME']] = true;
         }
 
         if ($diagnosticDepartmentId > 0 && $headDepartmentId === $diagnosticDepartmentId) {
@@ -398,7 +404,8 @@ header('Content-Type: text/html; charset=UTF-8');
 <table>
     <thead>
     <tr>
-        <th>Кабинет (справочник)</th>
+        <th>Кабинет (агрегированное)</th>
+        <th>Подразделения</th>
         <th>Пользователей</th>
         <th>Мест по справочнику</th>
         <th>Разница (места - пользователи)</th>
@@ -413,13 +420,17 @@ header('Content-Type: text/html; charset=UTF-8');
         <?php
         $userCount = isset($cabinetUsageTotals[$summaryKey]) ? (int)$cabinetUsageTotals[$summaryKey]['count'] : 0;
         $workplaces = isset($cabinetDirectory[$summaryKey]) ? (int)$cabinetDirectory[$summaryKey]['workplaces'] : 0;
-        $cabinetTitle = isset($cabinetDirectory[$summaryKey])
-            ? $cabinetDirectory[$summaryKey]['name']
-            : ('Не найден в справочнике: ' . (isset($cabinetUsageTotals[$summaryKey]) ? $cabinetUsageTotals[$summaryKey]['sample'] : $summaryKey));
+        $cabinetTitle = isset($cabinetUsageTotals[$summaryKey])
+            ? (string)$cabinetUsageTotals[$summaryKey]['sample']
+            : (isset($cabinetDirectory[$summaryKey]) ? (string)$cabinetDirectory[$summaryKey]['name'] : (string)$summaryKey);
+        $departmentNames = isset($cabinetDepartmentNames[$summaryKey]) ? array_keys($cabinetDepartmentNames[$summaryKey]) : [];
+        sort($departmentNames, SORT_NATURAL | SORT_FLAG_CASE);
+        $departmentsLabel = empty($departmentNames) ? '—' : implode(', ', $departmentNames);
         $delta = $workplaces - $userCount;
         ?>
         <tr>
             <td><?= htmlspecialcharsbx($cabinetTitle) ?></td>
+            <td><?= htmlspecialcharsbx($departmentsLabel) ?></td>
             <td><?= $userCount ?></td>
             <td><?= $workplaces ?></td>
             <td><?= $delta ?></td>
