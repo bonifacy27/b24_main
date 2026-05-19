@@ -263,41 +263,84 @@ header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
 <html lang="ru">
-<head><meta charset="UTF-8"><title>Отчет по подразделениям и рабочим местам</title></head>
-<body style="font-family:Arial,sans-serif;font-size:13px;">
+<head>
+    <meta charset="UTF-8">
+    <title>Отчет по подразделениям и рабочим местам</title>
+    <style>
+        body { font-family: Arial,sans-serif; font-size:13px; margin:16px; }
+        table { border-collapse: collapse; width:100%; }
+        th, td { border:1px solid #d8e0ea; padding:6px 8px; vertical-align: top; }
+        th { background:#f5f9ff; }
+        .filters { margin: 10px 0 16px; }
+        .filters input { padding:4px 6px; }
+    </style>
+</head>
+<body>
 <h1>Отчет по подразделениям и рабочим местам</h1>
+<form method="get" class="filters">
+    <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
+    <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+    <label style="margin-left:8px;"><input type="checkbox" name="diagnostic" value="Y" <?= $showDiagnostics ? 'checked' : '' ?>> Диагностика</label>
+    <button type="submit" style="margin-left:8px;">Показать</button>
+</form>
 <div>Период: <strong><?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?></strong> — <strong><?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></strong></div>
 <?php if ($showDiagnostics): ?>
 <pre style="background:#f5f5f5;padding:10px;">СКУД диагностика:
 <?=htmlspecialcharsbx(print_r($skudDiagnostics, true))?></pre>
 <?php endif; ?>
 
-<table border="1" cellspacing="0" cellpadding="6" style="margin-top:12px;border-collapse:collapse;width:100%;">
-<tr>
-<th>Дата</th><th>Подразделение</th><th>Руководитель</th><th>Кол-во сотрудников</th><th>Форматы работы сотрудников</th><th>Кабинеты</th><th>Кол-во мест в кабинетах</th><th>В офисе &lt;= 4ч</th><th>В офисе &gt; 4ч</th><th>Сотрудников на удаленке</th><th>Сотрудников отсутствует</th>
-</tr>
-<?php foreach ($departmentData as $departmentId => $departmentRow): ?>
-    <?php
-    $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
-    $formats = $departmentRow['WORK_FORMATS']; ksort($formats, SORT_NATURAL | SORT_FLAG_CASE);
-    $cabinets = $departmentRow['CABINETS']; ksort($cabinets, SORT_NATURAL | SORT_FLAG_CASE);
-    ?>
-    <?php foreach ($skudStats[$departmentId] as $dateKey => $stat): ?>
+<?php
+$periodDays = [];
+foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $d) {
+    $periodDays[] = $d->format('Y-m-d');
+}
+?>
+
+<table>
+    <thead>
+    <tr>
+        <th rowspan="2">Подразделение</th>
+        <th rowspan="2">Руководитель</th>
+        <th rowspan="2">Кол-во сотрудников</th>
+        <th rowspan="2">Форматы работы сотрудников</th>
+        <th rowspan="2">Кабинеты</th>
+        <th rowspan="2">Кол-во мест в кабинетах</th>
+        <?php foreach ($periodDays as $dateKey): ?>
+            <th colspan="4"><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></th>
+        <?php endforeach; ?>
+    </tr>
+    <tr>
+        <?php foreach ($periodDays as $dateKey): ?>
+            <th>В офисе &lt;= 4ч</th>
+            <th>В офисе &gt; 4ч</th>
+            <th>Сотрудников на удаленке</th>
+            <th>Сотрудников отсутствует</th>
+        <?php endforeach; ?>
+    </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($departmentData as $departmentId => $departmentRow): ?>
+        <?php
+        $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
+        $formats = $departmentRow['WORK_FORMATS']; ksort($formats, SORT_NATURAL | SORT_FLAG_CASE);
+        $cabinets = $departmentRow['CABINETS']; ksort($cabinets, SORT_NATURAL | SORT_FLAG_CASE);
+        ?>
         <tr>
-            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
             <td><?=htmlspecialcharsbx($departments[$departmentId]['NAME'])?></td>
             <td><?=htmlspecialcharsbx($headName)?></td>
-            <td><?=$departmentRow['TOTAL']?></td>
+            <td><?= (int)$departmentRow['TOTAL'] ?></td>
             <td><?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
             <td><?php foreach ($cabinets as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
             <td><?php foreach ($cabinets as $name => $count) { $places = isset($cabinetDirectory[$name]) ? (int)$cabinetDirectory[$name] : 0; $delta = $places - (int)$count; echo htmlspecialcharsbx($name).': '.$places.' (Δ '.$delta.')<br>'; } ?></td>
-            <td><?=(int)$stat['OFFICE_LT_4']?></td>
-            <td><?=(int)$stat['OFFICE_GT_4']?></td>
-            <td><?=(int)$stat['REMOTE']?></td>
-            <td><?=(int)$stat['ABSENT']?></td>
+            <?php foreach ($periodDays as $dateKey): $stat = isset($skudStats[$departmentId][$dateKey]) ? $skudStats[$departmentId][$dateKey] : ['OFFICE_LT_4'=>0,'OFFICE_GT_4'=>0,'REMOTE'=>0,'ABSENT'=>0]; ?>
+                <td><?= (int)$stat['OFFICE_LT_4'] ?></td>
+                <td><?= (int)$stat['OFFICE_GT_4'] ?></td>
+                <td><?= (int)$stat['REMOTE'] ?></td>
+                <td><?= (int)$stat['ABSENT'] ?></td>
+            <?php endforeach; ?>
         </tr>
     <?php endforeach; ?>
-<?php endforeach; ?>
+    </tbody>
 </table>
 </body>
 </html>
