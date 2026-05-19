@@ -70,6 +70,60 @@ $normalizeDurationToMinutes = static function (string $value): int {
     return ((int)$m[1] * 60) + (int)$m[2];
 };
 
+$normalizeCabinet = static function (string $cabinetRaw): string {
+    $value = trim(mb_strtolower($cabinetRaw));
+    if ($value === '' || $value === 'не указан') {
+        return '';
+    }
+
+    if (!preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+        return '';
+    }
+
+    $cabinetCode = str_replace([' ', ','], '', $match[1]);
+    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
+
+    if (mb_strpos($value, 'москов') !== false) {
+        return 'moskovskiy|' . $cabinetCode;
+    }
+    if (mb_strpos($value, 'новоладож') !== false) {
+        return 'novoladozhskaya|' . $cabinetCode;
+    }
+    if (mb_strpos($value, 'рентген') !== false) {
+        return 'rentgena|' . $cabinetCode;
+    }
+
+    return 'other|' . $cabinetCode;
+};
+
+$normalizeDirectoryCabinet = static function (string $cabinetName): string {
+    $value = trim(mb_strtolower($cabinetName));
+    if ($value === '') {
+        return '';
+    }
+
+    $parts = array_map('trim', explode(',', $value, 2));
+    if (count($parts) < 2) {
+        return '';
+    }
+
+    $location = $parts[0];
+    $cabinetCode = str_replace([' ', ','], '', $parts[1]);
+    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
+
+    if (mb_strpos($location, 'москов') !== false) {
+        return 'moskovskiy|' . $cabinetCode;
+    }
+    if (mb_strpos($location, 'новоладож') !== false) {
+        return 'novoladozhskaya|' . $cabinetCode;
+    }
+    if (mb_strpos($location, 'рентген') !== false) {
+        return 'rentgena|' . $cabinetCode;
+    }
+
+    return 'other|' . $cabinetCode;
+};
+
 $departments = [];
 $rsSections = \CIBlockSection::GetList(
     ['LEFT_MARGIN' => 'ASC'],
@@ -133,6 +187,7 @@ if (!empty($headIds)) {
 
 $departmentData = [];
 $userDepartmentsMap = [];
+$cabinetUsageAll = [];
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $departmentData[$departmentId] = ['TOTAL' => 0, 'WORK_FORMATS' => [], 'CABINETS' => []];
@@ -170,6 +225,18 @@ while ($user = $rsUsers->Fetch()) {
             $departmentData[$headDepartmentId]['CABINETS'][$cabinet] = 0;
         }
         $departmentData[$headDepartmentId]['CABINETS'][$cabinet]++;
+
+        $normalizedCabinet = $normalizeCabinet($cabinet);
+        if ($normalizedCabinet !== '') {
+            if (!isset($cabinetUsageAll[$normalizedCabinet])) {
+                $cabinetUsageAll[$normalizedCabinet] = ['TOTAL' => 0, 'BY_DEPARTMENT' => [], 'TITLE' => $cabinet];
+            }
+            $cabinetUsageAll[$normalizedCabinet]['TOTAL']++;
+            if (!isset($cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$headDepartmentId])) {
+                $cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$headDepartmentId] = 0;
+            }
+            $cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$headDepartmentId]++;
+        }
     }
 }
 
@@ -180,7 +247,10 @@ if ($cabinetHl) {
     $cabinetClass = $cabinetEntity->getDataClass();
     $rsCabinets = $cabinetClass::getList(['select' => ['UF_NAME', 'UF_WORKPLACES']]);
     while ($row = $rsCabinets->fetch()) {
-        $cabinetDirectory[trim((string)$row['UF_NAME'])] = (int)$row['UF_WORKPLACES'];
+        $title = trim((string)$row['UF_NAME']);
+        $normalized = $normalizeDirectoryCabinet($title);
+        if ($normalized === '') { continue; }
+        $cabinetDirectory[$normalized] = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES']];
     }
 }
 
@@ -273,6 +343,10 @@ header('Content-Type: text/html; charset=UTF-8');
         th { background:#f5f9ff; }
         .filters { margin: 10px 0 16px; }
         .filters input { padding:4px 6px; }
+        .cab-line { margin-bottom: 6px; padding: 4px 6px; border-radius: 4px; }
+        .delta-bad { background: #ffd9d9; }
+        .delta-warn { background: #fff5cc; }
+        .delta-good { background: #d9f7d9; }
     </style>
 </head>
 <body>
@@ -303,8 +377,7 @@ foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->m
         <th rowspan="2">Руководитель</th>
         <th rowspan="2">Кол-во сотрудников</th>
         <th rowspan="2">Форматы работы сотрудников</th>
-        <th rowspan="2">Кабинеты</th>
-        <th rowspan="2">Кол-во мест в кабинетах</th>
+        <th rowspan="2">Кабинеты и рабочие места</th>
         <?php foreach ($periodDays as $dateKey): ?>
             <th colspan="4"><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></th>
         <?php endforeach; ?>
@@ -330,8 +403,36 @@ foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->m
             <td><?=htmlspecialcharsbx($headName)?></td>
             <td><?= (int)$departmentRow['TOTAL'] ?></td>
             <td><?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
-            <td><?php foreach ($cabinets as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
-            <td><?php foreach ($cabinets as $name => $count) { $places = isset($cabinetDirectory[$name]) ? (int)$cabinetDirectory[$name] : 0; $delta = $places - (int)$count; echo htmlspecialcharsbx($name).': '.$places.' (Δ '.$delta.')<br>'; } ?></td>
+            <td>
+                <?php foreach ($cabinets as $name => $count): ?>
+                    <?php
+                    $normalizedCabinet = $normalizeCabinet($name);
+                    $places = 0;
+                    $cabinetTitle = $name;
+                    $thisDepartmentOccupied = (int)$count;
+                    $totalOccupied = (int)$count;
+                    if ($normalizedCabinet !== '' && isset($cabinetUsageAll[$normalizedCabinet])) {
+                        $totalOccupied = (int)$cabinetUsageAll[$normalizedCabinet]['TOTAL'];
+                        $thisDepartmentOccupied = isset($cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$departmentId]) ? (int)$cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$departmentId] : (int)$count;
+                        $cabinetTitle = (string)$cabinetUsageAll[$normalizedCabinet]['TITLE'];
+                    }
+                    if ($normalizedCabinet !== '' && isset($cabinetDirectory[$normalizedCabinet])) {
+                        $places = (int)$cabinetDirectory[$normalizedCabinet]['WORKPLACES'];
+                        $cabinetTitle = (string)$cabinetDirectory[$normalizedCabinet]['TITLE'];
+                    }
+                    $otherOccupied = max(0, $totalOccupied - $thisDepartmentOccupied);
+                    $delta = $places - $totalOccupied;
+                    $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
+                    ?>
+                    <div class="cab-line <?= $deltaClass ?>">
+                        <strong><?= htmlspecialcharsbx($cabinetTitle) ?></strong><br>
+                        мест всего: <strong><?= $places ?></strong>,
+                        занято этим подразделением: <strong><?= $thisDepartmentOccupied ?></strong>,
+                        занято другими: <strong><?= $otherOccupied ?></strong>,
+                        разница (места - занято всего): <strong><?= $delta ?></strong>
+                    </div>
+                <?php endforeach; ?>
+            </td>
             <?php foreach ($periodDays as $dateKey): $stat = isset($skudStats[$departmentId][$dateKey]) ? $skudStats[$departmentId][$dateKey] : ['OFFICE_LT_4'=>0,'OFFICE_GT_4'=>0,'REMOTE'=>0,'ABSENT'=>0]; ?>
                 <td><?= (int)$stat['OFFICE_LT_4'] ?></td>
                 <td><?= (int)$stat['OFFICE_GT_4'] ?></td>
