@@ -187,6 +187,7 @@ if (!empty($headIds)) {
 
 $departmentData = [];
 $userDepartmentsMap = [];
+$userCabinetMap = [];
 $cabinetUsageAll = [];
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
@@ -213,6 +214,7 @@ while ($user = $rsUsers->Fetch()) {
     $cabinet = trim((string)$user['UF_CABINET']);
     $cabinet = $cabinet !== '' ? $cabinet : 'Не указан';
     $workFormat = trim((string)$user['UF_WORK_FORMAT']);
+    $userCabinetMap[$userId] = $cabinet;
     $workFormat = $workFormat !== '' ? $workFormat : 'Не указан';
 
     foreach (array_keys($headDepartments) as $headDepartmentId) {
@@ -263,6 +265,13 @@ foreach ($period as $day) {
     }
 }
 
+
+$cabinetDailyOffice = [];
+foreach ($period as $day) {
+    $dateKey = $day->format('Y-m-d');
+    $cabinetDailyOffice[$dateKey] = [];
+}
+
 $skudDiagnostics = ['rows' => 0, 'with_user_mapping' => 0, 'parsed_date' => 0, 'in_period' => 0, 'office_lt_4' => 0, 'office_gt_4' => 0, 'remote' => 0, 'absent' => 0, 'sample' => []];
 $skudHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(5)->fetch();
 if ($skudHl) {
@@ -285,6 +294,8 @@ if ($skudHl) {
         if ($dateKey < $dateFrom->format('Y-m-d') || $dateKey > $dateTo->format('Y-m-d')) { continue; }
         $skudDiagnostics['in_period']++;
         $entry = trim((string)$row['UF_ENTRY_TIME']);
+        $userCabinet = isset($userCabinetMap[$userId]) ? (string)$userCabinetMap[$userId] : '';
+        $userCabinetNorm = $normalizeCabinet($userCabinet);
         $norma = $normalizeDurationToMinutes((string)$row['UF_NORMA']);
         $worked = $normalizeDurationToMinutes((string)$row['UF_WT_TOTAL']);
         $status = trim((string)$row['UF_DAY_STATUS']);
@@ -311,6 +322,17 @@ if ($skudHl) {
                 } else {
                     $skudStats[$departmentId][$dateKey]['OFFICE_LT_4']++;
                     $skudDiagnostics['office_lt_4']++;
+                }
+
+                if ($userCabinetNorm !== '') {
+                    if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
+                        $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
+                    }
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm]['TOTAL']++;
+                    if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId])) {
+                        $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId] = 0;
+                    }
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId]++;
                 }
                 continue;
             }
@@ -409,27 +431,30 @@ foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->m
                     $normalizedCabinet = $normalizeCabinet($name);
                     $places = 0;
                     $cabinetTitle = $name;
-                    $thisDepartmentOccupied = (int)$count;
-                    $totalOccupied = (int)$count;
-                    if ($normalizedCabinet !== '' && isset($cabinetUsageAll[$normalizedCabinet])) {
-                        $totalOccupied = (int)$cabinetUsageAll[$normalizedCabinet]['TOTAL'];
-                        $thisDepartmentOccupied = isset($cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$departmentId]) ? (int)$cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$departmentId] : (int)$count;
-                        $cabinetTitle = (string)$cabinetUsageAll[$normalizedCabinet]['TITLE'];
-                    }
                     if ($normalizedCabinet !== '' && isset($cabinetDirectory[$normalizedCabinet])) {
                         $places = (int)$cabinetDirectory[$normalizedCabinet]['WORKPLACES'];
                         $cabinetTitle = (string)$cabinetDirectory[$normalizedCabinet]['TITLE'];
                     }
-                    $otherOccupied = max(0, $totalOccupied - $thisDepartmentOccupied);
-                    $delta = $places - $totalOccupied;
-                    $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
                     ?>
-                    <div class="cab-line <?= $deltaClass ?>">
-                        <strong><?= htmlspecialcharsbx($cabinetTitle) ?></strong><br>
-                        мест всего: <strong><?= $places ?></strong>,
-                        занято этим подразделением: <strong><?= $thisDepartmentOccupied ?></strong>,
-                        занято другими: <strong><?= $otherOccupied ?></strong>,
-                        разница (места - занято всего): <strong><?= $delta ?></strong>
+                    <div class="cab-line" style="border:1px solid #e1e7ef;">
+                        <strong><?= htmlspecialcharsbx($cabinetTitle) ?></strong> (мест всего: <strong><?= $places ?></strong>)<br>
+                        <?php foreach ($periodDays as $dayKey): ?>
+                            <?php
+                            $dayCab = ($normalizedCabinet !== '' && isset($cabinetDailyOffice[$dayKey][$normalizedCabinet])) ? $cabinetDailyOffice[$dayKey][$normalizedCabinet] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
+                            $thisDepartmentOccupied = isset($dayCab['BY_DEPARTMENT'][$departmentId]) ? (int)$dayCab['BY_DEPARTMENT'][$departmentId] : 0;
+                            $totalOccupied = (int)$dayCab['TOTAL'];
+                            $otherOccupied = max(0, $totalOccupied - $thisDepartmentOccupied);
+                            $delta = $places - $totalOccupied;
+                            $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
+                            ?>
+                            <div class="<?= $deltaClass ?>" style="margin-top:4px;padding:2px 4px;">
+                                <?=htmlspecialcharsbx((new \DateTime($dayKey))->format('d.m.Y'))?>: 
+                                это подразделение <strong><?= $thisDepartmentOccupied ?></strong>,
+                                другие <strong><?= $otherOccupied ?></strong>,
+                                всего занято <strong><?= $totalOccupied ?></strong>,
+                                разница <strong><?= $delta ?></strong>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
                 <?php endforeach; ?>
             </td>
