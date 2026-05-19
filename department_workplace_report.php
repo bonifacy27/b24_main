@@ -181,6 +181,11 @@ $departmentData = [];
 $userDepartmentsMap = [];
 $userCabinetMap = [];
 $cabinetUsageAll = [];
+$workFormatMap = [
+    '1929' => 'Офис',
+    '1930' => 'Дистанционный',
+    '1931' => 'Комбинированный',
+];
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $departmentData[$departmentId] = ['TOTAL' => 0, 'WORK_FORMATS' => [], 'CABINETS' => []];
@@ -207,7 +212,7 @@ while ($user = $rsUsers->Fetch()) {
     $cabinet = $cabinet !== '' ? $cabinet : 'Не указан';
     $workFormat = trim((string)$user['UF_WORK_FORMAT']);
     $userCabinetMap[$userId] = $cabinet;
-    $workFormat = $workFormat !== '' ? $workFormat : 'Не указан';
+    $workFormat = $workFormat !== '' ? (isset($workFormatMap[$workFormat]) ? $workFormatMap[$workFormat] : ('Неизвестный формат (' . $workFormat . ')')) : 'Не указан';
 
     foreach (array_keys($headDepartments) as $headDepartmentId) {
         $departmentData[$headDepartmentId]['TOTAL']++;
@@ -444,7 +449,6 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         <th rowspan="2">Подразделение</th>
         <th rowspan="2">Руководитель</th>
         <th rowspan="2">Кол-во сотрудников</th>
-        <th rowspan="2">Форматы работы сотрудников</th>
                 <?php foreach ($periodDays as $dateKey): ?>
             <th colspan="5"><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></th>
         <?php endforeach; ?>
@@ -469,8 +473,10 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         <tr>
             <td><?=htmlspecialcharsbx($departments[$departmentId]['NAME'])?></td>
             <td><?=htmlspecialcharsbx($headName)?></td>
-            <td><?= (int)$departmentRow['TOTAL'] ?></td>
-            <td><?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
+            <td>
+                <strong><?= (int)$departmentRow['TOTAL'] ?></strong><br>
+                <?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?>
+            </td>
             <?php foreach ($periodDays as $dateKey): $stat = isset($skudStats[$departmentId][$dateKey]) ? $skudStats[$departmentId][$dateKey] : ['OFFICE_LT_4'=>0,'OFFICE_GT_4'=>0,'REMOTE'=>0,'ABSENT'=>0]; ?>
                 <td><?= (int)$stat['OFFICE_LT_4'] ?></td>
                 <td><?= (int)$stat['OFFICE_GT_4'] ?></td>
