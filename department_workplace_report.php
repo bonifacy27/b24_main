@@ -181,6 +181,7 @@ $departmentData = [];
 $userDepartmentsMap = [];
 $departmentUsers = [];
 $userCabinetMap = [];
+$userWorkFormatCodeMap = [];
 $cabinetUsageAll = [];
 $workFormatMap = [
     '1929' => 'Офис',
@@ -212,8 +213,10 @@ while ($user = $rsUsers->Fetch()) {
     $userDepartmentsMap[$userId] = array_keys($headDepartments);
     $cabinet = trim((string)$user['UF_CABINET']);
     $cabinet = $cabinet !== '' ? $cabinet : 'Не указан';
-    $workFormat = trim((string)$user['UF_WORK_FORMAT']);
+    $workFormatCode = trim((string)$user['UF_WORK_FORMAT']);
+    $workFormat = $workFormatCode;
     $userCabinetMap[$userId] = $cabinet;
+    $userWorkFormatCodeMap[$userId] = $workFormatCode;
     $workFormat = $workFormat !== '' ? (isset($workFormatMap[$workFormat]) ? $workFormatMap[$workFormat] : ('Неизвестный формат (' . $workFormat . ')')) : 'Не указан';
 
     foreach (array_keys($headDepartments) as $headDepartmentId) {
@@ -388,7 +391,12 @@ foreach ($departmentData as $departmentId => $_d) {
         $dateKey = $d->format('Y-m-d');
         $skudStats[$departmentId][$dateKey] = ['OFFICE_LT_4' => 0, 'OFFICE_GT_4' => 0, 'REMOTE' => 0, 'ABSENT' => 0];
         foreach ($deptUserIds as $uid) {
-            $state = isset($skudUserStates[$departmentId][$dateKey][$uid]) ? $skudUserStates[$departmentId][$dateKey][$uid] : 'ABSENT';
+            if (isset($skudUserStates[$departmentId][$dateKey][$uid])) {
+                $state = $skudUserStates[$departmentId][$dateKey][$uid];
+            } else {
+                $userWorkFormatCode = isset($userWorkFormatCodeMap[$uid]) ? (string)$userWorkFormatCodeMap[$uid] : '';
+                $state = $userWorkFormatCode === '1930' ? 'REMOTE' : 'ABSENT';
+            }
             $skudStats[$departmentId][$dateKey][$state]++;
         }
     }
