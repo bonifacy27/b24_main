@@ -39,6 +39,8 @@ $dateFrom->setTime(0,0,0);
 $dateTo->setTime(0,0,0);
 $showDiagnostics = isset($_GET['diagnostic']) && (string)$_GET['diagnostic'] === 'Y';
 $reportMode = isset($_GET['report_mode']) && (string)$_GET['report_mode'] === 'summary' ? 'summary' : 'daily';
+$cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
+$cabinetFilterNorm = '';
 
 
 $parseSkudDateToKey = static function ($rawValue): string {
@@ -96,6 +98,10 @@ $normalizeCabinet = static function (string $cabinetRaw): string {
 
     return 'other|' . $cabinetCode;
 };
+
+if ($cabinetFilterRaw !== '') {
+    $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
+}
 
 $normalizeDirectoryCabinet = static function (string $cabinetName): string {
     $value = trim(mb_strtolower($cabinetName));
@@ -352,6 +358,38 @@ if ($skudHl) {
     }
 }
 
+
+$cabinetFilterOptions = [];
+foreach ($cabinetDirectory as $cabKey => $cabData) {
+    $cabinetFilterOptions[$cabData['TITLE']] = true;
+}
+foreach ($departmentData as $dRow) {
+    foreach ($dRow['CABINETS'] as $cabName => $_c) {
+        $cabinetFilterOptions[$cabName] = true;
+    }
+}
+$availableCabinets = array_keys($cabinetFilterOptions);
+sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
+
+$filteredDepartmentIds = [];
+foreach ($departmentData as $departmentId => $departmentRow) {
+    if ($cabinetFilterNorm === '') {
+        $filteredDepartmentIds[] = $departmentId;
+        continue;
+    }
+
+    $hasCabinet = false;
+    foreach ($departmentRow['CABINETS'] as $cabName => $_count) {
+        if ($normalizeCabinet($cabName) === $cabinetFilterNorm) {
+            $hasCabinet = true;
+            break;
+        }
+    }
+    if ($hasCabinet) {
+        $filteredDepartmentIds[] = $departmentId;
+    }
+}
+
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
@@ -379,6 +417,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;"><input type="checkbox" name="diagnostic" value="Y" <?= $showDiagnostics ? 'checked' : '' ?>> Диагностика</label>
     <label style="margin-left:8px;">Режим: <select name="report_mode"><option value="daily" <?= $reportMode === 'daily' ? 'selected' : '' ?>>По датам за период</option><option value="summary" <?= $reportMode === 'summary' ? 'selected' : '' ?>>Сводный за период</option></select></label>
+    <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
     <button type="submit" style="margin-left:8px;">Показать</button>
 </form>
 <div>Период: <strong><?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?></strong> — <strong><?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></strong></div>
@@ -421,8 +460,7 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         <th rowspan="2">Руководитель</th>
         <th rowspan="2">Кол-во сотрудников</th>
         <th rowspan="2">Форматы работы сотрудников</th>
-        <th rowspan="2">Кабинеты и рабочие места</th>
-        <?php foreach ($periodDays as $dateKey): ?>
+                <?php foreach ($periodDays as $dateKey): ?>
             <th colspan="4"><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></th>
         <?php endforeach; ?>
     </tr>
@@ -436,7 +474,7 @@ foreach ($departmentData as $departmentId => $departmentRow) {
     </tr>
     </thead>
     <tbody>
-    <?php foreach ($departmentData as $departmentId => $departmentRow): ?>
+    <?php foreach ($filteredDepartmentIds as $departmentId): $departmentRow = $departmentData[$departmentId]; ?>
         <?php
         $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
         $formats = $departmentRow['WORK_FORMATS']; ksort($formats, SORT_NATURAL | SORT_FLAG_CASE);
@@ -447,44 +485,36 @@ foreach ($departmentData as $departmentId => $departmentRow) {
             <td><?=htmlspecialcharsbx($headName)?></td>
             <td><?= (int)$departmentRow['TOTAL'] ?></td>
             <td><?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
-            <td>
-                <?php foreach ($cabinets as $name => $count): ?>
-                    <?php
-                    $normalizedCabinet = $normalizeCabinet($name);
-                    $places = 0;
-                    $cabinetTitle = $name;
-                    if ($normalizedCabinet !== '' && isset($cabinetDirectory[$normalizedCabinet])) {
-                        $places = (int)$cabinetDirectory[$normalizedCabinet]['WORKPLACES'];
-                        $cabinetTitle = (string)$cabinetDirectory[$normalizedCabinet]['TITLE'];
-                    }
-                    ?>
-                    <div class="cab-line" style="border:1px solid #e1e7ef;">
-                        <strong><?= htmlspecialcharsbx($cabinetTitle) ?></strong> (мест всего: <strong><?= $places ?></strong>)<br>
-                        <?php foreach ($periodDays as $dayKey): ?>
-                            <?php
-                            $dayCab = ($normalizedCabinet !== '' && isset($cabinetDailyOffice[$dayKey][$normalizedCabinet])) ? $cabinetDailyOffice[$dayKey][$normalizedCabinet] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
-                            $thisDepartmentOccupied = isset($dayCab['BY_DEPARTMENT'][$departmentId]) ? (int)$dayCab['BY_DEPARTMENT'][$departmentId] : 0;
-                            $totalOccupied = (int)$dayCab['TOTAL'];
-                            $otherOccupied = max(0, $totalOccupied - $thisDepartmentOccupied);
-                            $delta = $places - $totalOccupied;
-                            $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
-                            ?>
-                            <div class="<?= $deltaClass ?>" style="margin-top:4px;padding:2px 4px;">
-                                <?=htmlspecialcharsbx((new \DateTime($dayKey))->format('d.m.Y'))?>: 
-                                это подразделение <strong><?= $thisDepartmentOccupied ?></strong>,
-                                другие <strong><?= $otherOccupied ?></strong>,
-                                всего занято <strong><?= $totalOccupied ?></strong>,
-                                разница <strong><?= $delta ?></strong>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endforeach; ?>
-            </td>
             <?php foreach ($periodDays as $dateKey): $stat = isset($skudStats[$departmentId][$dateKey]) ? $skudStats[$departmentId][$dateKey] : ['OFFICE_LT_4'=>0,'OFFICE_GT_4'=>0,'REMOTE'=>0,'ABSENT'=>0]; ?>
                 <td><?= (int)$stat['OFFICE_LT_4'] ?></td>
                 <td><?= (int)$stat['OFFICE_GT_4'] ?></td>
                 <td><?= (int)$stat['REMOTE'] ?></td>
-                <td><?= (int)$stat['ABSENT'] ?></td>
+                <td>
+                    <?= (int)$stat['ABSENT'] ?>
+                    <div style="margin-top:6px; border-top:1px dashed #cfd8e3; padding-top:4px;">
+                        <?php foreach ($cabinets as $cabName => $cabCnt): ?>
+                            <?php
+                            $cabNorm = $normalizeCabinet($cabName);
+                            if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+                            $places = 0;
+                            $cabTitle = $cabName;
+                            if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) {
+                                $places = (int)$cabinetDirectory[$cabNorm]['WORKPLACES'];
+                                $cabTitle = (string)$cabinetDirectory[$cabNorm]['TITLE'];
+                            }
+                            $dayCab = ($cabNorm !== '' && isset($cabinetDailyOffice[$dateKey][$cabNorm])) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
+                            $thisDep = isset($dayCab['BY_DEPARTMENT'][$departmentId]) ? (int)$dayCab['BY_DEPARTMENT'][$departmentId] : 0;
+                            $totalOcc = (int)$dayCab['TOTAL'];
+                            $otherDep = max(0, $totalOcc - $thisDep);
+                            $delta = $places - $totalOcc;
+                            $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
+                            ?>
+                            <div class="<?= $deltaClass ?>" style="margin-top:3px;padding:2px 4px;">
+                                <strong><?=htmlspecialcharsbx($cabTitle)?></strong>: мест <?= $places ?>, это подр. <?= $thisDep ?>, другие <?= $otherDep ?>, Δ <?= $delta ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </td>
             <?php endforeach; ?>
         </tr>
     <?php endforeach; ?>
@@ -498,7 +528,7 @@ foreach ($departmentData as $departmentId => $departmentRow) {
     </tr>
     </thead>
     <tbody>
-    <?php foreach ($departmentData as $departmentId => $departmentRow): ?>
+    <?php foreach ($filteredDepartmentIds as $departmentId): $departmentRow = $departmentData[$departmentId]; ?>
         <?php
         $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
         $cabinets = $departmentRow['CABINETS']; ksort($cabinets, SORT_NATURAL | SORT_FLAG_CASE);
