@@ -529,6 +529,17 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
         $formats = $departmentRow['WORK_FORMATS']; ksort($formats, SORT_NATURAL | SORT_FLAG_CASE);
         $cabinets = $departmentRow['CABINETS']; ksort($cabinets, SORT_NATURAL | SORT_FLAG_CASE);
+        $uniqueCabinets = [];
+        foreach ($cabinets as $cabName => $cabCount) {
+            $cabNorm = $normalizeCabinet($cabName);
+            if ($cabNorm === '') {
+                $cabNorm = 'raw|' . mb_strtolower(trim((string)$cabName));
+            }
+            if (!isset($uniqueCabinets[$cabNorm])) {
+                $uniqueCabinets[$cabNorm] = ['name' => $cabName, 'count' => 0];
+            }
+            $uniqueCabinets[$cabNorm]['count'] += (int)$cabCount;
+        }
         ?>
         <tr>
             <td><?=htmlspecialcharsbx($departments[$departmentId]['NAME'])?></td>
@@ -543,12 +554,12 @@ foreach ($departmentData as $departmentId => $departmentRow) {
                 <td><?= (int)$stat['REMOTE'] ?></td>
                 <td><?= (int)$stat['ABSENT'] ?></td>
                 <td>
-                    <?php foreach ($cabinets as $cabName => $cabCnt): ?>
+                    <?php foreach ($uniqueCabinets as $cabNormKey => $cabRow): ?>
                         <?php
-                        $cabNorm = $normalizeCabinet($cabName);
+                        $cabNorm = mb_strpos($cabNormKey, 'raw|') === 0 ? '' : $cabNormKey;
                         if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
                         $places = 0;
-                        $cabTitle = $cabName;
+                        $cabTitle = (string)$cabRow['name'];
                         if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) {
                             $places = (int)$cabinetDirectory[$cabNorm]['WORKPLACES'];
                             $cabTitle = (string)$cabinetDirectory[$cabNorm]['TITLE'];
