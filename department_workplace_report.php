@@ -179,6 +179,7 @@ if (!empty($headIds)) {
 
 $departmentData = [];
 $userDepartmentsMap = [];
+$departmentUsers = [];
 $userCabinetMap = [];
 $cabinetUsageAll = [];
 $workFormatMap = [
@@ -189,6 +190,7 @@ $workFormatMap = [
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $departmentData[$departmentId] = ['TOTAL' => 0, 'WORK_FORMATS' => [], 'CABINETS' => []];
+    $departmentUsers[$departmentId] = [];
 }
 
 $rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_WORK_FORMAT'], 'FIELDS' => ['ID', 'UF_DEPARTMENT', 'UF_CABINET', 'UF_WORK_FORMAT']]);
@@ -215,7 +217,8 @@ while ($user = $rsUsers->Fetch()) {
     $workFormat = $workFormat !== '' ? (isset($workFormatMap[$workFormat]) ? $workFormatMap[$workFormat] : ('Неизвестный формат (' . $workFormat . ')')) : 'Не указан';
 
     foreach (array_keys($headDepartments) as $headDepartmentId) {
-        $departmentData[$headDepartmentId]['TOTAL']++;
+$departmentData[$headDepartmentId]['TOTAL']++;
+        $departmentUsers[$headDepartmentId][$userId] = true;
         if (!isset($departmentData[$headDepartmentId]['WORK_FORMATS'][$workFormat])) {
             $departmentData[$headDepartmentId]['WORK_FORMATS'][$workFormat] = 0;
         }
@@ -269,6 +272,7 @@ foreach ($period as $day) {
     $cabinetDailyOffice[$dateKey] = [];
 }
 
+$skudUserStates = [];
 $skudDiagnostics = ['rows' => 0, 'with_user_mapping' => 0, 'parsed_date' => 0, 'in_period' => 0, 'office_lt_4' => 0, 'office_gt_4' => 0, 'remote' => 0, 'absent' => 0, 'sample' => []];
 $skudHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(5)->fetch();
 if ($skudHl) {
@@ -312,15 +316,9 @@ if ($skudHl) {
         foreach ($userDepartmentsMap[$userId] as $departmentId) {
             if (!isset($skudStats[$departmentId][$dateKey])) { continue; }
 
+            $state = '';
             if ($entry !== '') {
-                if ($worked > 240) {
-                    $skudStats[$departmentId][$dateKey]['OFFICE_GT_4']++;
-                    $skudDiagnostics['office_gt_4']++;
-                } else {
-                    $skudStats[$departmentId][$dateKey]['OFFICE_LT_4']++;
-                    $skudDiagnostics['office_lt_4']++;
-                }
-
+                $state = $worked > 240 ? 'OFFICE_GT_4' : 'OFFICE_LT_4';
                 if ($userCabinetNorm !== '') {
                     if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
                         $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
@@ -331,18 +329,20 @@ if ($skudHl) {
                     }
                     $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId]++;
                 }
-                continue;
+            } elseif ($norma > 0 && $worked === $norma) {
+                $state = 'REMOTE';
+            } elseif ($status !== '' && mb_strtolower($status) !== 'работа') {
+                $state = 'ABSENT';
             }
 
-            if ($norma > 0 && $worked === $norma) {
-                $skudStats[$departmentId][$dateKey]['REMOTE']++;
-                $skudDiagnostics['remote']++;
-                continue;
-            }
-
-            if ($status !== '' && mb_strtolower($status) !== 'работа') {
-                $skudStats[$departmentId][$dateKey]['ABSENT']++;
-                $skudDiagnostics['absent']++;
+            if ($state !== '') {
+                if (!isset($skudUserStates[$departmentId])) { $skudUserStates[$departmentId] = []; }
+                if (!isset($skudUserStates[$departmentId][$dateKey])) { $skudUserStates[$departmentId][$dateKey] = []; }
+                $prev = isset($skudUserStates[$departmentId][$dateKey][$userId]) ? $skudUserStates[$departmentId][$dateKey][$userId] : '';
+                $priority = ['OFFICE_GT_4'=>4,'OFFICE_LT_4'=>3,'REMOTE'=>2,'ABSENT'=>1,''=>0];
+                if ($priority[$state] > $priority[$prev]) {
+                    $skudUserStates[$departmentId][$dateKey][$userId] = $state;
+                }
             }
         }
     }
@@ -377,6 +377,20 @@ foreach ($departmentData as $departmentId => $departmentRow) {
     }
     if ($hasCabinet) {
         $filteredDepartmentIds[] = $departmentId;
+    }
+}
+
+
+// Пересчет статистики: каждый сотрудник подразделения на каждую дату должен попасть в ровно один статус.
+foreach ($departmentData as $departmentId => $_d) {
+    $deptUserIds = isset($departmentUsers[$departmentId]) ? array_keys($departmentUsers[$departmentId]) : [];
+    foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $d) {
+        $dateKey = $d->format('Y-m-d');
+        $skudStats[$departmentId][$dateKey] = ['OFFICE_LT_4' => 0, 'OFFICE_GT_4' => 0, 'REMOTE' => 0, 'ABSENT' => 0];
+        foreach ($deptUserIds as $uid) {
+            $state = isset($skudUserStates[$departmentId][$dateKey][$uid]) ? $skudUserStates[$departmentId][$dateKey][$uid] : 'ABSENT';
+            $skudStats[$departmentId][$dateKey][$state]++;
+        }
     }
 }
 
