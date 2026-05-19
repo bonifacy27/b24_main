@@ -15,6 +15,7 @@ define('NOT_CHECK_PERMISSIONS', true);
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
 
 use Bitrix\Main\Loader;
+use Bitrix\Main\Type\Date;
 
 if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
     header('Content-Type: text/plain; charset=UTF-8');
@@ -34,6 +35,33 @@ $dateToRaw = isset($_GET['date_to']) ? (string)$_GET['date_to'] : $dateFromRaw;
 $dateFrom = \DateTime::createFromFormat('Y-m-d', $dateFromRaw) ?: new \DateTime();
 $dateTo = \DateTime::createFromFormat('Y-m-d', $dateToRaw) ?: clone $dateFrom;
 if ($dateFrom > $dateTo) { [$dateFrom, $dateTo] = [$dateTo, $dateFrom]; }
+$dateFrom->setTime(0,0,0);
+$dateTo->setTime(0,0,0);
+$showDiagnostics = isset($_GET['diagnostic']) && (string)$_GET['diagnostic'] === 'Y';
+
+
+$parseSkudDateToKey = static function ($rawValue): string {
+    if ($rawValue instanceof \DateTimeInterface) {
+        return $rawValue->format('Y-m-d');
+    }
+    $raw = trim((string)$rawValue);
+    if ($raw === '') { return ''; }
+
+    $formats = ['Y-m-d H:i:s', 'Y-m-d', 'd.m.Y H:i:s', 'd.m.Y'];
+    foreach ($formats as $format) {
+        $dt = \DateTime::createFromFormat($format, $raw);
+        if ($dt instanceof \DateTime) {
+            return $dt->format('Y-m-d');
+        }
+    }
+
+    $timestamp = strtotime($raw);
+    if ($timestamp !== false) {
+        return date('Y-m-d', $timestamp);
+    }
+
+    return '';
+};
 
 $normalizeDurationToMinutes = static function (string $value): int {
     $value = trim($value);
@@ -165,22 +193,43 @@ foreach ($period as $day) {
     }
 }
 
+$skudDiagnostics = ['rows' => 0, 'with_user_mapping' => 0, 'parsed_date' => 0, 'in_period' => 0, 'office_lt_4' => 0, 'office_gt_4' => 0, 'remote' => 0, 'absent' => 0, 'sample' => []];
 $skudHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(5)->fetch();
 if ($skudHl) {
     $skudEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($skudHl);
     $skudClass = $skudEntity->getDataClass();
     $rows = $skudClass::getList([
         'select' => ['UF_USER_ID', 'UF_DATE', 'UF_DAY_STATUS', 'UF_ENTRY_TIME', 'UF_EXIT_TIME', 'UF_NORMA', 'UF_WT_TOTAL'],
-        'filter' => ['>=UF_DATE' => $dateFrom->format('Y-m-d'), '<=UF_DATE' => $dateTo->format('Y-m-d')],
+        'filter' => ['>=UF_DATE' => Date::createFromPhp($dateFrom), '<=UF_DATE' => Date::createFromPhp($dateTo)],
     ]);
     while ($row = $rows->fetch()) {
+        $skudDiagnostics['rows']++;
         $userId = (int)$row['UF_USER_ID'];
         if ($userId <= 0 || !isset($userDepartmentsMap[$userId])) { continue; }
-        $dateKey = (new \DateTime((string)$row['UF_DATE']))->format('Y-m-d');
+        $skudDiagnostics['with_user_mapping']++;
+
+        $dateKey = $parseSkudDateToKey($row['UF_DATE']);
+        if ($dateKey === '') { continue; }
+        $skudDiagnostics['parsed_date']++;
+
+        if ($dateKey < $dateFrom->format('Y-m-d') || $dateKey > $dateTo->format('Y-m-d')) { continue; }
+        $skudDiagnostics['in_period']++;
         $entry = trim((string)$row['UF_ENTRY_TIME']);
         $norma = $normalizeDurationToMinutes((string)$row['UF_NORMA']);
         $worked = $normalizeDurationToMinutes((string)$row['UF_WT_TOTAL']);
         $status = trim((string)$row['UF_DAY_STATUS']);
+
+        if ($showDiagnostics && count($skudDiagnostics['sample']) < 20) {
+            $skudDiagnostics['sample'][] = [
+                'USER_ID' => $userId,
+                'UF_DATE_RAW' => is_scalar($row['UF_DATE']) ? (string)$row['UF_DATE'] : gettype($row['UF_DATE']),
+                'DATE_KEY' => $dateKey,
+                'ENTRY' => $entry,
+                'WT_TOTAL' => (string)$row['UF_WT_TOTAL'],
+                'NORMA' => (string)$row['UF_NORMA'],
+                'STATUS' => $status,
+            ];
+        }
 
         foreach ($userDepartmentsMap[$userId] as $departmentId) {
             if (!isset($skudStats[$departmentId][$dateKey])) { continue; }
@@ -188,19 +237,23 @@ if ($skudHl) {
             if ($entry !== '') {
                 if ($worked > 240) {
                     $skudStats[$departmentId][$dateKey]['OFFICE_GT_4']++;
+                    $skudDiagnostics['office_gt_4']++;
                 } else {
                     $skudStats[$departmentId][$dateKey]['OFFICE_LT_4']++;
+                    $skudDiagnostics['office_lt_4']++;
                 }
                 continue;
             }
 
             if ($norma > 0 && $worked === $norma) {
                 $skudStats[$departmentId][$dateKey]['REMOTE']++;
+                $skudDiagnostics['remote']++;
                 continue;
             }
 
             if ($status !== '' && mb_strtolower($status) !== 'работа') {
                 $skudStats[$departmentId][$dateKey]['ABSENT']++;
+                $skudDiagnostics['absent']++;
             }
         }
     }
@@ -214,6 +267,11 @@ header('Content-Type: text/html; charset=UTF-8');
 <body style="font-family:Arial,sans-serif;font-size:13px;">
 <h1>Отчет по подразделениям и рабочим местам</h1>
 <div>Период: <strong><?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?></strong> — <strong><?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></strong></div>
+<?php if ($showDiagnostics): ?>
+<pre style="background:#f5f5f5;padding:10px;">СКУД диагностика:
+<?=htmlspecialcharsbx(print_r($skudDiagnostics, true))?></pre>
+<?php endif; ?>
+
 <table border="1" cellspacing="0" cellpadding="6" style="margin-top:12px;border-collapse:collapse;width:100%;">
 <tr>
 <th>Дата</th><th>Подразделение</th><th>Руководитель</th><th>Кол-во сотрудников</th><th>Форматы работы сотрудников</th><th>Кабинеты</th><th>Кол-во мест в кабинетах</th><th>В офисе &lt;= 4ч</th><th>В офисе &gt; 4ч</th><th>Сотрудников на удаленке</th><th>Сотрудников отсутствует</th>
