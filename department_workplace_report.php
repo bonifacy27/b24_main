@@ -168,6 +168,10 @@ $headIds = [];
 foreach ($departments as $department) {
     if ((int)$department['UF_HEAD'] > 0) { $headIds[(int)$department['UF_HEAD']] = true; }
 }
+$headDepartmentIds = [];
+foreach ($departments as $departmentId => $department) {
+    if ((int)$department['UF_HEAD'] > 0) { $headDepartmentIds[$departmentId] = true; }
+}
 $headsMap = [];
 if (!empty($headIds)) {
     $rsHeads = \CUser::GetList($by='id', $order='asc', ['ID' => implode('|', array_keys($headIds))], ['FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN']]);
@@ -192,6 +196,18 @@ foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $departmentData[$departmentId] = ['TOTAL' => 0, 'WORK_FORMATS' => [], 'CABINETS' => []];
     $departmentUsers[$departmentId] = [];
+}
+
+$headParentMap = [];
+foreach (array_keys($headDepartmentIds) as $headDepartmentId) {
+    $parentId = isset($departments[$headDepartmentId]) ? (int)$departments[$headDepartmentId]['IBLOCK_SECTION_ID'] : 0;
+    while ($parentId > 0 && isset($departments[$parentId])) {
+        if (isset($headDepartmentIds[$parentId])) {
+            $headParentMap[$headDepartmentId] = $parentId;
+            break;
+        }
+        $parentId = (int)$departments[$parentId]['IBLOCK_SECTION_ID'];
+    }
 }
 
 $rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_WORK_FORMAT'], 'FIELDS' => ['ID', 'UF_DEPARTMENT', 'UF_CABINET', 'UF_WORK_FORMAT']]);
@@ -219,8 +235,11 @@ while ($user = $rsUsers->Fetch()) {
     $userWorkFormatCodeMap[$userId] = $workFormatCode;
     $workFormat = $workFormat !== '' ? (isset($workFormatMap[$workFormat]) ? $workFormatMap[$workFormat] : ('Неизвестный формат (' . $workFormat . ')')) : 'Не указан';
 
-    foreach (array_keys($headDepartments) as $headDepartmentId) {
-$departmentData[$headDepartmentId]['TOTAL']++;
+    $resolvedHeadDepartments = array_keys($headDepartments);
+    $userDepartmentsMap[$userId] = $resolvedHeadDepartments;
+
+    foreach ($resolvedHeadDepartments as $headDepartmentId) {
+        $departmentData[$headDepartmentId]['TOTAL']++;
         $departmentUsers[$headDepartmentId][$userId] = true;
         if (!isset($departmentData[$headDepartmentId]['WORK_FORMATS'][$workFormat])) {
             $departmentData[$headDepartmentId]['WORK_FORMATS'][$workFormat] = 0;
@@ -242,6 +261,25 @@ $departmentData[$headDepartmentId]['TOTAL']++;
             }
             $cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$headDepartmentId]++;
         }
+    }
+
+    // Руководитель дочернего подразделения учитывается в составе родительского руководителя (только на 1 уровень вверх).
+    foreach ($resolvedHeadDepartments as $childHeadDepartmentId) {
+        if (!isset($departments[$childHeadDepartmentId]) || (int)$departments[$childHeadDepartmentId]['UF_HEAD'] !== $userId) { continue; }
+        if (!isset($headParentMap[$childHeadDepartmentId])) { continue; }
+        $parentHeadDepartmentId = (int)$headParentMap[$childHeadDepartmentId];
+        if ($parentHeadDepartmentId <= 0 || !isset($departmentData[$parentHeadDepartmentId])) { continue; }
+
+        $departmentData[$parentHeadDepartmentId]['TOTAL']++;
+        $departmentUsers[$parentHeadDepartmentId][$userId] = true;
+        if (!isset($departmentData[$parentHeadDepartmentId]['WORK_FORMATS'][$workFormat])) {
+            $departmentData[$parentHeadDepartmentId]['WORK_FORMATS'][$workFormat] = 0;
+        }
+        $departmentData[$parentHeadDepartmentId]['WORK_FORMATS'][$workFormat]++;
+        if (!isset($departmentData[$parentHeadDepartmentId]['CABINETS'][$cabinet])) {
+            $departmentData[$parentHeadDepartmentId]['CABINETS'][$cabinet] = 0;
+        }
+        $departmentData[$parentHeadDepartmentId]['CABINETS'][$cabinet]++;
     }
 }
 
