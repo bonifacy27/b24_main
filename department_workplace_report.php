@@ -544,6 +544,10 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         $avgOffice = (float)$summaryByDepartment[$departmentId]['AVG_OFFICE'];
         $avgRemote = (float)$summaryByDepartment[$departmentId]['AVG_REMOTE'];
         $avgAbsent = (float)$summaryByDepartment[$departmentId]['AVG_ABSENT'];
+        $totalEmployees = max(1, (int)$departmentRow['TOTAL']);
+        $avgOfficePercent = round(($avgOffice / $totalEmployees) * 100, 1);
+        $avgRemotePercent = round(($avgRemote / $totalEmployees) * 100, 1);
+        $avgAbsentPercent = round(($avgAbsent / $totalEmployees) * 100, 1);
         $util = $totalPlaces > 0 ? round(($avgOffice / $totalPlaces) * 100, 1) : 0;
         ?>
         <tr>
@@ -552,9 +556,9 @@ foreach ($departmentData as $departmentId => $departmentRow) {
             <td><?= (int)$departmentRow['TOTAL'] ?></td>
             <td><?= !empty($cabinetLoadLines) ? implode('<br>', $cabinetLoadLines) : '—' ?></td>
             <td><?= $totalPlaces ?></td>
-            <td><?= $avgOffice ?></td>
-            <td><?= $avgRemote ?></td>
-            <td><?= $avgAbsent ?></td>
+            <td><?= $avgOffice ?> (<?= $avgOfficePercent ?>%)</td>
+            <td><?= $avgRemote ?> (<?= $avgRemotePercent ?>%)</td>
+            <td><?= $avgAbsent ?> (<?= $avgAbsentPercent ?>%)</td>
             <td><?= $util ?>%</td>
         </tr>
     <?php endforeach; ?>
