@@ -38,6 +38,7 @@ if ($dateFrom > $dateTo) { [$dateFrom, $dateTo] = [$dateTo, $dateFrom]; }
 $dateFrom->setTime(0,0,0);
 $dateTo->setTime(0,0,0);
 $showDiagnostics = isset($_GET['diagnostic']) && (string)$_GET['diagnostic'] === 'Y';
+$reportMode = isset($_GET['report_mode']) && (string)$_GET['report_mode'] === 'summary' ? 'summary' : 'daily';
 
 
 $parseSkudDateToKey = static function ($rawValue): string {
@@ -377,6 +378,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;"><input type="checkbox" name="diagnostic" value="Y" <?= $showDiagnostics ? 'checked' : '' ?>> Диагностика</label>
+    <label style="margin-left:8px;">Режим: <select name="report_mode"><option value="daily" <?= $reportMode === 'daily' ? 'selected' : '' ?>>По датам за период</option><option value="summary" <?= $reportMode === 'summary' ? 'selected' : '' ?>>Сводный за период</option></select></label>
     <button type="submit" style="margin-left:8px;">Показать</button>
 </form>
 <div>Период: <strong><?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?></strong> — <strong><?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></strong></div>
@@ -390,8 +392,28 @@ $periodDays = [];
 foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $d) {
     $periodDays[] = $d->format('Y-m-d');
 }
+
+$periodDaysCount = max(1, count($periodDays));
+$summaryByDepartment = [];
+foreach ($departmentData as $departmentId => $departmentRow) {
+    $sumOffice = 0;
+    $sumRemote = 0;
+    $sumAbsent = 0;
+    foreach ($periodDays as $dayKey) {
+        $stat = isset($skudStats[$departmentId][$dayKey]) ? $skudStats[$departmentId][$dayKey] : ['OFFICE_LT_4'=>0,'OFFICE_GT_4'=>0,'REMOTE'=>0,'ABSENT'=>0];
+        $sumOffice += (int)$stat['OFFICE_LT_4'] + (int)$stat['OFFICE_GT_4'];
+        $sumRemote += (int)$stat['REMOTE'];
+        $sumAbsent += (int)$stat['ABSENT'];
+    }
+    $summaryByDepartment[$departmentId] = [
+        'AVG_OFFICE' => round($sumOffice / $periodDaysCount, 2),
+        'AVG_REMOTE' => round($sumRemote / $periodDaysCount, 2),
+        'AVG_ABSENT' => round($sumAbsent / $periodDaysCount, 2),
+    ];
+}
 ?>
 
+<?php if ($reportMode === 'daily'): ?>
 <table>
     <thead>
     <tr>
@@ -468,5 +490,56 @@ foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->m
     <?php endforeach; ?>
     </tbody>
 </table>
+<?php else: ?>
+<table>
+    <thead>
+    <tr>
+        <th>Подразделение</th><th>Руководитель</th><th>Кол-во сотрудников</th><th>Кабинеты и загрузка</th><th>Рабочих мест (всего)</th><th>Среднее в офисе</th><th>Среднее на удаленке</th><th>Среднее отсутствующих</th><th>Утилизация рабочих мест, %</th>
+    </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($departmentData as $departmentId => $departmentRow): ?>
+        <?php
+        $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
+        $cabinets = $departmentRow['CABINETS']; ksort($cabinets, SORT_NATURAL | SORT_FLAG_CASE);
+        $totalPlaces = 0;
+        $cabinetLoadLines = [];
+        foreach ($cabinets as $name => $count) {
+            $normalizedCabinet = $normalizeCabinet($name);
+            $places = 0;
+            $title = $name;
+            if ($normalizedCabinet !== '' && isset($cabinetDirectory[$normalizedCabinet])) {
+                $places = (int)$cabinetDirectory[$normalizedCabinet]['WORKPLACES'];
+                $title = (string)$cabinetDirectory[$normalizedCabinet]['TITLE'];
+            }
+            $totalPlaces += $places;
+            $sumTotalOccupied = 0;
+            foreach ($periodDays as $dayKey) {
+                $sumTotalOccupied += ($normalizedCabinet !== '' && isset($cabinetDailyOffice[$dayKey][$normalizedCabinet])) ? (int)$cabinetDailyOffice[$dayKey][$normalizedCabinet]['TOTAL'] : 0;
+            }
+            $avgOccupied = round($sumTotalOccupied / $periodDaysCount, 2);
+            $cabUtil = $places > 0 ? round(($avgOccupied / $places) * 100, 1) : 0;
+            $cabinetLoadLines[] = htmlspecialcharsbx($title).': ср. занято '.$avgOccupied.' из '.$places.' ('.$cabUtil.'%)';
+        }
+        $avgOffice = (float)$summaryByDepartment[$departmentId]['AVG_OFFICE'];
+        $avgRemote = (float)$summaryByDepartment[$departmentId]['AVG_REMOTE'];
+        $avgAbsent = (float)$summaryByDepartment[$departmentId]['AVG_ABSENT'];
+        $util = $totalPlaces > 0 ? round(($avgOffice / $totalPlaces) * 100, 1) : 0;
+        ?>
+        <tr>
+            <td><?=htmlspecialcharsbx($departments[$departmentId]['NAME'])?></td>
+            <td><?=htmlspecialcharsbx($headName)?></td>
+            <td><?= (int)$departmentRow['TOTAL'] ?></td>
+            <td><?= !empty($cabinetLoadLines) ? implode('<br>', $cabinetLoadLines) : '—' ?></td>
+            <td><?= $totalPlaces ?></td>
+            <td><?= $avgOffice ?></td>
+            <td><?= $avgRemote ?></td>
+            <td><?= $avgAbsent ?></td>
+            <td><?= $util ?>%</td>
+        </tr>
+    <?php endforeach; ?>
+    </tbody>
+</table>
+<?php endif; ?>
 </body>
 </html>
