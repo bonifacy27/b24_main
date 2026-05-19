@@ -103,7 +103,7 @@ if ($cabinetFilterRaw !== '') {
     $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
 }
 
-$normalizeDirectoryCabinet = static function (string $cabinetName): string {
+$normalizeDirectoryCabinet = static function (string $cabinetName) use ($normalizeCabinet): string {
     return $normalizeCabinet($cabinetName);
 };
 
