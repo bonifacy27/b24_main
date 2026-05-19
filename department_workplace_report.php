@@ -79,11 +79,20 @@ $normalizeCabinet = static function (string $cabinetRaw): string {
         return '';
     }
 
-    if (!preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+    $cabinetCode = '';
+    if (preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+        $cabinetCode = (string)$match[1];
+    } elseif (preg_match('/,\s*([0-9]+[a-zа-я0-9\.-]*)\s*$/ui', $value, $match)) {
+        // Поддержка справочника вида "Московский, 601" без префикса "каб."
+        $cabinetCode = (string)$match[1];
+    } elseif (preg_match('/\b([0-9]+[a-zа-я0-9\.-]*)\b/ui', $value, $match)) {
+        // Fallback на первый числовой токен (например, "офис 711-2")
+        $cabinetCode = (string)$match[1];
+    } else {
         return '';
     }
 
-    $cabinetCode = str_replace([' ', ','], '', $match[1]);
+    $cabinetCode = str_replace([' ', ','], '', $cabinetCode);
     $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
 
     if (mb_strpos($value, 'москов') !== false) {
