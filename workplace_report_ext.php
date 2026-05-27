@@ -84,7 +84,13 @@ $normalizeDirectoryCabinet = static function (string $cabinetName): string {
     return 'other|' . $cabinetCode;
 };
 
-$cabinetFilterNorm = $cabinetFilterRaw !== '' ? $normalizeCabinet($cabinetFilterRaw) : '';
+$cabinetFilterNorm = '';
+if ($cabinetFilterRaw !== '') {
+    $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
+    if ($cabinetFilterNorm === '') {
+        $cabinetFilterNorm = $normalizeDirectoryCabinet($cabinetFilterRaw);
+    }
+}
 
 $departments = [];
 $rsSections = \CIBlockSection::GetList(
