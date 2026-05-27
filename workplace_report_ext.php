@@ -264,7 +264,8 @@ header('Content-Type: text/html; charset=UTF-8');
         body { font-family: Arial,sans-serif; font-size:13px; margin:16px; }
         table { border-collapse: collapse; width:100%; }
         th, td { border:1px solid #d8e0ea; padding:6px 8px; vertical-align: top; }
-        th { background:#f5f9ff; white-space: nowrap; }
+        th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
+        .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
     </style>
 </head>
@@ -283,12 +284,12 @@ header('Content-Type: text/html; charset=UTF-8');
         <th>Подразделение</th>
         <th>Руководитель</th>
         <th>Кабинет</th>
-        <th>Кол-во рабочих мест в кабинете</th>
-        <th>Кол-во закрепленных чел. за кабинетом</th>
+        <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
+        <th class="col-narrow">Кол-во закрепленных чел. за кабинетом</th>
         <th>Дата</th>
-        <th>Кол-во сотрудников в офисе (&gt;4ч)</th>
+        <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
         <th>% загрузки</th>
-        <th>Кол-во свободных рм</th>
+        <th class="col-narrow">Кол-во свободных рм</th>
     </tr>
     </thead>
     <tbody>
