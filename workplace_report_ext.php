@@ -111,22 +111,36 @@ while ($section = $rsSections->Fetch()) {
 
 
 $getDepartmentChainFromHead = static function (int $headDepartmentId) use (&$departments): array {
+    $excludedRoots = ['НАО «Национальная спутниковая компания»', 'Управление'];
     $chain = [];
     $currentId = $headDepartmentId;
     $guard = 0;
     while ($currentId > 0 && isset($departments[$currentId]) && $guard < 100) {
-        $chain[] = (string)$departments[$currentId]['NAME'];
+        $name = (string)$departments[$currentId]['NAME'];
+        if (!in_array($name, $excludedRoots, true)) {
+            $chain[] = $name;
+        }
         $currentId = (int)$departments[$currentId]['IBLOCK_SECTION_ID'];
         $guard++;
     }
+
     $chain = array_reverse($chain);
-    if (count($chain) > 5) {
-        $chain = array_slice($chain, -5);
+
+    if (count($chain) <= 5) {
+        while (count($chain) < 5) {
+            $chain[] = '';
+        }
+        return array_values($chain);
     }
-    while (count($chain) < 5) {
-        array_unshift($chain, '');
+
+    if (count($chain) === 6) {
+        return array_values($chain);
     }
-    return array_values($chain);
+
+    $firstFive = array_slice($chain, 0, 5);
+    $sixth = implode(' / ', array_slice($chain, 5));
+    $firstFive[] = $sixth;
+    return array_values($firstFive);
 };
 
 $departmentChildren = [];
@@ -306,6 +320,7 @@ header('Content-Type: text/html; charset=UTF-8');
         <th>СЕО-3</th>
         <th>СЕО-4</th>
         <th>СЕО-5</th>
+        <th>СЕО-6</th>
         <th>Руководитель</th>
         <th>Кабинет</th>
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
@@ -351,6 +366,7 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?=htmlspecialcharsbx($deptChain[2])?></td>
                     <td><?=htmlspecialcharsbx($deptChain[3])?></td>
                     <td><?=htmlspecialcharsbx($deptChain[4])?></td>
+                    <td><?=htmlspecialcharsbx($deptChain[5])?></td>
                     <td><?=htmlspecialcharsbx($headName)?></td>
                     <td><?=htmlspecialcharsbx($cabTitle)?></td>
                     <td><?= $workplaces ?></td>
