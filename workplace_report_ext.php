@@ -109,6 +109,26 @@ while ($section = $rsSections->Fetch()) {
     ];
 }
 
+
+$getDepartmentChainFromHead = static function (int $headDepartmentId) use (&$departments): array {
+    $chain = [];
+    $currentId = $headDepartmentId;
+    $guard = 0;
+    while ($currentId > 0 && isset($departments[$currentId]) && $guard < 100) {
+        $chain[] = (string)$departments[$currentId]['NAME'];
+        $currentId = (int)$departments[$currentId]['IBLOCK_SECTION_ID'];
+        $guard++;
+    }
+    $chain = array_reverse($chain);
+    if (count($chain) > 5) {
+        $chain = array_slice($chain, -5);
+    }
+    while (count($chain) < 5) {
+        array_unshift($chain, '');
+    }
+    return array_values($chain);
+};
+
 $departmentChildren = [];
 foreach ($departments as $departmentId => $department) {
     $departmentChildren[$departmentId] = [];
@@ -281,7 +301,11 @@ header('Content-Type: text/html; charset=UTF-8');
 <table>
     <thead>
     <tr>
-        <th>Подразделение</th>
+        <th>СЕО-1</th>
+        <th>СЕО-2</th>
+        <th>СЕО-3</th>
+        <th>СЕО-4</th>
+        <th>СЕО-5</th>
         <th>Руководитель</th>
         <th>Кабинет</th>
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
@@ -320,8 +344,13 @@ header('Content-Type: text/html; charset=UTF-8');
                 $utilization = $workplaces > 0 ? round(($totalOccupied / $workplaces) * 100, 1) : 0;
                 $free = max(0, $workplaces - $totalOccupied);
                 ?>
+                <?php $deptChain = $getDepartmentChainFromHead($departmentId); ?>
                 <tr>
-                    <td><?=htmlspecialcharsbx($department['NAME'])?></td>
+                    <td><?=htmlspecialcharsbx($deptChain[0])?></td>
+                    <td><?=htmlspecialcharsbx($deptChain[1])?></td>
+                    <td><?=htmlspecialcharsbx($deptChain[2])?></td>
+                    <td><?=htmlspecialcharsbx($deptChain[3])?></td>
+                    <td><?=htmlspecialcharsbx($deptChain[4])?></td>
                     <td><?=htmlspecialcharsbx($headName)?></td>
                     <td><?=htmlspecialcharsbx($cabTitle)?></td>
                     <td><?= $workplaces ?></td>
