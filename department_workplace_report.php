@@ -79,11 +79,20 @@ $normalizeCabinet = static function (string $cabinetRaw): string {
         return '';
     }
 
-    if (!preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+    $cabinetCode = '';
+    if (preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+        $cabinetCode = (string)$match[1];
+    } elseif (preg_match('/,\s*([0-9]+[a-zа-я0-9\.-]*)\s*$/ui', $value, $match)) {
+        // Поддержка справочника вида "Московский, 601" без префикса "каб."
+        $cabinetCode = (string)$match[1];
+    } elseif (preg_match('/\b([0-9]+[a-zа-я0-9\.-]*)\b/ui', $value, $match)) {
+        // Fallback на первый числовой токен (например, "офис 711-2")
+        $cabinetCode = (string)$match[1];
+    } else {
         return '';
     }
 
-    $cabinetCode = str_replace([' ', ','], '', $match[1]);
+    $cabinetCode = str_replace([' ', ','], '', $cabinetCode);
     $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
 
     if (mb_strpos($value, 'москов') !== false) {
@@ -103,32 +112,8 @@ if ($cabinetFilterRaw !== '') {
     $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
 }
 
-$normalizeDirectoryCabinet = static function (string $cabinetName): string {
-    $value = trim(mb_strtolower($cabinetName));
-    if ($value === '') {
-        return '';
-    }
-
-    $parts = array_map('trim', explode(',', $value, 2));
-    if (count($parts) < 2) {
-        return '';
-    }
-
-    $location = $parts[0];
-    $cabinetCode = str_replace([' ', ','], '', $parts[1]);
-    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
-
-    if (mb_strpos($location, 'москов') !== false) {
-        return 'moskovskiy|' . $cabinetCode;
-    }
-    if (mb_strpos($location, 'новоладож') !== false) {
-        return 'novoladozhskaya|' . $cabinetCode;
-    }
-    if (mb_strpos($location, 'рентген') !== false) {
-        return 'rentgena|' . $cabinetCode;
-    }
-
-    return 'other|' . $cabinetCode;
+$normalizeDirectoryCabinet = static function (string $cabinetName) use ($normalizeCabinet): string {
+    return $normalizeCabinet($cabinetName);
 };
 
 $departments = [];
@@ -183,6 +168,10 @@ $headIds = [];
 foreach ($departments as $department) {
     if ((int)$department['UF_HEAD'] > 0) { $headIds[(int)$department['UF_HEAD']] = true; }
 }
+$headDepartmentIds = [];
+foreach ($departments as $departmentId => $department) {
+    if ((int)$department['UF_HEAD'] > 0) { $headDepartmentIds[$departmentId] = true; }
+}
 $headsMap = [];
 if (!empty($headIds)) {
     $rsHeads = \CUser::GetList($by='id', $order='asc', ['ID' => implode('|', array_keys($headIds))], ['FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN']]);
@@ -194,11 +183,31 @@ if (!empty($headIds)) {
 
 $departmentData = [];
 $userDepartmentsMap = [];
+$departmentUsers = [];
 $userCabinetMap = [];
+$userWorkFormatCodeMap = [];
 $cabinetUsageAll = [];
+$workFormatMap = [
+    '1929' => 'Офис',
+    '1930' => 'Дистанционный',
+    '1931' => 'Комбинированный',
+];
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $departmentData[$departmentId] = ['TOTAL' => 0, 'WORK_FORMATS' => [], 'CABINETS' => []];
+    $departmentUsers[$departmentId] = [];
+}
+
+$headParentMap = [];
+foreach (array_keys($headDepartmentIds) as $headDepartmentId) {
+    $parentId = isset($departments[$headDepartmentId]) ? (int)$departments[$headDepartmentId]['IBLOCK_SECTION_ID'] : 0;
+    while ($parentId > 0 && isset($departments[$parentId])) {
+        if (isset($headDepartmentIds[$parentId])) {
+            $headParentMap[$headDepartmentId] = $parentId;
+            break;
+        }
+        $parentId = (int)$departments[$parentId]['IBLOCK_SECTION_ID'];
+    }
 }
 
 $rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_WORK_FORMAT'], 'FIELDS' => ['ID', 'UF_DEPARTMENT', 'UF_CABINET', 'UF_WORK_FORMAT']]);
@@ -220,12 +229,18 @@ while ($user = $rsUsers->Fetch()) {
     $userDepartmentsMap[$userId] = array_keys($headDepartments);
     $cabinet = trim((string)$user['UF_CABINET']);
     $cabinet = $cabinet !== '' ? $cabinet : 'Не указан';
-    $workFormat = trim((string)$user['UF_WORK_FORMAT']);
+    $workFormatCode = trim((string)$user['UF_WORK_FORMAT']);
+    $workFormat = $workFormatCode;
     $userCabinetMap[$userId] = $cabinet;
-    $workFormat = $workFormat !== '' ? $workFormat : 'Не указан';
+    $userWorkFormatCodeMap[$userId] = $workFormatCode;
+    $workFormat = $workFormat !== '' ? (isset($workFormatMap[$workFormat]) ? $workFormatMap[$workFormat] : ('Неизвестный формат (' . $workFormat . ')')) : 'Не указан';
 
-    foreach (array_keys($headDepartments) as $headDepartmentId) {
+    $resolvedHeadDepartments = array_keys($headDepartments);
+    $userDepartmentsMap[$userId] = $resolvedHeadDepartments;
+
+    foreach ($resolvedHeadDepartments as $headDepartmentId) {
         $departmentData[$headDepartmentId]['TOTAL']++;
+        $departmentUsers[$headDepartmentId][$userId] = true;
         if (!isset($departmentData[$headDepartmentId]['WORK_FORMATS'][$workFormat])) {
             $departmentData[$headDepartmentId]['WORK_FORMATS'][$workFormat] = 0;
         }
@@ -246,6 +261,25 @@ while ($user = $rsUsers->Fetch()) {
             }
             $cabinetUsageAll[$normalizedCabinet]['BY_DEPARTMENT'][$headDepartmentId]++;
         }
+    }
+
+    // Руководитель дочернего подразделения учитывается в составе родительского руководителя (только на 1 уровень вверх).
+    foreach ($resolvedHeadDepartments as $childHeadDepartmentId) {
+        if (!isset($departments[$childHeadDepartmentId]) || (int)$departments[$childHeadDepartmentId]['UF_HEAD'] !== $userId) { continue; }
+        if (!isset($headParentMap[$childHeadDepartmentId])) { continue; }
+        $parentHeadDepartmentId = (int)$headParentMap[$childHeadDepartmentId];
+        if ($parentHeadDepartmentId <= 0 || !isset($departmentData[$parentHeadDepartmentId])) { continue; }
+
+        $departmentData[$parentHeadDepartmentId]['TOTAL']++;
+        $departmentUsers[$parentHeadDepartmentId][$userId] = true;
+        if (!isset($departmentData[$parentHeadDepartmentId]['WORK_FORMATS'][$workFormat])) {
+            $departmentData[$parentHeadDepartmentId]['WORK_FORMATS'][$workFormat] = 0;
+        }
+        $departmentData[$parentHeadDepartmentId]['WORK_FORMATS'][$workFormat]++;
+        if (!isset($departmentData[$parentHeadDepartmentId]['CABINETS'][$cabinet])) {
+            $departmentData[$parentHeadDepartmentId]['CABINETS'][$cabinet] = 0;
+        }
+        $departmentData[$parentHeadDepartmentId]['CABINETS'][$cabinet]++;
     }
 }
 
@@ -279,6 +313,7 @@ foreach ($period as $day) {
     $cabinetDailyOffice[$dateKey] = [];
 }
 
+$skudUserStates = [];
 $skudDiagnostics = ['rows' => 0, 'with_user_mapping' => 0, 'parsed_date' => 0, 'in_period' => 0, 'office_lt_4' => 0, 'office_gt_4' => 0, 'remote' => 0, 'absent' => 0, 'sample' => []];
 $skudHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(5)->fetch();
 if ($skudHl) {
@@ -322,15 +357,9 @@ if ($skudHl) {
         foreach ($userDepartmentsMap[$userId] as $departmentId) {
             if (!isset($skudStats[$departmentId][$dateKey])) { continue; }
 
+            $state = '';
             if ($entry !== '') {
-                if ($worked > 240) {
-                    $skudStats[$departmentId][$dateKey]['OFFICE_GT_4']++;
-                    $skudDiagnostics['office_gt_4']++;
-                } else {
-                    $skudStats[$departmentId][$dateKey]['OFFICE_LT_4']++;
-                    $skudDiagnostics['office_lt_4']++;
-                }
-
+                $state = $worked > 240 ? 'OFFICE_GT_4' : 'OFFICE_LT_4';
                 if ($userCabinetNorm !== '') {
                     if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
                         $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
@@ -341,18 +370,20 @@ if ($skudHl) {
                     }
                     $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId]++;
                 }
-                continue;
+            } elseif ($norma > 0 && $worked === $norma) {
+                $state = 'REMOTE';
+            } elseif ($status !== '' && mb_strtolower($status) !== 'работа') {
+                $state = 'ABSENT';
             }
 
-            if ($norma > 0 && $worked === $norma) {
-                $skudStats[$departmentId][$dateKey]['REMOTE']++;
-                $skudDiagnostics['remote']++;
-                continue;
-            }
-
-            if ($status !== '' && mb_strtolower($status) !== 'работа') {
-                $skudStats[$departmentId][$dateKey]['ABSENT']++;
-                $skudDiagnostics['absent']++;
+            if ($state !== '') {
+                if (!isset($skudUserStates[$departmentId])) { $skudUserStates[$departmentId] = []; }
+                if (!isset($skudUserStates[$departmentId][$dateKey])) { $skudUserStates[$departmentId][$dateKey] = []; }
+                $prev = isset($skudUserStates[$departmentId][$dateKey][$userId]) ? $skudUserStates[$departmentId][$dateKey][$userId] : '';
+                $priority = ['OFFICE_GT_4'=>4,'OFFICE_LT_4'=>3,'REMOTE'=>2,'ABSENT'=>1,''=>0];
+                if ($priority[$state] > $priority[$prev]) {
+                    $skudUserStates[$departmentId][$dateKey][$userId] = $state;
+                }
             }
         }
     }
@@ -387,6 +418,25 @@ foreach ($departmentData as $departmentId => $departmentRow) {
     }
     if ($hasCabinet) {
         $filteredDepartmentIds[] = $departmentId;
+    }
+}
+
+
+// Пересчет статистики: каждый сотрудник подразделения на каждую дату должен попасть в ровно один статус.
+foreach ($departmentData as $departmentId => $_d) {
+    $deptUserIds = isset($departmentUsers[$departmentId]) ? array_keys($departmentUsers[$departmentId]) : [];
+    foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $d) {
+        $dateKey = $d->format('Y-m-d');
+        $skudStats[$departmentId][$dateKey] = ['OFFICE_LT_4' => 0, 'OFFICE_GT_4' => 0, 'REMOTE' => 0, 'ABSENT' => 0];
+        foreach ($deptUserIds as $uid) {
+            if (isset($skudUserStates[$departmentId][$dateKey][$uid])) {
+                $state = $skudUserStates[$departmentId][$dateKey][$uid];
+            } else {
+                $userWorkFormatCode = isset($userWorkFormatCodeMap[$uid]) ? (string)$userWorkFormatCodeMap[$uid] : '';
+                $state = $userWorkFormatCode === '1930' ? 'REMOTE' : 'ABSENT';
+            }
+            $skudStats[$departmentId][$dateKey][$state]++;
+        }
     }
 }
 
@@ -459,9 +509,8 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         <th rowspan="2">Подразделение</th>
         <th rowspan="2">Руководитель</th>
         <th rowspan="2">Кол-во сотрудников</th>
-        <th rowspan="2">Форматы работы сотрудников</th>
                 <?php foreach ($periodDays as $dateKey): ?>
-            <th colspan="4"><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></th>
+            <th colspan="5"><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></th>
         <?php endforeach; ?>
     </tr>
     <tr>
@@ -470,6 +519,7 @@ foreach ($departmentData as $departmentId => $departmentRow) {
             <th>В офисе &gt; 4ч</th>
             <th>Сотрудников на удаленке</th>
             <th>Сотрудников отсутствует</th>
+            <th>Кабинеты и места</th>
         <?php endforeach; ?>
     </tr>
     </thead>
@@ -479,41 +529,52 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         $headName = isset($headsMap[$departments[$departmentId]['UF_HEAD']]) ? $headsMap[$departments[$departmentId]['UF_HEAD']] : 'Не назначен';
         $formats = $departmentRow['WORK_FORMATS']; ksort($formats, SORT_NATURAL | SORT_FLAG_CASE);
         $cabinets = $departmentRow['CABINETS']; ksort($cabinets, SORT_NATURAL | SORT_FLAG_CASE);
+        $uniqueCabinets = [];
+        foreach ($cabinets as $cabName => $cabCount) {
+            $cabNorm = $normalizeCabinet($cabName);
+            if ($cabNorm === '') {
+                $cabNorm = 'raw|' . mb_strtolower(trim((string)$cabName));
+            }
+            if (!isset($uniqueCabinets[$cabNorm])) {
+                $uniqueCabinets[$cabNorm] = ['name' => $cabName, 'count' => 0];
+            }
+            $uniqueCabinets[$cabNorm]['count'] += (int)$cabCount;
+        }
         ?>
         <tr>
             <td><?=htmlspecialcharsbx($departments[$departmentId]['NAME'])?></td>
             <td><?=htmlspecialcharsbx($headName)?></td>
-            <td><?= (int)$departmentRow['TOTAL'] ?></td>
-            <td><?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?></td>
+            <td>
+                <strong><?= (int)$departmentRow['TOTAL'] ?></strong><br>
+                <?php foreach ($formats as $name => $count) { echo htmlspecialcharsbx($name).' — '.(int)$count.'<br>'; } ?>
+            </td>
             <?php foreach ($periodDays as $dateKey): $stat = isset($skudStats[$departmentId][$dateKey]) ? $skudStats[$departmentId][$dateKey] : ['OFFICE_LT_4'=>0,'OFFICE_GT_4'=>0,'REMOTE'=>0,'ABSENT'=>0]; ?>
                 <td><?= (int)$stat['OFFICE_LT_4'] ?></td>
                 <td><?= (int)$stat['OFFICE_GT_4'] ?></td>
                 <td><?= (int)$stat['REMOTE'] ?></td>
+                <td><?= (int)$stat['ABSENT'] ?></td>
                 <td>
-                    <?= (int)$stat['ABSENT'] ?>
-                    <div style="margin-top:6px; border-top:1px dashed #cfd8e3; padding-top:4px;">
-                        <?php foreach ($cabinets as $cabName => $cabCnt): ?>
-                            <?php
-                            $cabNorm = $normalizeCabinet($cabName);
-                            if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
-                            $places = 0;
-                            $cabTitle = $cabName;
-                            if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) {
-                                $places = (int)$cabinetDirectory[$cabNorm]['WORKPLACES'];
-                                $cabTitle = (string)$cabinetDirectory[$cabNorm]['TITLE'];
-                            }
-                            $dayCab = ($cabNorm !== '' && isset($cabinetDailyOffice[$dateKey][$cabNorm])) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
-                            $thisDep = isset($dayCab['BY_DEPARTMENT'][$departmentId]) ? (int)$dayCab['BY_DEPARTMENT'][$departmentId] : 0;
-                            $totalOcc = (int)$dayCab['TOTAL'];
-                            $otherDep = max(0, $totalOcc - $thisDep);
-                            $delta = $places - $totalOcc;
-                            $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
-                            ?>
-                            <div class="<?= $deltaClass ?>" style="margin-top:3px;padding:2px 4px;">
-                                <strong><?=htmlspecialcharsbx($cabTitle)?></strong>: мест <?= $places ?>, это подр. <?= $thisDep ?>, другие <?= $otherDep ?>, Δ <?= $delta ?>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
+                    <?php foreach ($uniqueCabinets as $cabNormKey => $cabRow): ?>
+                        <?php
+                        $cabNorm = mb_strpos($cabNormKey, 'raw|') === 0 ? '' : $cabNormKey;
+                        if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+                        $places = 0;
+                        $cabTitle = (string)$cabRow['name'];
+                        if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) {
+                            $places = (int)$cabinetDirectory[$cabNorm]['WORKPLACES'];
+                            $cabTitle = (string)$cabinetDirectory[$cabNorm]['TITLE'];
+                        }
+                        $dayCab = ($cabNorm !== '' && isset($cabinetDailyOffice[$dateKey][$cabNorm])) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
+                        $thisDep = isset($dayCab['BY_DEPARTMENT'][$departmentId]) ? (int)$dayCab['BY_DEPARTMENT'][$departmentId] : 0;
+                        $totalOcc = (int)$dayCab['TOTAL'];
+                        $otherDep = max(0, $totalOcc - $thisDep);
+                        $delta = $places - $totalOcc;
+                        $deltaClass = $delta < 0 ? 'delta-bad' : ($delta <= 2 ? 'delta-warn' : 'delta-good');
+                        ?>
+                        <div class="<?= $deltaClass ?>" style="margin-top:3px;padding:2px 4px;">
+                            <strong><?=htmlspecialcharsbx($cabTitle)?></strong>: мест <?= $places ?>, это подр. <?= $thisDep ?>, другие <?= $otherDep ?>, Δ <?= $delta ?>
+                        </div>
+                    <?php endforeach; ?>
                 </td>
             <?php endforeach; ?>
         </tr>
@@ -554,6 +615,10 @@ foreach ($departmentData as $departmentId => $departmentRow) {
         $avgOffice = (float)$summaryByDepartment[$departmentId]['AVG_OFFICE'];
         $avgRemote = (float)$summaryByDepartment[$departmentId]['AVG_REMOTE'];
         $avgAbsent = (float)$summaryByDepartment[$departmentId]['AVG_ABSENT'];
+        $totalEmployees = max(1, (int)$departmentRow['TOTAL']);
+        $avgOfficePercent = round(($avgOffice / $totalEmployees) * 100, 1);
+        $avgRemotePercent = round(($avgRemote / $totalEmployees) * 100, 1);
+        $avgAbsentPercent = round(($avgAbsent / $totalEmployees) * 100, 1);
         $util = $totalPlaces > 0 ? round(($avgOffice / $totalPlaces) * 100, 1) : 0;
         ?>
         <tr>
@@ -562,9 +627,9 @@ foreach ($departmentData as $departmentId => $departmentRow) {
             <td><?= (int)$departmentRow['TOTAL'] ?></td>
             <td><?= !empty($cabinetLoadLines) ? implode('<br>', $cabinetLoadLines) : '—' ?></td>
             <td><?= $totalPlaces ?></td>
-            <td><?= $avgOffice ?></td>
-            <td><?= $avgRemote ?></td>
-            <td><?= $avgAbsent ?></td>
+            <td><?= $avgOffice ?> (<?= $avgOfficePercent ?>%)</td>
+            <td><?= $avgRemote ?> (<?= $avgRemotePercent ?>%)</td>
+            <td><?= $avgAbsent ?> (<?= $avgAbsentPercent ?>%)</td>
             <td><?= $util ?>%</td>
         </tr>
     <?php endforeach; ?>
