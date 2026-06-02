@@ -122,18 +122,41 @@ $orgNodesHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(99)->fetch();
 if ($orgNodesHl) {
     $orgNodesEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($orgNodesHl);
     $orgNodesClass = $orgNodesEntity->getDataClass();
-    $orgNodeRows = $orgNodesClass::getList(['select' => ['ID', 'UF_LEVEL', 'UF_NAME']]);
+    $orgNodeRows = $orgNodesClass::getList(['select' => ['*']]);
     while ($row = $orgNodeRows->fetch()) {
         $id = (int)$row['ID'];
         if ($id <= 0) { continue; }
+
+        $parentId = 0;
+        foreach (['UF_PARENT_ID', 'UF_PARENT', 'UF_PARENT_NODE_ID', 'UF_PARENT_NODE'] as $parentField) {
+            if (!isset($row[$parentField])) { continue; }
+            $parentIds = $normalizeOrgNodeIds($row[$parentField]);
+            if (!empty($parentIds)) {
+                $parentId = (int)reset($parentIds);
+                break;
+            }
+        }
+
         $orgNodes[$id] = [
             'LEVEL' => (int)$row['UF_LEVEL'],
             'NAME' => trim((string)$row['UF_NAME']),
+            'PARENT_ID' => $parentId,
         ];
     }
 }
 
-$resolveUserOrgUnit = static function ($rawOrgNodeValue) use ($normalizeOrgNodeIds, $orgNodes): array {
+$getOrgNodeChain = static function (int $nodeId) use ($orgNodes): array {
+    $chain = [];
+    $guard = 0;
+    while ($nodeId > 0 && isset($orgNodes[$nodeId]) && $guard < 100) {
+        $chain[] = $orgNodes[$nodeId];
+        $nodeId = (int)$orgNodes[$nodeId]['PARENT_ID'];
+        $guard++;
+    }
+    return array_reverse($chain);
+};
+
+$resolveUserOrgUnit = static function ($rawOrgNodeValue) use ($normalizeOrgNodeIds, $orgNodes, $getOrgNodeChain): array {
     $nodeIds = $normalizeOrgNodeIds($rawOrgNodeValue);
     $ceo1 = '';
     $department = '';
@@ -142,17 +165,21 @@ $resolveUserOrgUnit = static function ($rawOrgNodeValue) use ($normalizeOrgNodeI
     foreach ($nodeIds as $nodeId) {
         if (!isset($orgNodes[$nodeId])) { continue; }
 
-        $node = $orgNodes[$nodeId];
-        $nodeName = (string)$node['NAME'];
-        $nodeLevel = (int)$node['LEVEL'];
-        if ($nodeName === '') { continue; }
+        $nodeChain = $getOrgNodeChain((int)$nodeId);
+        if (empty($nodeChain)) { $nodeChain = [$orgNodes[$nodeId]]; }
 
-        if ($nodeLevel === 1 && $ceo1 === '') {
-            $ceo1 = $nodeName;
-        }
-        if ($nodeLevel >= $maxLevel) {
-            $department = $nodeName;
-            $maxLevel = $nodeLevel;
+        foreach ($nodeChain as $node) {
+            $nodeName = (string)$node['NAME'];
+            $nodeLevel = (int)$node['LEVEL'];
+            if ($nodeName === '') { continue; }
+
+            if ($nodeLevel === 1 && $ceo1 === '') {
+                $ceo1 = $nodeName;
+            }
+            if ($nodeLevel >= $maxLevel) {
+                $department = $nodeName;
+                $maxLevel = $nodeLevel;
+            }
         }
     }
 
