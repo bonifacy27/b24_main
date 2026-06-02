@@ -327,7 +327,6 @@ header('Content-Type: text/html; charset=UTF-8');
         <th class="col-narrow">Кол-во закрепленных чел. за кабинетом</th>
         <th>Дата</th>
         <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
-        <th class="col-narrow">Кол-во свободных рм</th>
     </tr>
     </thead>
     <tbody>
@@ -354,8 +353,6 @@ header('Content-Type: text/html; charset=UTF-8');
             foreach ($periodDays as $dateKey) {
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
                 $depOfficeCount = isset($dayData['BY_DEPARTMENT'][$departmentId]) ? (int)$dayData['BY_DEPARTMENT'][$departmentId] : 0;
-                $totalOccupied = (int)$dayData['TOTAL'];
-                $free = max(0, $workplaces - $totalOccupied);
                 ?>
                 <?php $deptChain = $getDepartmentChainFromHead($departmentId); ?>
                 <tr>
@@ -371,7 +368,6 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?= $assignedCount ?></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
                     <td><?= $depOfficeCount ?></td>
-                    <td><?= $free ?></td>
                 </tr>
                 <?php
             }
