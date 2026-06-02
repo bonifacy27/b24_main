@@ -327,8 +327,6 @@ header('Content-Type: text/html; charset=UTF-8');
         <th class="col-narrow">Кол-во закрепленных чел. за кабинетом</th>
         <th>Дата</th>
         <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
-        <th>% загрузки</th>
-        <th class="col-narrow">Кол-во свободных рм</th>
     </tr>
     </thead>
     <tbody>
@@ -355,9 +353,6 @@ header('Content-Type: text/html; charset=UTF-8');
             foreach ($periodDays as $dateKey) {
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
                 $depOfficeCount = isset($dayData['BY_DEPARTMENT'][$departmentId]) ? (int)$dayData['BY_DEPARTMENT'][$departmentId] : 0;
-                $totalOccupied = (int)$dayData['TOTAL'];
-                $utilization = $workplaces > 0 ? round(($totalOccupied / $workplaces) * 100, 1) : 0;
-                $free = max(0, $workplaces - $totalOccupied);
                 ?>
                 <?php $deptChain = $getDepartmentChainFromHead($departmentId); ?>
                 <tr>
@@ -373,14 +368,77 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?= $assignedCount ?></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
                     <td><?= $depOfficeCount ?></td>
-                    <td><?= $utilization ?>%</td>
-                    <td><?= $free ?></td>
                 </tr>
                 <?php
             }
         }
     }
     ?>
+    </tbody>
+</table>
+
+<?php
+$summaryCabinets = [];
+foreach ($cabinetDirectory as $cabNorm => $cabData) {
+    if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+    $summaryCabinets[$cabNorm] = [
+        'TITLE' => (string)$cabData['TITLE'],
+        'WORKPLACES' => (int)$cabData['WORKPLACES'],
+    ];
+}
+foreach ($userCabinetMap as $cabName) {
+    $cabNorm = $normalizeCabinet((string)$cabName);
+    if ($cabNorm === '' || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm)) { continue; }
+    if (!isset($summaryCabinets[$cabNorm])) {
+        $summaryCabinets[$cabNorm] = [
+            'TITLE' => (string)$cabName,
+            'WORKPLACES' => isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0,
+        ];
+    }
+}
+uasort($summaryCabinets, static function (array $left, array $right): int {
+    return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
+});
+?>
+
+<h2>Сводная таблица по кабинетам</h2>
+<table>
+    <thead>
+    <tr>
+        <th>Кабинет</th>
+        <th>Дата</th>
+        <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
+        <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
+        <th>% загрузки</th>
+        <th class="col-narrow">Кол-во свободных рм</th>
+    </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($summaryCabinets as $cabNorm => $cabData): ?>
+        <?php
+        $cabTitle = (string)$cabData['TITLE'];
+        $workplaces = (int)$cabData['WORKPLACES'];
+        $rowspan = max(1, count($periodDays));
+        ?>
+        <?php foreach ($periodDays as $dateIndex => $dateKey): ?>
+            <?php
+            $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0];
+            $totalOccupied = (int)$dayData['TOTAL'];
+            $utilization = $workplaces > 0 ? round(($totalOccupied / $workplaces) * 100, 1) : 0;
+            $free = max(0, $workplaces - $totalOccupied);
+            ?>
+            <tr>
+                <?php if ($dateIndex === 0): ?>
+                    <td rowspan="<?= $rowspan ?>"><?=htmlspecialcharsbx($cabTitle)?></td>
+                <?php endif; ?>
+                <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+                <td><?= $workplaces ?></td>
+                <td><?= $totalOccupied ?></td>
+                <td><?= $utilization ?>%</td>
+                <td><?= $free ?></td>
+            </tr>
+        <?php endforeach; ?>
+    <?php endforeach; ?>
     </tbody>
 </table>
 </body>
