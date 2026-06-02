@@ -315,7 +315,7 @@ if ($reverseHl) {
 }
 
 $officePresenceKeys = [];
-$unknownPresence = [];
+$unknownEmployees = [];
 foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
     foreach ($passes as $passId => $events) {
         $openEntry = null;
@@ -367,11 +367,25 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         }
 
         if ($cabinetFilterNorm !== '') { continue; }
-        if (!isset($unknownPresence[$legalEntity])) { $unknownPresence[$legalEntity] = []; }
-        if (!isset($unknownPresence[$legalEntity][$dateKey])) { $unknownPresence[$legalEntity][$dateKey] = 0; }
-        $unknownPresence[$legalEntity][$dateKey]++;
+        $employeeName = trim((string)$reverseUser['FIO']);
+        if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
+        $unknownEmployees[] = [
+            'LEGAL_ENTITY' => $legalEntity,
+            'EMPLOYEE' => $employeeName,
+            'DATE' => $dateKey,
+        ];
     }
 }
+
+usort($unknownEmployees, static function (array $left, array $right): int {
+    $legalCompare = strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
+    if ($legalCompare !== 0) { return $legalCompare; }
+
+    $employeeCompare = strnatcasecmp((string)$left['EMPLOYEE'], (string)$right['EMPLOYEE']);
+    if ($employeeCompare !== 0) { return $employeeCompare; }
+
+    return strcmp((string)$left['DATE'], (string)$right['DATE']);
+});
 
 $allCabinets = [];
 foreach ($cabinetDirectory as $cabKey => $cabData) { $allCabinets[$cabData['TITLE']] = true; }
@@ -471,29 +485,33 @@ header('Content-Type: text/html; charset=UTF-8');
             }
         }
     }
-    foreach ($unknownPresence as $legalEntity => $dateCounts) {
-        foreach ($periodDays as $dateKey) {
-            $unknownOfficeCount = isset($dateCounts[$dateKey]) ? (int)$dateCounts[$dateKey] : 0;
-            ?>
-            <tr>
-                <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td></td>
-                <td>Не определен</td>
-                <td>Не определен</td>
-                <td>0</td>
-                <td>0</td>
-                <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                <td><?= $unknownOfficeCount ?></td>
-            </tr>
-            <?php
-        }
-    }
     ?>
+    </tbody>
+</table>
+
+<h2>Сотрудники не определены</h2>
+<table>
+    <thead>
+    <tr>
+        <th>ЮЛ</th>
+        <th>Сотрудник</th>
+        <th>Дата</th>
+    </tr>
+    </thead>
+    <tbody>
+    <?php if (empty($unknownEmployees)): ?>
+        <tr>
+            <td colspan="3">Нет сотрудников без определенной структуры или кабинета.</td>
+        </tr>
+    <?php else: ?>
+        <?php foreach ($unknownEmployees as $employee): ?>
+            <tr>
+                <td><?=htmlspecialcharsbx((string)$employee['LEGAL_ENTITY'])?></td>
+                <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
+                <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
+            </tr>
+        <?php endforeach; ?>
+    <?php endif; ?>
     </tbody>
 </table>
 
