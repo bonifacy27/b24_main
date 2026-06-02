@@ -38,6 +38,7 @@ $dateFrom->setTime(0, 0, 0);
 $dateTo->setTime(0, 0, 0);
 
 $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
+$ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
 
 $normalizeLegalEntity = static function ($value): string {
     $legalEntity = trim((string)$value);
@@ -389,6 +390,16 @@ foreach ($userCabinetMap as $cabName) { $allCabinets[(string)$cabName] = true; }
 $availableCabinets = array_keys($allCabinets);
 sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
 
+$availableCeo1 = [];
+foreach ($departments as $departmentId => $department) {
+    if ((int)$department['UF_HEAD'] <= 0) { continue; }
+    $departmentSummary = $getDepartmentSummaryFromHead((int)$departmentId);
+    $ceo1 = trim((string)$departmentSummary['CEO1']);
+    if ($ceo1 !== '') { $availableCeo1[$ceo1] = true; }
+}
+$availableCeo1 = array_keys($availableCeo1);
+sort($availableCeo1, SORT_NATURAL | SORT_FLAG_CASE);
+
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
@@ -411,6 +422,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
+    <label style="margin-left:8px;">CEO-1: <select name="ceo1_filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
     <button type="submit" style="margin-left:8px;">Показать</button>
 </form>
 
@@ -434,6 +446,7 @@ header('Content-Type: text/html; charset=UTF-8');
         if ((int)$department['UF_HEAD'] <= 0) { continue; }
         $headName = isset($headsMap[$department['UF_HEAD']]) ? $headsMap[$department['UF_HEAD']] : 'Не назначен';
         $departmentSummary = $getDepartmentSummaryFromHead($departmentId);
+        if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
 
         $departmentCabinets = [];
         foreach ($userCabinetMap as $userId => $cabName) {
