@@ -61,6 +61,27 @@
 
 ---
 
+
+### 4. `sync_user_company_from_staff_1czup.php`
+Оснастка для синхронизации поля пользователя `UF_COMPANY` по данным `GateDB.dbo.Staff_1CZUP`.
+
+**Логика:**
+- Перебирает активных пользователей Битрикс24.
+- По `UF_1C_GUID` пользователя ищет запись в `Staff_1CZUP.Staff_ID`.
+- По `Staff_1CZUP.Source` выставляет значение списка `UF_COMPANY`:
+  - `Srvr=srv-off-1c01;Ref=1c_Pay83_NSC;` → `НСК [26]`
+  - `Srvr=srv-off-1c01;Ref=1c_Pay83_TM;` → `УК ТМ [1723]`
+
+**Использование:**
+```bash
+php -f sync_user_company_from_staff_1czup.php -- --dry-run
+php -f sync_user_company_from_staff_1czup.php -- --run
+```
+
+По умолчанию скрипт работает в режиме просмотра (`dry-run`); фактическое обновление выполняется только с ключом `--run` или параметром `?run=Y` при запуске из браузера.
+
+---
+
 ## ⚙️ Требования
 
 - PHP 7.0+
