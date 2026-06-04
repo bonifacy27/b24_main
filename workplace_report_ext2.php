@@ -234,18 +234,45 @@ while ($user = $rsUsers->Fetch()) {
 }
 
 $cabinetDirectory = [];
+$cabinetDirectoryById = [];
 $cabinetHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(74)->fetch();
 if ($cabinetHl) {
     $cabinetEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($cabinetHl);
     $cabinetClass = $cabinetEntity->getDataClass();
-    $rsCabinets = $cabinetClass::getList(['select' => ['UF_NAME', 'UF_WORKPLACES']]);
+    $rsCabinets = $cabinetClass::getList(['select' => ['ID', 'UF_NAME', 'UF_WORKPLACES']]);
     while ($row = $rsCabinets->fetch()) {
         $title = trim((string)$row['UF_NAME']);
         $normalized = $normalizeDirectoryCabinet($title);
         if ($normalized === '') { continue; }
-        $cabinetDirectory[$normalized] = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES']];
+        $cabinetData = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES']];
+        $cabinetDirectory[$normalized] = $cabinetData;
+        $cabinetDirectoryById[(int)$row['ID']] = $cabinetData + ['NORM' => $normalized];
     }
 }
+
+$resolveReverseCabinet = static function ($cabinetValue) use (&$cabinetDirectoryById, $normalizeCabinet, $normalizeDirectoryCabinet): array {
+    if (is_array($cabinetValue)) {
+        $cabinetValue = isset($cabinetValue['VALUE']) ? $cabinetValue['VALUE'] : (isset($cabinetValue['ID']) ? $cabinetValue['ID'] : reset($cabinetValue));
+    }
+
+    $cabinetRaw = trim((string)$cabinetValue);
+    if ($cabinetRaw === '') { return ['TITLE' => '', 'NORM' => '']; }
+
+    if (ctype_digit($cabinetRaw) && isset($cabinetDirectoryById[(int)$cabinetRaw])) {
+        return [
+            'TITLE' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['TITLE'],
+            'NORM' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['NORM'],
+        ];
+    }
+
+    $cabinetNorm = $normalizeCabinet($cabinetRaw);
+    if ($cabinetNorm === '') { $cabinetNorm = $normalizeDirectoryCabinet($cabinetRaw); }
+
+    return [
+        'TITLE' => $cabinetNorm !== '' ? $cabinetRaw : '',
+        'NORM' => $cabinetNorm,
+    ];
+};
 
 $periodDays = [];
 foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $day) {
@@ -263,15 +290,18 @@ if ($reverseUsersHl) {
     $reverseUsersEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($reverseUsersHl);
     $reverseUsersClass = $reverseUsersEntity->getDataClass();
     $reverseUsersRows = $reverseUsersClass::getList([
-        'select' => ['UF_EXT_ID', 'UF_LAST_NAME', 'UF_FIRST_NAME', 'UF_SECOND_NAME', 'UF_TAB_NUM'],
+        'select' => ['UF_EXT_ID', 'UF_LAST_NAME', 'UF_FIRST_NAME', 'UF_SECOND_NAME', 'UF_TAB_NUM', 'UF_CABINET'],
         'filter' => ['=UF_SOURCE' => 'Reverse'],
     ]);
     while ($row = $reverseUsersRows->fetch()) {
         $passId = trim((string)$row['UF_EXT_ID']);
         if ($passId === '') { continue; }
+        $reverseCabinet = $resolveReverseCabinet(isset($row['UF_CABINET']) ? $row['UF_CABINET'] : '');
         $reverseUsersByPass[$passId] = [
             'FIO' => trim((string)$row['UF_LAST_NAME'] . ' ' . (string)$row['UF_FIRST_NAME'] . ' ' . (string)$row['UF_SECOND_NAME']),
             'LEGAL_ENTITY' => $normalizeLegalEntity($row['UF_TAB_NUM']),
+            'CABINET' => (string)$reverseCabinet['TITLE'],
+            'CABINET_NORM' => (string)$reverseCabinet['NORM'],
         ];
     }
 }
@@ -336,7 +366,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         if ($workedSeconds <= 0 || $workedSeconds === $fourHoursSeconds) { continue; }
         $isShortOfficePresence = $workedSeconds < $fourHoursSeconds;
 
-        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК'];
+        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК', 'CABINET' => '', 'CABINET_NORM' => ''];
         $legalEntity = $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
         $employeeKey = $portalUserId > 0 ? 'U' . $portalUserId : 'P' . $passId;
         if ($isShortOfficePresence) {
@@ -380,12 +410,34 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             continue;
         }
 
-        if ($cabinetFilterNorm !== '') { continue; }
+        $reverseCabinetNorm = isset($reverseUser['CABINET_NORM']) ? (string)$reverseUser['CABINET_NORM'] : '';
+        $reverseCabinetTitle = isset($reverseUser['CABINET']) ? (string)$reverseUser['CABINET'] : '';
+        if ($reverseCabinetNorm !== '') {
+            if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm])) {
+                $cabinetDailyOffice[$dateKey][$reverseCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
+            }
+            foreach (['SHORT_TOTAL', 'BY_DEPARTMENT', 'SHORT_BY_DEPARTMENT', 'BY_LEGAL_ENTITY', 'SHORT_BY_LEGAL_ENTITY'] as $officeKey) {
+                if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$officeKey])) {
+                    $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$officeKey] = in_array($officeKey, ['SHORT_TOTAL'], true) ? 0 : [];
+                }
+            }
+
+            $totalKey = $isShortOfficePresence ? 'SHORT_TOTAL' : 'TOTAL';
+            $legalKey = $isShortOfficePresence ? 'SHORT_BY_LEGAL_ENTITY' : 'BY_LEGAL_ENTITY';
+            if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity])) {
+                $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity] = 0;
+            }
+            $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$totalKey]++;
+            $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity]++;
+        }
+
+        if ($cabinetFilterNorm !== '' && $reverseCabinetNorm !== $cabinetFilterNorm) { continue; }
         $employeeName = trim((string)$reverseUser['FIO']);
         if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
         $unknownEmployees[] = [
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
+            'CABINET' => $reverseCabinetTitle,
             'DATE' => $dateKey,
         ];
     }
@@ -519,19 +571,21 @@ header('Content-Type: text/html; charset=UTF-8');
     <tr>
         <th>ЮЛ</th>
         <th>Сотрудник</th>
+        <th>Кабинет</th>
         <th>Дата</th>
     </tr>
     </thead>
     <tbody>
     <?php if (empty($unknownEmployees)): ?>
         <tr>
-            <td colspan="3">Нет сотрудников без определенной структуры или кабинета.</td>
+            <td colspan="4">Нет сотрудников без определенной структуры или кабинета.</td>
         </tr>
     <?php else: ?>
         <?php foreach ($unknownEmployees as $employee): ?>
             <tr>
                 <td><?=htmlspecialcharsbx((string)$employee['LEGAL_ENTITY'])?></td>
                 <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
+                <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
             </tr>
         <?php endforeach; ?>
