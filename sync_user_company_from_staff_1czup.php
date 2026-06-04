@@ -9,6 +9,11 @@
  * - по Staff_1CZUP.Source назначаем значение списка UF_COMPANY:
  *   - Srvr=srv-off-1c01;Ref=1c_Pay83_NSC; => НСК [26]
  *   - Srvr=srv-off-1c01;Ref=1c_Pay83_TM;  => УК ТМ [1723]
+ * - если Source не найден/не распознан, определяем UF_COMPANY по e-mail:
+ *   - содержит tricolor.ru    => НСК [26]
+ *   - содержит tricolormedia  => УК ТМ [1723]
+ *   - содержит monobrand      => ТТ [27]
+ *   - иначе                  => Иное [29]
  *
  * Запуск из CLI:
  *   php -f sync_user_company_from_staff_1czup.php -- --dry-run
@@ -35,6 +40,8 @@ const STAFF_SOURCE_NSC = 'Srvr=srv-off-1c01;Ref=1c_Pay83_NSC;';
 const STAFF_SOURCE_TM = 'Srvr=srv-off-1c01;Ref=1c_Pay83_TM;';
 const USER_COMPANY_NSC_ID = 26;
 const USER_COMPANY_TM_ID = 1723;
+const USER_COMPANY_TT_ID = 27;
+const USER_COMPANY_OTHER_ID = 29;
 
 $sourceToCompany = [
     STAFF_SOURCE_NSC => USER_COMPANY_NSC_ID,
@@ -81,6 +88,25 @@ function scuNormalizeScalar($value): string
     return is_scalar($value) ? trim((string)$value) : '';
 }
 
+function scuGetCompanyByEmail(string $email): int
+{
+    $email = strtolower(trim($email));
+
+    if (strpos($email, 'tricolor.ru') !== false) {
+        return USER_COMPANY_NSC_ID;
+    }
+
+    if (strpos($email, 'tricolormedia') !== false) {
+        return USER_COMPANY_TM_ID;
+    }
+
+    if (strpos($email, 'monobrand') !== false) {
+        return USER_COMPANY_TT_ID;
+    }
+
+    return USER_COMPANY_OTHER_ID;
+}
+
 function scuGetStaffSourceByGuid(\Bitrix\Main\DB\Connection $connection, string $guid): string
 {
     $guid = trim($guid);
@@ -115,6 +141,8 @@ $alreadyActual = 0;
 $withoutGuid = 0;
 $withoutStaffRow = 0;
 $unknownSource = 0;
+$resolvedBySource = 0;
+$resolvedByEmail = 0;
 $errors = 0;
 
 if (!scuIsCli()) {
@@ -130,7 +158,7 @@ $userRows = \CUser::GetList(
     $order,
     ['ACTIVE' => 'Y'],
     [
-        'FIELDS' => ['ID', 'LOGIN', 'NAME', 'LAST_NAME', 'SECOND_NAME'],
+        'FIELDS' => ['ID', 'LOGIN', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME'],
         'SELECT' => ['UF_1C_GUID', 'UF_COMPANY'],
     ]
 );
@@ -140,25 +168,32 @@ while ($user = $userRows->Fetch()) {
 
     $userId = (int)$user['ID'];
     $guid = scuNormalizeScalar($user['UF_1C_GUID'] ?? '');
+    $email = scuNormalizeScalar($user['EMAIL'] ?? '');
     $currentCompany = (int)scuNormalizeScalar($user['UF_COMPANY'] ?? 0);
+    $source = '';
+    $targetCompany = 0;
+    $resolveReason = '';
 
     if ($guid === '') {
         $withoutGuid++;
-        continue;
+    } else {
+        $source = scuGetStaffSourceByGuid($connection, $guid);
+        if ($source === '') {
+            $withoutStaffRow++;
+        } elseif (isset($sourceToCompany[$source])) {
+            $targetCompany = (int)$sourceToCompany[$source];
+            $resolvedBySource++;
+            $resolveReason = 'source';
+        } else {
+            $unknownSource++;
+        }
     }
 
-    $source = scuGetStaffSourceByGuid($connection, $guid);
-    if ($source === '') {
-        $withoutStaffRow++;
-        continue;
+    if ($targetCompany <= 0) {
+        $targetCompany = scuGetCompanyByEmail($email);
+        $resolvedByEmail++;
+        $resolveReason = 'email';
     }
-
-    if (!isset($sourceToCompany[$source])) {
-        $unknownSource++;
-        continue;
-    }
-
-    $targetCompany = (int)$sourceToCompany[$source];
     if ($currentCompany === $targetCompany) {
         $alreadyActual++;
         continue;
@@ -167,12 +202,14 @@ while ($user = $userRows->Fetch()) {
     if ($isDryRun) {
         $wouldUpdate++;
         scuPrintLine(sprintf(
-            'DRY-RUN user=%d login=%s guid=%s UF_COMPANY: %d -> %d source=%s',
+            'DRY-RUN user=%d login=%s email=%s guid=%s UF_COMPANY: %d -> %d reason=%s source=%s',
             $userId,
             scuNormalizeScalar($user['LOGIN'] ?? ''),
+            $email,
             $guid,
             $currentCompany,
             $targetCompany,
+            $resolveReason,
             $source
         ));
         continue;
@@ -181,22 +218,26 @@ while ($user = $userRows->Fetch()) {
     if ($userUpdater->Update($userId, ['UF_COMPANY' => $targetCompany])) {
         $updated++;
         scuPrintLine(sprintf(
-            'UPDATED user=%d login=%s guid=%s UF_COMPANY: %d -> %d source=%s',
+            'UPDATED user=%d login=%s email=%s guid=%s UF_COMPANY: %d -> %d reason=%s source=%s',
             $userId,
             scuNormalizeScalar($user['LOGIN'] ?? ''),
+            $email,
             $guid,
             $currentCompany,
             $targetCompany,
+            $resolveReason,
             $source
         ));
     } else {
         $errors++;
         scuPrintLine(sprintf(
-            'ERROR user=%d login=%s guid=%s target=%d: %s',
+            'ERROR user=%d login=%s email=%s guid=%s target=%d reason=%s: %s',
             $userId,
             scuNormalizeScalar($user['LOGIN'] ?? ''),
+            $email,
             $guid,
             $targetCompany,
+            $resolveReason,
             trim((string)$userUpdater->LAST_ERROR)
         ));
     }
@@ -210,6 +251,8 @@ scuPrintLine('already_actual=' . $alreadyActual);
 scuPrintLine('without_guid=' . $withoutGuid);
 scuPrintLine('without_staff_row_or_source=' . $withoutStaffRow);
 scuPrintLine('unknown_source=' . $unknownSource);
+scuPrintLine('resolved_by_source=' . $resolvedBySource);
+scuPrintLine('resolved_by_email=' . $resolvedByEmail);
 scuPrintLine('errors=' . $errors);
 scuPrintLine('Finish UF_COMPANY sync.');
 
