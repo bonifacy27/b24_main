@@ -99,6 +99,16 @@ $normalizeDirectoryCabinet = static function (string $cabinetName): string {
     return 'other|' . $cabinetCode;
 };
 
+$normalizeOrgNodeIds = static function ($rawValue): array {
+    $values = is_array($rawValue) ? $rawValue : [$rawValue];
+    $ids = [];
+    foreach ($values as $value) {
+        $id = (int)$value;
+        if ($id > 0) { $ids[$id] = true; }
+    }
+    return array_keys($ids);
+};
+
 $cabinetFilterNorm = '';
 if ($cabinetFilterRaw !== '') {
     $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
@@ -106,6 +116,88 @@ if ($cabinetFilterRaw !== '') {
         $cabinetFilterNorm = $normalizeDirectoryCabinet($cabinetFilterRaw);
     }
 }
+
+$orgNodes = [];
+$orgNodesHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(99)->fetch();
+if ($orgNodesHl) {
+    $orgNodesEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($orgNodesHl);
+    $orgNodesClass = $orgNodesEntity->getDataClass();
+    $orgNodeRows = $orgNodesClass::getList(['select' => ['*']]);
+    while ($row = $orgNodeRows->fetch()) {
+        $id = (int)$row['ID'];
+        if ($id <= 0) { continue; }
+
+        $parentId = 0;
+        foreach (['UF_PARENT_ID', 'UF_PARENT', 'UF_PARENT_NODE_ID', 'UF_PARENT_NODE'] as $parentField) {
+            if (!isset($row[$parentField])) { continue; }
+            $parentIds = $normalizeOrgNodeIds($row[$parentField]);
+            if (!empty($parentIds)) {
+                $parentId = (int)reset($parentIds);
+                break;
+            }
+        }
+
+        $orgNodes[$id] = [
+            'LEVEL' => (int)$row['UF_LEVEL'],
+            'NAME' => trim((string)$row['UF_NAME']),
+            'PARENT_ID' => $parentId,
+        ];
+    }
+}
+
+$getOrgNodeChain = static function (int $nodeId) use ($orgNodes): array {
+    $chain = [];
+    $guard = 0;
+    while ($nodeId > 0 && isset($orgNodes[$nodeId]) && $guard < 100) {
+        $chain[] = $orgNodes[$nodeId];
+        $nodeId = (int)$orgNodes[$nodeId]['PARENT_ID'];
+        $guard++;
+    }
+    return array_reverse($chain);
+};
+
+$resolveUserOrgUnit = static function ($rawOrgNodeValue) use ($normalizeOrgNodeIds, $orgNodes, $getOrgNodeChain): array {
+    $nodeIds = $normalizeOrgNodeIds($rawOrgNodeValue);
+    $ceo1 = '';
+    $department = '';
+    $maxLevel = -1;
+
+    foreach ($nodeIds as $nodeId) {
+        if (!isset($orgNodes[$nodeId])) { continue; }
+
+        $nodeChain = $getOrgNodeChain((int)$nodeId);
+        if (empty($nodeChain)) { $nodeChain = [$orgNodes[$nodeId]]; }
+
+        foreach ($nodeChain as $node) {
+            $nodeName = (string)$node['NAME'];
+            $nodeLevel = (int)$node['LEVEL'];
+            if ($nodeName === '') { continue; }
+
+            if ($nodeLevel === 1 && $ceo1 === '') {
+                $ceo1 = $nodeName;
+            }
+            if ($nodeLevel >= $maxLevel) {
+                $department = $nodeName;
+                $maxLevel = $nodeLevel;
+            }
+        }
+    }
+
+    if ($department === '' && !empty($nodeIds)) {
+        $lastNodeId = (int)end($nodeIds);
+        if (isset($orgNodes[$lastNodeId])) {
+            $department = (string)$orgNodes[$lastNodeId]['NAME'];
+        }
+    }
+    if ($ceo1 === '' && $maxLevel === 1) {
+        $ceo1 = $department;
+    }
+
+    return [
+        'CEO1' => $ceo1,
+        'DEPARTMENT' => $department,
+    ];
+};
 
 $departments = [];
 $rsSections = \CIBlockSection::GetList(
@@ -123,36 +215,6 @@ while ($section = $rsSections->Fetch()) {
         'UF_HEAD' => (int)$section['UF_HEAD'],
     ];
 }
-
-$getDepartmentSummaryFromHead = static function (int $headDepartmentId) use (&$departments): array {
-    $excludedRoots = ['НАО «Национальная спутниковая компания»', 'Управление'];
-    $chain = [];
-    $currentId = $headDepartmentId;
-    $guard = 0;
-    while ($currentId > 0 && isset($departments[$currentId]) && $guard < 100) {
-        $name = (string)$departments[$currentId]['NAME'];
-        if (!in_array($name, $excludedRoots, true)) {
-            $chain[] = $name;
-        }
-        $currentId = (int)$departments[$currentId]['IBLOCK_SECTION_ID'];
-        $guard++;
-    }
-
-    $chain = array_reverse($chain);
-    $ceo1 = isset($chain[0]) ? (string)$chain[0] : '';
-    $department = '';
-    for ($index = count($chain) - 1; $index >= 0; $index--) {
-        if ((string)$chain[$index] !== '') {
-            $department = (string)$chain[$index];
-            break;
-        }
-    }
-
-    return [
-        'CEO1' => $ceo1,
-        'DEPARTMENT' => $department,
-    ];
-};
 
 $departmentChildren = [];
 foreach ($departments as $departmentId => $department) {
@@ -184,15 +246,18 @@ foreach ($departments as $departmentId => $department) {
 }
 
 $headsMap = [];
+$headOrgSummaryMap = [];
 $headIds = [];
 foreach ($departments as $department) {
     if ((int)$department['UF_HEAD'] > 0) { $headIds[(int)$department['UF_HEAD']] = true; }
 }
 if (!empty($headIds)) {
-    $rsHeads = \CUser::GetList($by='id', $order='asc', ['ID' => implode('|', array_keys($headIds))], ['FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN']]);
+    $rsHeads = \CUser::GetList($by='id', $order='asc', ['ID' => implode('|', array_keys($headIds))], ['SELECT' => ['UF_1C_ORG_NODE'], 'FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN']]);
     while ($head = $rsHeads->Fetch()) {
+        $headId = (int)$head['ID'];
         $fio = trim($head['LAST_NAME'] . ' ' . $head['NAME'] . ' ' . $head['SECOND_NAME']);
-        $headsMap[(int)$head['ID']] = $fio !== '' ? $fio : (string)$head['LOGIN'];
+        $headsMap[$headId] = $fio !== '' ? $fio : (string)$head['LOGIN'];
+        $headOrgSummaryMap[$headId] = $resolveUserOrgUnit($head['UF_1C_ORG_NODE']);
     }
 }
 
@@ -234,18 +299,45 @@ while ($user = $rsUsers->Fetch()) {
 }
 
 $cabinetDirectory = [];
+$cabinetDirectoryById = [];
 $cabinetHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(74)->fetch();
 if ($cabinetHl) {
     $cabinetEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($cabinetHl);
     $cabinetClass = $cabinetEntity->getDataClass();
-    $rsCabinets = $cabinetClass::getList(['select' => ['UF_NAME', 'UF_WORKPLACES']]);
+    $rsCabinets = $cabinetClass::getList(['select' => ['ID', 'UF_NAME', 'UF_WORKPLACES']]);
     while ($row = $rsCabinets->fetch()) {
         $title = trim((string)$row['UF_NAME']);
         $normalized = $normalizeDirectoryCabinet($title);
         if ($normalized === '') { continue; }
-        $cabinetDirectory[$normalized] = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES']];
+        $cabinetData = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES']];
+        $cabinetDirectory[$normalized] = $cabinetData;
+        $cabinetDirectoryById[(int)$row['ID']] = $cabinetData + ['NORM' => $normalized];
     }
 }
+
+$resolveReverseCabinet = static function ($cabinetValue) use (&$cabinetDirectoryById, $normalizeCabinet, $normalizeDirectoryCabinet): array {
+    if (is_array($cabinetValue)) {
+        $cabinetValue = isset($cabinetValue['VALUE']) ? $cabinetValue['VALUE'] : (isset($cabinetValue['ID']) ? $cabinetValue['ID'] : reset($cabinetValue));
+    }
+
+    $cabinetRaw = trim((string)$cabinetValue);
+    if ($cabinetRaw === '') { return ['TITLE' => '', 'NORM' => '']; }
+
+    if (ctype_digit($cabinetRaw) && isset($cabinetDirectoryById[(int)$cabinetRaw])) {
+        return [
+            'TITLE' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['TITLE'],
+            'NORM' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['NORM'],
+        ];
+    }
+
+    $cabinetNorm = $normalizeCabinet($cabinetRaw);
+    if ($cabinetNorm === '') { $cabinetNorm = $normalizeDirectoryCabinet($cabinetRaw); }
+
+    return [
+        'TITLE' => $cabinetNorm !== '' ? $cabinetRaw : '',
+        'NORM' => $cabinetNorm,
+    ];
+};
 
 $periodDays = [];
 foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $day) {
@@ -263,15 +355,18 @@ if ($reverseUsersHl) {
     $reverseUsersEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($reverseUsersHl);
     $reverseUsersClass = $reverseUsersEntity->getDataClass();
     $reverseUsersRows = $reverseUsersClass::getList([
-        'select' => ['UF_EXT_ID', 'UF_LAST_NAME', 'UF_FIRST_NAME', 'UF_SECOND_NAME', 'UF_TAB_NUM'],
+        'select' => ['UF_EXT_ID', 'UF_LAST_NAME', 'UF_FIRST_NAME', 'UF_SECOND_NAME', 'UF_TAB_NUM', 'UF_CABINET'],
         'filter' => ['=UF_SOURCE' => 'Reverse'],
     ]);
     while ($row = $reverseUsersRows->fetch()) {
         $passId = trim((string)$row['UF_EXT_ID']);
         if ($passId === '') { continue; }
+        $reverseCabinet = $resolveReverseCabinet(isset($row['UF_CABINET']) ? $row['UF_CABINET'] : '');
         $reverseUsersByPass[$passId] = [
             'FIO' => trim((string)$row['UF_LAST_NAME'] . ' ' . (string)$row['UF_FIRST_NAME'] . ' ' . (string)$row['UF_SECOND_NAME']),
             'LEGAL_ENTITY' => $normalizeLegalEntity($row['UF_TAB_NUM']),
+            'CABINET' => (string)$reverseCabinet['TITLE'],
+            'CABINET_NORM' => (string)$reverseCabinet['NORM'],
         ];
     }
 }
@@ -312,6 +407,7 @@ if ($reverseHl) {
 }
 
 $officePresenceKeys = [];
+$shortOfficePresenceKeys = [];
 $unknownEmployees = [];
 foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
     foreach ($passes as $passId => $events) {
@@ -331,44 +427,82 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $dayEnd = (new \DateTime($dateKey))->setTime(23, 59, 59);
             $workedSeconds += max(0, $dayEnd->getTimestamp() - $openEntry->getTimestamp());
         }
-        if ($workedSeconds <= 4 * 60 * 60) { continue; }
+        $fourHoursSeconds = 4 * 60 * 60;
+        if ($workedSeconds <= 0 || $workedSeconds === $fourHoursSeconds) { continue; }
+        $isShortOfficePresence = $workedSeconds < $fourHoursSeconds;
 
-        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК'];
+        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК', 'CABINET' => '', 'CABINET_NORM' => ''];
         $legalEntity = $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
         $employeeKey = $portalUserId > 0 ? 'U' . $portalUserId : 'P' . $passId;
-        if (isset($officePresenceKeys[$dateKey][$employeeKey])) { continue; }
-        $officePresenceKeys[$dateKey][$employeeKey] = true;
+        if ($isShortOfficePresence) {
+            if (isset($shortOfficePresenceKeys[$dateKey][$employeeKey])) { continue; }
+            $shortOfficePresenceKeys[$dateKey][$employeeKey] = true;
+        } else {
+            if (isset($officePresenceKeys[$dateKey][$employeeKey])) { continue; }
+            $officePresenceKeys[$dateKey][$employeeKey] = true;
+        }
 
         $userCabinetNorm = $portalUserId > 0 && isset($userCabinetMap[$portalUserId]) ? $normalizeCabinet((string)$userCabinetMap[$portalUserId]) : '';
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
 
         if ($userCabinetNorm !== '' && !empty($userDepartmentIds)) {
             if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
-                $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => []];
+                $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
             }
-            if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_LEGAL_ENTITY'][$legalEntity])) {
-                $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_LEGAL_ENTITY'][$legalEntity] = 0;
+            foreach (['SHORT_TOTAL', 'BY_DEPARTMENT', 'SHORT_BY_DEPARTMENT', 'BY_LEGAL_ENTITY', 'SHORT_BY_LEGAL_ENTITY'] as $officeKey) {
+                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$officeKey])) {
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm][$officeKey] = in_array($officeKey, ['SHORT_TOTAL'], true) ? 0 : [];
+                }
             }
-            $cabinetDailyOffice[$dateKey][$userCabinetNorm]['TOTAL']++;
-            $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_LEGAL_ENTITY'][$legalEntity]++;
+
+            $totalKey = $isShortOfficePresence ? 'SHORT_TOTAL' : 'TOTAL';
+            $legalKey = $isShortOfficePresence ? 'SHORT_BY_LEGAL_ENTITY' : 'BY_LEGAL_ENTITY';
+            $departmentKey = $isShortOfficePresence ? 'SHORT_BY_DEPARTMENT' : 'BY_DEPARTMENT';
+            if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$legalKey][$legalEntity])) {
+                $cabinetDailyOffice[$dateKey][$userCabinetNorm][$legalKey][$legalEntity] = 0;
+            }
+            $cabinetDailyOffice[$dateKey][$userCabinetNorm][$totalKey]++;
+            $cabinetDailyOffice[$dateKey][$userCabinetNorm][$legalKey][$legalEntity]++;
             foreach ($userDepartmentIds as $departmentId) {
-                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId])) {
-                    $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId] = [];
+                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId])) {
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId] = [];
                 }
-                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId][$legalEntity])) {
-                    $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId][$legalEntity] = 0;
+                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity])) {
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity] = 0;
                 }
-                $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId][$legalEntity]++;
+                $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity]++;
             }
             continue;
         }
 
-        if ($cabinetFilterNorm !== '') { continue; }
+        $reverseCabinetNorm = isset($reverseUser['CABINET_NORM']) ? (string)$reverseUser['CABINET_NORM'] : '';
+        $reverseCabinetTitle = isset($reverseUser['CABINET']) ? (string)$reverseUser['CABINET'] : '';
+        if ($reverseCabinetNorm !== '') {
+            if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm])) {
+                $cabinetDailyOffice[$dateKey][$reverseCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
+            }
+            foreach (['SHORT_TOTAL', 'BY_DEPARTMENT', 'SHORT_BY_DEPARTMENT', 'BY_LEGAL_ENTITY', 'SHORT_BY_LEGAL_ENTITY'] as $officeKey) {
+                if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$officeKey])) {
+                    $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$officeKey] = in_array($officeKey, ['SHORT_TOTAL'], true) ? 0 : [];
+                }
+            }
+
+            $totalKey = $isShortOfficePresence ? 'SHORT_TOTAL' : 'TOTAL';
+            $legalKey = $isShortOfficePresence ? 'SHORT_BY_LEGAL_ENTITY' : 'BY_LEGAL_ENTITY';
+            if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity])) {
+                $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity] = 0;
+            }
+            $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$totalKey]++;
+            $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity]++;
+        }
+
+        if ($cabinetFilterNorm !== '' && $reverseCabinetNorm !== $cabinetFilterNorm) { continue; }
         $employeeName = trim((string)$reverseUser['FIO']);
         if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
         $unknownEmployees[] = [
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
+            'CABINET' => $reverseCabinetTitle,
             'DATE' => $dateKey,
         ];
     }
@@ -392,8 +526,9 @@ sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
 
 $availableCeo1 = [];
 foreach ($departments as $departmentId => $department) {
-    if ((int)$department['UF_HEAD'] <= 0) { continue; }
-    $departmentSummary = $getDepartmentSummaryFromHead((int)$departmentId);
+    $headUserId = (int)$department['UF_HEAD'];
+    if ($headUserId <= 0) { continue; }
+    $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
     $ceo1 = trim((string)$departmentSummary['CEO1']);
     if ($ceo1 !== '') { $availableCeo1[$ceo1] = true; }
 }
@@ -437,6 +572,7 @@ header('Content-Type: text/html; charset=UTF-8');
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
         <th class="col-narrow">Кол-во закрепленных чел. за кабинетом</th>
         <th>Дата</th>
+        <th class="col-narrow">Кол-во сотрудников в офисе (&lt;4ч)</th>
         <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
     </tr>
     </thead>
@@ -444,8 +580,9 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php
     foreach ($departments as $departmentId => $department) {
         if ((int)$department['UF_HEAD'] <= 0) { continue; }
-        $headName = isset($headsMap[$department['UF_HEAD']]) ? $headsMap[$department['UF_HEAD']] : 'Не назначен';
-        $departmentSummary = $getDepartmentSummaryFromHead($departmentId);
+        $headUserId = (int)$department['UF_HEAD'];
+        $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
+        $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
         if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
 
         $departmentCabinets = [];
@@ -464,9 +601,13 @@ header('Content-Type: text/html; charset=UTF-8');
             $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
 
             foreach ($periodDays as $dateKey) {
-                $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
+                $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
-                if (empty($departmentLegalCounts)) { $departmentLegalCounts = ['НСК' => 0]; }
+                $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
+                $legalEntities = array_fill_keys(array_merge(array_keys($departmentLegalCounts), array_keys($shortDepartmentLegalCounts)), true);
+                if (empty($legalEntities)) { $legalEntities = ['НСК' => true]; }
+                $departmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $departmentLegalCounts);
+                $shortDepartmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $shortDepartmentLegalCounts);
                 ksort($departmentLegalCounts, SORT_NATURAL | SORT_FLAG_CASE);
                 ?>
                 <?php foreach ($departmentLegalCounts as $legalEntity => $officeCount): ?>
@@ -479,6 +620,7 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?= $workplaces ?></td>
                     <td><?= $assignedCount ?></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+                    <td><?= isset($shortDepartmentLegalCounts[$legalEntity]) ? (int)$shortDepartmentLegalCounts[$legalEntity] : 0 ?></td>
                     <td><?= (int)$officeCount ?></td>
                 </tr>
                 <?php endforeach; ?>
@@ -496,19 +638,21 @@ header('Content-Type: text/html; charset=UTF-8');
     <tr>
         <th>ЮЛ</th>
         <th>Сотрудник</th>
+        <th>Кабинет</th>
         <th>Дата</th>
     </tr>
     </thead>
     <tbody>
     <?php if (empty($unknownEmployees)): ?>
         <tr>
-            <td colspan="3">Нет сотрудников без определенной структуры или кабинета.</td>
+            <td colspan="4">Нет сотрудников без определенной структуры или кабинета.</td>
         </tr>
     <?php else: ?>
         <?php foreach ($unknownEmployees as $employee): ?>
             <tr>
                 <td><?=htmlspecialcharsbx((string)$employee['LEGAL_ENTITY'])?></td>
                 <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
+                <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
             </tr>
         <?php endforeach; ?>
@@ -547,6 +691,7 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
         <th>Кабинет</th>
         <th>Дата</th>
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
+        <th class="col-narrow">Кол-во сотрудников в офисе (&lt;4ч)</th>
         <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
         <th>% загрузки</th>
         <th class="col-narrow">Кол-во свободных рм</th>
@@ -561,7 +706,8 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
         ?>
         <?php foreach ($periodDays as $dateIndex => $dateKey): ?>
             <?php
-            $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0];
+            $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+            $shortTotalOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
             $totalOccupied = (int)$dayData['TOTAL'];
             $utilization = $workplaces > 0 ? round(($totalOccupied / $workplaces) * 100, 1) : 0;
             $free = max(0, $workplaces - $totalOccupied);
@@ -572,6 +718,7 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
                 <?php endif; ?>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
                 <td><?= $workplaces ?></td>
+                <td><?= $shortTotalOccupied ?></td>
                 <td><?= $totalOccupied ?></td>
                 <td><?= $utilization ?>%</td>
                 <td><?= $free ?></td>
