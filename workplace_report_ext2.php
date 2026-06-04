@@ -312,6 +312,7 @@ if ($reverseHl) {
 }
 
 $officePresenceKeys = [];
+$shortOfficePresenceKeys = [];
 $unknownEmployees = [];
 foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
     foreach ($passes as $passId => $events) {
@@ -331,34 +332,50 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $dayEnd = (new \DateTime($dateKey))->setTime(23, 59, 59);
             $workedSeconds += max(0, $dayEnd->getTimestamp() - $openEntry->getTimestamp());
         }
-        if ($workedSeconds <= 4 * 60 * 60) { continue; }
+        $fourHoursSeconds = 4 * 60 * 60;
+        if ($workedSeconds <= 0 || $workedSeconds === $fourHoursSeconds) { continue; }
+        $isShortOfficePresence = $workedSeconds < $fourHoursSeconds;
 
         $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК'];
         $legalEntity = $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
         $employeeKey = $portalUserId > 0 ? 'U' . $portalUserId : 'P' . $passId;
-        if (isset($officePresenceKeys[$dateKey][$employeeKey])) { continue; }
-        $officePresenceKeys[$dateKey][$employeeKey] = true;
+        if ($isShortOfficePresence) {
+            if (isset($shortOfficePresenceKeys[$dateKey][$employeeKey])) { continue; }
+            $shortOfficePresenceKeys[$dateKey][$employeeKey] = true;
+        } else {
+            if (isset($officePresenceKeys[$dateKey][$employeeKey])) { continue; }
+            $officePresenceKeys[$dateKey][$employeeKey] = true;
+        }
 
         $userCabinetNorm = $portalUserId > 0 && isset($userCabinetMap[$portalUserId]) ? $normalizeCabinet((string)$userCabinetMap[$portalUserId]) : '';
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
 
         if ($userCabinetNorm !== '' && !empty($userDepartmentIds)) {
             if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
-                $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => []];
+                $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
             }
-            if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_LEGAL_ENTITY'][$legalEntity])) {
-                $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_LEGAL_ENTITY'][$legalEntity] = 0;
+            foreach (['SHORT_TOTAL', 'BY_DEPARTMENT', 'SHORT_BY_DEPARTMENT', 'BY_LEGAL_ENTITY', 'SHORT_BY_LEGAL_ENTITY'] as $officeKey) {
+                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$officeKey])) {
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm][$officeKey] = in_array($officeKey, ['SHORT_TOTAL'], true) ? 0 : [];
+                }
             }
-            $cabinetDailyOffice[$dateKey][$userCabinetNorm]['TOTAL']++;
-            $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_LEGAL_ENTITY'][$legalEntity]++;
+
+            $totalKey = $isShortOfficePresence ? 'SHORT_TOTAL' : 'TOTAL';
+            $legalKey = $isShortOfficePresence ? 'SHORT_BY_LEGAL_ENTITY' : 'BY_LEGAL_ENTITY';
+            $departmentKey = $isShortOfficePresence ? 'SHORT_BY_DEPARTMENT' : 'BY_DEPARTMENT';
+            if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$legalKey][$legalEntity])) {
+                $cabinetDailyOffice[$dateKey][$userCabinetNorm][$legalKey][$legalEntity] = 0;
+            }
+            $cabinetDailyOffice[$dateKey][$userCabinetNorm][$totalKey]++;
+            $cabinetDailyOffice[$dateKey][$userCabinetNorm][$legalKey][$legalEntity]++;
             foreach ($userDepartmentIds as $departmentId) {
-                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId])) {
-                    $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId] = [];
+                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId])) {
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId] = [];
                 }
-                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId][$legalEntity])) {
-                    $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId][$legalEntity] = 0;
+                if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity])) {
+                    $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity] = 0;
                 }
-                $cabinetDailyOffice[$dateKey][$userCabinetNorm]['BY_DEPARTMENT'][$departmentId][$legalEntity]++;
+                $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity]++;
             }
             continue;
         }
@@ -437,6 +454,7 @@ header('Content-Type: text/html; charset=UTF-8');
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
         <th class="col-narrow">Кол-во закрепленных чел. за кабинетом</th>
         <th>Дата</th>
+        <th class="col-narrow">Кол-во сотрудников в офисе (&lt;4ч)</th>
         <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
     </tr>
     </thead>
@@ -464,9 +482,13 @@ header('Content-Type: text/html; charset=UTF-8');
             $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
 
             foreach ($periodDays as $dateKey) {
-                $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'BY_DEPARTMENT' => []];
+                $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
-                if (empty($departmentLegalCounts)) { $departmentLegalCounts = ['НСК' => 0]; }
+                $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
+                $legalEntities = array_fill_keys(array_merge(array_keys($departmentLegalCounts), array_keys($shortDepartmentLegalCounts)), true);
+                if (empty($legalEntities)) { $legalEntities = ['НСК' => true]; }
+                $departmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $departmentLegalCounts);
+                $shortDepartmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $shortDepartmentLegalCounts);
                 ksort($departmentLegalCounts, SORT_NATURAL | SORT_FLAG_CASE);
                 ?>
                 <?php foreach ($departmentLegalCounts as $legalEntity => $officeCount): ?>
@@ -479,6 +501,7 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?= $workplaces ?></td>
                     <td><?= $assignedCount ?></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+                    <td><?= isset($shortDepartmentLegalCounts[$legalEntity]) ? (int)$shortDepartmentLegalCounts[$legalEntity] : 0 ?></td>
                     <td><?= (int)$officeCount ?></td>
                 </tr>
                 <?php endforeach; ?>
@@ -547,6 +570,7 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
         <th>Кабинет</th>
         <th>Дата</th>
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
+        <th class="col-narrow">Кол-во сотрудников в офисе (&lt;4ч)</th>
         <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
         <th>% загрузки</th>
         <th class="col-narrow">Кол-во свободных рм</th>
@@ -561,7 +585,8 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
         ?>
         <?php foreach ($periodDays as $dateIndex => $dateKey): ?>
             <?php
-            $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0];
+            $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+            $shortTotalOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
             $totalOccupied = (int)$dayData['TOTAL'];
             $utilization = $workplaces > 0 ? round(($totalOccupied / $workplaces) * 100, 1) : 0;
             $free = max(0, $workplaces - $totalOccupied);
@@ -572,6 +597,7 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
                 <?php endif; ?>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
                 <td><?= $workplaces ?></td>
+                <td><?= $shortTotalOccupied ?></td>
                 <td><?= $totalOccupied ?></td>
                 <td><?= $utilization ?>%</td>
                 <td><?= $free ?></td>
