@@ -99,6 +99,16 @@ $normalizeDirectoryCabinet = static function (string $cabinetName): string {
     return 'other|' . $cabinetCode;
 };
 
+$normalizeOrgNodeIds = static function ($rawValue): array {
+    $values = is_array($rawValue) ? $rawValue : [$rawValue];
+    $ids = [];
+    foreach ($values as $value) {
+        $id = (int)$value;
+        if ($id > 0) { $ids[$id] = true; }
+    }
+    return array_keys($ids);
+};
+
 $cabinetFilterNorm = '';
 if ($cabinetFilterRaw !== '') {
     $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
@@ -106,6 +116,88 @@ if ($cabinetFilterRaw !== '') {
         $cabinetFilterNorm = $normalizeDirectoryCabinet($cabinetFilterRaw);
     }
 }
+
+$orgNodes = [];
+$orgNodesHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(99)->fetch();
+if ($orgNodesHl) {
+    $orgNodesEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($orgNodesHl);
+    $orgNodesClass = $orgNodesEntity->getDataClass();
+    $orgNodeRows = $orgNodesClass::getList(['select' => ['*']]);
+    while ($row = $orgNodeRows->fetch()) {
+        $id = (int)$row['ID'];
+        if ($id <= 0) { continue; }
+
+        $parentId = 0;
+        foreach (['UF_PARENT_ID', 'UF_PARENT', 'UF_PARENT_NODE_ID', 'UF_PARENT_NODE'] as $parentField) {
+            if (!isset($row[$parentField])) { continue; }
+            $parentIds = $normalizeOrgNodeIds($row[$parentField]);
+            if (!empty($parentIds)) {
+                $parentId = (int)reset($parentIds);
+                break;
+            }
+        }
+
+        $orgNodes[$id] = [
+            'LEVEL' => (int)$row['UF_LEVEL'],
+            'NAME' => trim((string)$row['UF_NAME']),
+            'PARENT_ID' => $parentId,
+        ];
+    }
+}
+
+$getOrgNodeChain = static function (int $nodeId) use ($orgNodes): array {
+    $chain = [];
+    $guard = 0;
+    while ($nodeId > 0 && isset($orgNodes[$nodeId]) && $guard < 100) {
+        $chain[] = $orgNodes[$nodeId];
+        $nodeId = (int)$orgNodes[$nodeId]['PARENT_ID'];
+        $guard++;
+    }
+    return array_reverse($chain);
+};
+
+$resolveUserOrgUnit = static function ($rawOrgNodeValue) use ($normalizeOrgNodeIds, $orgNodes, $getOrgNodeChain): array {
+    $nodeIds = $normalizeOrgNodeIds($rawOrgNodeValue);
+    $ceo1 = '';
+    $department = '';
+    $maxLevel = -1;
+
+    foreach ($nodeIds as $nodeId) {
+        if (!isset($orgNodes[$nodeId])) { continue; }
+
+        $nodeChain = $getOrgNodeChain((int)$nodeId);
+        if (empty($nodeChain)) { $nodeChain = [$orgNodes[$nodeId]]; }
+
+        foreach ($nodeChain as $node) {
+            $nodeName = (string)$node['NAME'];
+            $nodeLevel = (int)$node['LEVEL'];
+            if ($nodeName === '') { continue; }
+
+            if ($nodeLevel === 1 && $ceo1 === '') {
+                $ceo1 = $nodeName;
+            }
+            if ($nodeLevel >= $maxLevel) {
+                $department = $nodeName;
+                $maxLevel = $nodeLevel;
+            }
+        }
+    }
+
+    if ($department === '' && !empty($nodeIds)) {
+        $lastNodeId = (int)end($nodeIds);
+        if (isset($orgNodes[$lastNodeId])) {
+            $department = (string)$orgNodes[$lastNodeId]['NAME'];
+        }
+    }
+    if ($ceo1 === '' && $maxLevel === 1) {
+        $ceo1 = $department;
+    }
+
+    return [
+        'CEO1' => $ceo1,
+        'DEPARTMENT' => $department,
+    ];
+};
 
 $departments = [];
 $rsSections = \CIBlockSection::GetList(
@@ -123,36 +215,6 @@ while ($section = $rsSections->Fetch()) {
         'UF_HEAD' => (int)$section['UF_HEAD'],
     ];
 }
-
-$getDepartmentSummaryFromHead = static function (int $headDepartmentId) use (&$departments): array {
-    $excludedRoots = ['НАО «Национальная спутниковая компания»', 'Управление'];
-    $chain = [];
-    $currentId = $headDepartmentId;
-    $guard = 0;
-    while ($currentId > 0 && isset($departments[$currentId]) && $guard < 100) {
-        $name = (string)$departments[$currentId]['NAME'];
-        if (!in_array($name, $excludedRoots, true)) {
-            $chain[] = $name;
-        }
-        $currentId = (int)$departments[$currentId]['IBLOCK_SECTION_ID'];
-        $guard++;
-    }
-
-    $chain = array_reverse($chain);
-    $ceo1 = isset($chain[0]) ? (string)$chain[0] : '';
-    $department = '';
-    for ($index = count($chain) - 1; $index >= 0; $index--) {
-        if ((string)$chain[$index] !== '') {
-            $department = (string)$chain[$index];
-            break;
-        }
-    }
-
-    return [
-        'CEO1' => $ceo1,
-        'DEPARTMENT' => $department,
-    ];
-};
 
 $departmentChildren = [];
 foreach ($departments as $departmentId => $department) {
@@ -184,15 +246,18 @@ foreach ($departments as $departmentId => $department) {
 }
 
 $headsMap = [];
+$headOrgSummaryMap = [];
 $headIds = [];
 foreach ($departments as $department) {
     if ((int)$department['UF_HEAD'] > 0) { $headIds[(int)$department['UF_HEAD']] = true; }
 }
 if (!empty($headIds)) {
-    $rsHeads = \CUser::GetList($by='id', $order='asc', ['ID' => implode('|', array_keys($headIds))], ['FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN']]);
+    $rsHeads = \CUser::GetList($by='id', $order='asc', ['ID' => implode('|', array_keys($headIds))], ['SELECT' => ['UF_1C_ORG_NODE'], 'FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN']]);
     while ($head = $rsHeads->Fetch()) {
+        $headId = (int)$head['ID'];
         $fio = trim($head['LAST_NAME'] . ' ' . $head['NAME'] . ' ' . $head['SECOND_NAME']);
-        $headsMap[(int)$head['ID']] = $fio !== '' ? $fio : (string)$head['LOGIN'];
+        $headsMap[$headId] = $fio !== '' ? $fio : (string)$head['LOGIN'];
+        $headOrgSummaryMap[$headId] = $resolveUserOrgUnit($head['UF_1C_ORG_NODE']);
     }
 }
 
@@ -392,8 +457,9 @@ sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
 
 $availableCeo1 = [];
 foreach ($departments as $departmentId => $department) {
-    if ((int)$department['UF_HEAD'] <= 0) { continue; }
-    $departmentSummary = $getDepartmentSummaryFromHead((int)$departmentId);
+    $headUserId = (int)$department['UF_HEAD'];
+    if ($headUserId <= 0) { continue; }
+    $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
     $ceo1 = trim((string)$departmentSummary['CEO1']);
     if ($ceo1 !== '') { $availableCeo1[$ceo1] = true; }
 }
@@ -444,8 +510,9 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php
     foreach ($departments as $departmentId => $department) {
         if ((int)$department['UF_HEAD'] <= 0) { continue; }
-        $headName = isset($headsMap[$department['UF_HEAD']]) ? $headsMap[$department['UF_HEAD']] : 'Не назначен';
-        $departmentSummary = $getDepartmentSummaryFromHead($departmentId);
+        $headUserId = (int)$department['UF_HEAD'];
+        $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
+        $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
         if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
 
         $departmentCabinets = [];
