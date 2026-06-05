@@ -414,13 +414,19 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $openEntry = null;
         $workedSeconds = 0;
         $portalUserId = 0;
+        $inputEventsCount = 0;
+        $outputEventsCount = 0;
         foreach ($events as $event) {
             if ((int)$event['USER_ID'] > 0) { $portalUserId = (int)$event['USER_ID']; }
             if ($event['EVENT'] === 'in') {
+                $inputEventsCount++;
                 if ($openEntry === null) { $openEntry = $event['TIME']; }
-            } elseif ($event['EVENT'] === 'out' && $openEntry !== null) {
-                $workedSeconds += max(0, $event['TIME']->getTimestamp() - $openEntry->getTimestamp());
-                $openEntry = null;
+            } elseif ($event['EVENT'] === 'out') {
+                $outputEventsCount++;
+                if ($openEntry !== null) {
+                    $workedSeconds += max(0, $event['TIME']->getTimestamp() - $openEntry->getTimestamp());
+                    $openEntry = null;
+                }
             }
         }
         if ($openEntry !== null) {
@@ -428,8 +434,9 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $workedSeconds += max(0, $dayEnd->getTimestamp() - $openEntry->getTimestamp());
         }
         $fourHoursSeconds = 4 * 60 * 60;
-        if ($workedSeconds <= 0 || $workedSeconds === $fourHoursSeconds) { continue; }
-        $isShortOfficePresence = $workedSeconds < $fourHoursSeconds;
+        $hasSingleInputWithoutOutput = $inputEventsCount === 1 && $outputEventsCount === 0;
+        if ($workedSeconds <= 0 || (!$hasSingleInputWithoutOutput && $workedSeconds === $fourHoursSeconds)) { continue; }
+        $isShortOfficePresence = $hasSingleInputWithoutOutput || $workedSeconds < $fourHoursSeconds;
 
         $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК', 'CABINET' => '', 'CABINET_NORM' => ''];
         $legalEntity = $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
