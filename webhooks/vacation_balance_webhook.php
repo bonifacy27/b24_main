@@ -61,7 +61,7 @@ $data = getRequestData();
 $token   = isset($data['token']) ? (string)$data['token'] : '';
 $guid    = isset($data['guid']) ? trim((string)$data['guid']) : '';
 $year    = isset($data['year']) ? (int)$data['year'] : 0;
-$balance = isset($data['balance']) ? (int)$data['balance'] : 0;
+$balance = isset($data['balance']) ? (int)round((float)$data['balance']) : 0;
 
 if ($token === '' || $token !== WEBHOOK_TOKEN) {
     respond(false, 'Unauthorized: invalid token', [], 401);
