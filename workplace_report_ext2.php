@@ -612,11 +612,33 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             ];
             continue;
         }
+
+        $unknownReasons = [];
+        if ($portalUserId <= 0) {
+            $unknownReasons[] = 'Не найдена учетная запись на портале по событию Reverse';
+        } else {
+            if (!isset($userCabinetMap[$portalUserId])) {
+                $unknownReasons[] = 'Учетная запись на портале не активна или не попала в выборку активных сотрудников';
+            } elseif ($userCabinetNorm === '') {
+                $unknownReasons[] = 'Не указан или не распознан кабинет в поле UF_CABINET';
+            }
+            if (!isset($userDepartmentsMap[$portalUserId]) || empty($userDepartmentIds)) {
+                $unknownReasons[] = 'Не определено подразделение или ответственный руководитель в структуре отчета';
+            }
+        }
+        if ($reverseCabinetNorm === '') {
+            $unknownReasons[] = 'Не указан или не распознан кабинет в данных Reverse';
+        }
+        if (empty($unknownReasons)) {
+            $unknownReasons[] = 'Недостаточно данных для привязки к подразделению и кабинету основного списка';
+        }
+
         $unknownEmployees[] = [
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
             'CABINET' => $reverseCabinetTitle,
             'DATE' => $dateKey,
+            'REASON' => implode('; ', array_unique($unknownReasons)),
         ];
     }
 }
@@ -689,6 +711,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .modal-table th, .modal-table td { border: 1px solid #d8e0ea; padding: 6px 8px; }
         .modal-status-in { color: #166534; font-weight: 600; }
         .modal-status-out { color: #991b1b; }
+        .unknown-employee { cursor: help; border-bottom: 1px dotted #6b7f99; }
     </style>
 </head>
 <body>
@@ -809,7 +832,7 @@ header('Content-Type: text/html; charset=UTF-8');
         <?php foreach ($unknownEmployees as $employee): ?>
             <tr>
                 <td><?=htmlspecialcharsbx((string)($employee['LEGAL_ENTITY'] !== '' ? $employee['LEGAL_ENTITY'] : $undefinedLegalEntity))?></td>
-                <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
+                <td><span class="unknown-employee" title="<?=htmlspecialcharsbx((string)($employee['REASON'] ?? 'Причина не определена'))?>"><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></span></td>
                 <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
             </tr>
