@@ -364,7 +364,7 @@ while ($user = $rsUsers->Fetch()) {
         foreach ($userDepartmentsMap[$userId] as $headDepId) {
             if (!isset($departmentCabinetAssignedUsers[$headDepId])) { $departmentCabinetAssignedUsers[$headDepId] = []; }
             if (!isset($departmentCabinetAssignedUsers[$headDepId][$cabNorm])) { $departmentCabinetAssignedUsers[$headDepId][$cabNorm] = []; }
-            $departmentCabinetAssignedUsers[$headDepId][$cabNorm][] = $userName;
+            $departmentCabinetAssignedUsers[$headDepId][$cabNorm][$userId] = $userName;
         }
     }
 }
@@ -664,6 +664,10 @@ header('Content-Type: text/html; charset=UTF-8');
         .modal-close { border: 0; background: none; font-size: 24px; line-height: 1; cursor: pointer; }
         .modal-subtitle { color: #52616f; margin: 0 0 12px; }
         .modal-empty { color: #7a8794; }
+        .modal-table { border-collapse: collapse; width: 100%; }
+        .modal-table th, .modal-table td { border: 1px solid #d8e0ea; padding: 6px 8px; }
+        .modal-status-in { color: #166534; font-weight: 600; }
+        .modal-status-out { color: #991b1b; }
     </style>
 </head>
 <body>
@@ -733,12 +737,22 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
                     <?php
-                    $departmentAssignedUsers = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
-                    $departmentAssignedUsers = array_values(array_unique(array_filter($departmentAssignedUsers, static function ($name): bool { return trim((string)$name) !== ''; })));
-                    sort($departmentAssignedUsers, SORT_NATURAL | SORT_FLAG_CASE);
+                    $departmentAssignedUsersRaw = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
+                    $departmentAssignedUsers = [];
+                    foreach ($departmentAssignedUsersRaw as $assignedUserId => $assignedUserName) {
+                        $assignedUserName = trim((string)$assignedUserName);
+                        if ($assignedUserName === '') { continue; }
+                        $assignedEmployeeKey = 'U' . (int)$assignedUserId;
+                        $isAssignedUserInOffice = isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey]);
+                        $departmentAssignedUsers[] = [
+                            'NAME' => $assignedUserName,
+                            'STATUS' => $isAssignedUserInOffice ? 'В офисе' : 'Не в офисе',
+                        ];
+                    }
+                    usort($departmentAssignedUsers, static function (array $left, array $right): int { return strnatcasecmp((string)$left['NAME'], (string)$right['NAME']); });
                     $departmentAssignedUsersJson = htmlspecialcharsbx(json_encode($departmentAssignedUsers, JSON_UNESCAPED_UNICODE));
                     ?>
-                    <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx($headName)?>" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-employees="<?=$departmentAssignedUsersJson?>"><?=htmlspecialcharsbx($headName)?></button></td>
+                    <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx($headName)?>" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$departmentAssignedUsersJson?>"><?=htmlspecialcharsbx($headName)?></button></td>
                     <td><?=htmlspecialcharsbx($cabTitle)?></td>
                     <td><?= $workplaces ?></td>
                     <td><?= $assignedCount ?></td>
@@ -909,13 +923,33 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
             return;
         }
 
-        var list = document.createElement('ul');
-        employees.forEach(function (employee) {
-            var item = document.createElement('li');
-            item.textContent = employee;
-            list.appendChild(item);
+        var table = document.createElement('table');
+        table.className = 'modal-table';
+        var thead = document.createElement('thead');
+        var headerRow = document.createElement('tr');
+        ['ФИО', 'В офисе/не в офисе за отчетный день'].forEach(function (title) {
+            var th = document.createElement('th');
+            th.textContent = title;
+            headerRow.appendChild(th);
         });
-        body.appendChild(list);
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        employees.forEach(function (employee) {
+            var row = document.createElement('tr');
+            var nameCell = document.createElement('td');
+            var statusCell = document.createElement('td');
+            var status = employee.STATUS || 'Не в офисе';
+            nameCell.textContent = employee.NAME || '';
+            statusCell.textContent = status;
+            statusCell.className = status === 'В офисе' ? 'modal-status-in' : 'modal-status-out';
+            row.appendChild(nameCell);
+            row.appendChild(statusCell);
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
     }
 
     document.querySelectorAll('.head-modal-trigger').forEach(function (button) {
@@ -928,7 +962,7 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
             }
             if (!Array.isArray(employees)) { employees = []; }
 
-            subtitle.textContent = 'Руководитель: ' + (button.getAttribute('data-head') || '') + '. Кабинет: ' + (button.getAttribute('data-cabinet') || '') + '.';
+            subtitle.textContent = 'Руководитель: ' + (button.getAttribute('data-head') || '') + '. Кабинет: ' + (button.getAttribute('data-cabinet') || '') + '. Дата: ' + (button.getAttribute('data-date') || '') + '.';
             renderEmployees(employees);
             modal.classList.add('is-open');
             modal.setAttribute('aria-hidden', 'false');
