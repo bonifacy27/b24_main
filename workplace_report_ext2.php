@@ -380,8 +380,10 @@ $userDepartmentsMap = [];
 $userCabinetMap = [];
 $userLegalEntityMap = [];
 $userLegalEntityByName = [];
+$portalUserInfoById = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
+$departmentCabinetLegalEntities = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
 $userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
 
@@ -391,6 +393,12 @@ while ($user = $rsUsers->Fetch()) {
     $userName = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME'] . ' ' . (string)$user['SECOND_NAME']);
     if ($userName === '') { $userName = (string)$user['LOGIN']; }
     $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap, $userOfficeEnumValueMap);
+    $portalUserInfoById[$userId] = [
+        'ACTIVE' => (string)$user['ACTIVE'],
+        'CABINET' => trim((string)$user['UF_CABINET']),
+        'DEPARTMENTS_RAW' => is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']],
+        'LEGAL_ENTITY' => $userLegalEntityMap[$userId],
+    ];
     if ($userName !== '' && $userLegalEntityMap[$userId] !== '') {
         if (!isset($userLegalEntityByName[$userName])) {
             $userLegalEntityByName[$userName] = $userLegalEntityMap[$userId];
@@ -410,6 +418,7 @@ while ($user = $rsUsers->Fetch()) {
             $headDepartments[$headDepartmentId] = true;
         }
     }
+    $portalUserInfoById[$userId]['HEAD_DEPARTMENTS'] = array_keys($headDepartments);
     if (empty($headDepartments)) { continue; }
 
     $userDepartmentsMap[$userId] = array_keys($headDepartments);
@@ -429,7 +438,11 @@ while ($user = $rsUsers->Fetch()) {
         foreach ($userDepartmentsMap[$userId] as $headDepId) {
             if (!isset($departmentCabinetAssignedUsers[$headDepId])) { $departmentCabinetAssignedUsers[$headDepId] = []; }
             if (!isset($departmentCabinetAssignedUsers[$headDepId][$cabNorm])) { $departmentCabinetAssignedUsers[$headDepId][$cabNorm] = []; }
+            if (!isset($departmentCabinetLegalEntities[$headDepId])) { $departmentCabinetLegalEntities[$headDepId] = []; }
+            if (!isset($departmentCabinetLegalEntities[$headDepId][$cabNorm])) { $departmentCabinetLegalEntities[$headDepId][$cabNorm] = []; }
             $departmentCabinetAssignedUsers[$headDepId][$cabNorm][$userId] = $userName;
+            $assignedLegalEntity = trim((string)$userLegalEntityMap[$userId]);
+            if ($assignedLegalEntity !== '') { $departmentCabinetLegalEntities[$headDepId][$cabNorm][$assignedLegalEntity] = true; }
         }
     }
 }
@@ -598,7 +611,11 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $officePresenceKeys[$dateKey][$employeeKey] = true;
         }
 
-        $userCabinetNorm = $portalUserId > 0 && isset($userCabinetMap[$portalUserId]) ? $normalizeCabinet((string)$userCabinetMap[$portalUserId]) : '';
+        $userCabinetRaw = $portalUserId > 0 && isset($userCabinetMap[$portalUserId]) ? (string)$userCabinetMap[$portalUserId] : '';
+        if ($userCabinetRaw === '' && $portalUserId > 0 && isset($portalUserInfoById[$portalUserId])) {
+            $userCabinetRaw = (string)$portalUserInfoById[$portalUserId]['CABINET'];
+        }
+        $userCabinetNorm = $userCabinetRaw !== '' ? $normalizeCabinet($userCabinetRaw) : '';
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
 
         if ($userCabinetNorm !== '' && !empty($userDepartmentIds)) {
@@ -663,11 +680,28 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             ];
             continue;
         }
+        $unknownReason = 'Не определена причина исключения из основного списка.';
+        if ($portalUserId <= 0 || !isset($portalUserInfoById[$portalUserId])) {
+            $unknownReason = 'Не найдена учетная запись на портале для пропуска Reverse.';
+        } elseif ((string)$portalUserInfoById[$portalUserId]['ACTIVE'] !== 'Y') {
+            $unknownReason = 'Учетная запись на портале не активна.';
+        } elseif (trim((string)$portalUserInfoById[$portalUserId]['CABINET']) === '') {
+            $unknownReason = 'Не указан кабинет в поле UF_CABINET.';
+        } elseif ($userCabinetNorm === '') {
+            $unknownReason = 'Кабинет из поля UF_CABINET не удалось сопоставить со справочником кабинетов.';
+        } elseif (empty($portalUserInfoById[$portalUserId]['DEPARTMENTS_RAW'])) {
+            $unknownReason = 'Не указано подразделение в поле UF_DEPARTMENT.';
+        } elseif (empty($portalUserInfoById[$portalUserId]['HEAD_DEPARTMENTS'])) {
+            $unknownReason = 'Подразделение сотрудника не привязано к руководителю, выводимому в основном списке.';
+        } elseif ($officeFilterRaw !== '' && $userCabinetNorm !== '' && !isset($cabinetDirectory[$userCabinetNorm])) {
+            $unknownReason = 'Кабинет сотрудника не входит в выбранный фильтр офиса.';
+        }
         $unknownEmployees[] = [
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
             'CABINET' => $reverseCabinetTitle,
             'DATE' => $dateKey,
+            'REASON' => $unknownReason,
         ];
     }
 }
@@ -803,15 +837,14 @@ header('Content-Type: text/html; charset=UTF-8');
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
-                $legalEntities = array_fill_keys(array_merge(array_keys($departmentLegalCounts), array_keys($shortDepartmentLegalCounts)), true);
-                if (empty($legalEntities)) { $legalEntities = [$undefinedLegalEntity => true]; }
-                $departmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $departmentLegalCounts);
-                $shortDepartmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $shortDepartmentLegalCounts);
-                ksort($departmentLegalCounts, SORT_NATURAL | SORT_FLAG_CASE);
+                $departmentLegalEntityNames = isset($departmentCabinetLegalEntities[$departmentId][$cabNorm]) ? array_keys($departmentCabinetLegalEntities[$departmentId][$cabNorm]) : [];
+                sort($departmentLegalEntityNames, SORT_NATURAL | SORT_FLAG_CASE);
+                $departmentLegalEntitiesTitle = !empty($departmentLegalEntityNames) ? implode(', ', $departmentLegalEntityNames) : $undefinedLegalEntity;
+                $officeCount = array_sum($departmentLegalCounts);
+                $shortOfficeTotal = array_sum($shortDepartmentLegalCounts);
                 ?>
-                <?php foreach ($departmentLegalCounts as $legalEntity => $officeCount): ?>
                 <tr>
-                    <td><?=htmlspecialcharsbx((string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity))?></td>
+                    <td><?=htmlspecialcharsbx($departmentLegalEntitiesTitle)?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
                     <?php
@@ -824,6 +857,7 @@ header('Content-Type: text/html; charset=UTF-8');
                         $isAssignedUserInOffice = isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey]);
                         $departmentAssignedUsers[] = [
                             'NAME' => $assignedUserName,
+                            'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
                             'STATUS' => $isAssignedUserInOffice ? 'В офисе' : 'Не в офисе',
                         ];
                     }
@@ -833,7 +867,7 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx($headName)?>" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$departmentAssignedUsersJson?>"><?=htmlspecialcharsbx($headName)?></button></td>
                     <td><?=htmlspecialcharsbx($cabTitle)?></td>
                     <?php
-                    $shortOfficeCount = isset($shortDepartmentLegalCounts[$legalEntity]) ? (int)$shortDepartmentLegalCounts[$legalEntity] : 0;
+                    $shortOfficeCount = (int)$shortOfficeTotal;
                     $cabinetDateTotalKey = $cabNorm . '|' . $dateKey;
                     $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
                     $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
@@ -846,7 +880,6 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?= $shortOfficeCount ?></td>
                     <td><?= (int)$officeCount ?></td>
                 </tr>
-                <?php endforeach; ?>
                 <?php
             }
         }
@@ -892,7 +925,7 @@ header('Content-Type: text/html; charset=UTF-8');
         <?php foreach ($unknownEmployees as $employee): ?>
             <tr>
                 <td><?=htmlspecialcharsbx((string)($employee['LEGAL_ENTITY'] !== '' ? $employee['LEGAL_ENTITY'] : $undefinedLegalEntity))?></td>
-                <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
+                <td title="<?=htmlspecialcharsbx((string)($employee['REASON'] ?? ''))?>"><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
                 <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
             </tr>
@@ -1128,7 +1161,7 @@ foreach ($periodDays as $dateKey) {
         table.className = 'modal-table';
         var thead = document.createElement('thead');
         var headerRow = document.createElement('tr');
-        ['ФИО', 'В офисе/не в офисе за отчетный день'].forEach(function (title) {
+        ['ФИО', 'ЮЛ', 'В офисе/не в офисе за отчетный день'].forEach(function (title) {
             var th = document.createElement('th');
             th.textContent = title;
             headerRow.appendChild(th);
@@ -1140,12 +1173,15 @@ foreach ($periodDays as $dateKey) {
         employees.forEach(function (employee) {
             var row = document.createElement('tr');
             var nameCell = document.createElement('td');
+            var legalEntityCell = document.createElement('td');
             var statusCell = document.createElement('td');
             var status = employee.STATUS || 'Не в офисе';
             nameCell.textContent = employee.NAME || '';
+            legalEntityCell.textContent = employee.LEGAL_ENTITY || 'Не определено';
             statusCell.textContent = status;
             statusCell.className = status === 'В офисе' ? 'modal-status-in' : 'modal-status-out';
             row.appendChild(nameCell);
+            row.appendChild(legalEntityCell);
             row.appendChild(statusCell);
             tbody.appendChild(row);
         });
