@@ -319,7 +319,7 @@ if (!empty($headIds)) {
 }
 
 $departmentUsers = [];
-$departmentLegalEntities = [];
+$departmentCabinetLegalEntities = [];
 $userDepartmentsMap = [];
 $userCabinetMap = [];
 $userLegalEntityMap = [];
@@ -358,11 +358,7 @@ while ($user = $rsUsers->Fetch()) {
     $userDepartmentsMap[$userId] = array_keys($headDepartments);
     foreach ($userDepartmentsMap[$userId] as $headDepId) {
         if (!isset($departmentUsers[$headDepId])) { $departmentUsers[$headDepId] = []; }
-        if (!isset($departmentLegalEntities[$headDepId])) { $departmentLegalEntities[$headDepId] = []; }
         $departmentUsers[$headDepId][$userId] = true;
-        if (isset($userLegalEntityMap[$userId]) && $userLegalEntityMap[$userId] !== '') {
-            $departmentLegalEntities[$headDepId][$userLegalEntityMap[$userId]] = true;
-        }
     }
 
     $cabinet = trim((string)$user['UF_CABINET']);
@@ -377,6 +373,12 @@ while ($user = $rsUsers->Fetch()) {
             if (!isset($departmentCabinetAssignedUsers[$headDepId])) { $departmentCabinetAssignedUsers[$headDepId] = []; }
             if (!isset($departmentCabinetAssignedUsers[$headDepId][$cabNorm])) { $departmentCabinetAssignedUsers[$headDepId][$cabNorm] = []; }
             $departmentCabinetAssignedUsers[$headDepId][$cabNorm][$userId] = $userName;
+
+            if (!isset($departmentCabinetLegalEntities[$headDepId])) { $departmentCabinetLegalEntities[$headDepId] = []; }
+            if (!isset($departmentCabinetLegalEntities[$headDepId][$cabNorm])) { $departmentCabinetLegalEntities[$headDepId][$cabNorm] = []; }
+            if (isset($userLegalEntityMap[$userId]) && $userLegalEntityMap[$userId] !== '') {
+                $departmentCabinetLegalEntities[$headDepId][$cabNorm][$userLegalEntityMap[$userId]] = true;
+            }
         }
     }
 }
@@ -744,7 +746,7 @@ header('Content-Type: text/html; charset=UTF-8');
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
-                $departmentLegalEntityList = isset($departmentLegalEntities[$departmentId]) ? array_keys($departmentLegalEntities[$departmentId]) : [];
+                $departmentLegalEntityList = isset($departmentCabinetLegalEntities[$departmentId][$cabNorm]) ? array_keys($departmentCabinetLegalEntities[$departmentId][$cabNorm]) : [];
                 $departmentLegalEntityList = array_values(array_filter($departmentLegalEntityList, static function ($legalEntity): bool { return trim((string)$legalEntity) !== ''; }));
                 sort($departmentLegalEntityList, SORT_NATURAL | SORT_FLAG_CASE);
                 $departmentLegalEntityText = !empty($departmentLegalEntityList) ? implode(', ', $departmentLegalEntityList) : $undefinedLegalEntity;
