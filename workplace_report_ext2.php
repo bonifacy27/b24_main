@@ -873,9 +873,33 @@ header('Content-Type: text/html; charset=UTF-8');
                     $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
                     $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
                     $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+                    $cabinetAssignedEmployees = [];
+                    foreach ($departmentCabinetAssignedUsers as $assignedDepartmentId => $assignedCabinets) {
+                        if (!isset($assignedCabinets[$cabNorm]) || !isset($departments[$assignedDepartmentId])) { continue; }
+                        $assignedHeadUserId = (int)$departments[$assignedDepartmentId]['UF_HEAD'];
+                        $assignedHeadName = isset($headsMap[$assignedHeadUserId]) ? $headsMap[$assignedHeadUserId] : 'Не назначен';
+                        $assignedDepartmentSummary = isset($headOrgSummaryMap[$assignedHeadUserId]) ? $headOrgSummaryMap[$assignedHeadUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+                        foreach ($assignedCabinets[$cabNorm] as $assignedUserId => $assignedUserName) {
+                            $assignedUserName = trim((string)$assignedUserName);
+                            if ($assignedUserName === '') { continue; }
+                            $cabinetAssignedEmployees[] = [
+                                'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
+                                'CEO1' => (string)$assignedDepartmentSummary['CEO1'],
+                                'DEPARTMENT' => (string)$assignedDepartmentSummary['DEPARTMENT'],
+                                'HEAD' => $assignedHeadName,
+                                'EMPLOYEE' => $assignedUserName,
+                            ];
+                        }
+                    }
+                    usort($cabinetAssignedEmployees, static function (array $left, array $right): int {
+                        $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
+                        if ($departmentCompare !== 0) { return $departmentCompare; }
+                        return strnatcasecmp((string)$left['EMPLOYEE'], (string)$right['EMPLOYEE']);
+                    });
+                    $cabinetAssignedEmployeesJson = htmlspecialcharsbx(json_encode($cabinetAssignedEmployees, JSON_UNESCAPED_UNICODE));
                     ?>
                     <td><?= $workplaces ?></td>
-                    <td><?= $assignedCount ?></td>
+                    <td><button type="button" class="head-modal-trigger assigned-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-employees="<?=$cabinetAssignedEmployeesJson?>"><?= $assignedCount ?></button></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
                     <td><?= $shortOfficeCount ?></td>
                     <td><?= (int)$officeCount ?></td>
@@ -1189,6 +1213,42 @@ foreach ($periodDays as $dateKey) {
         body.appendChild(table);
     }
 
+    function renderAssignedEmployees(employees) {
+        body.innerHTML = '';
+        if (!employees.length) {
+            var empty = document.createElement('p');
+            empty.className = 'modal-empty';
+            empty.textContent = 'Нет сотрудников, закрепленных за этим кабинетом.';
+            body.appendChild(empty);
+            return;
+        }
+
+        var table = document.createElement('table');
+        table.className = 'modal-table';
+        var thead = document.createElement('thead');
+        var headerRow = document.createElement('tr');
+        ['ЮЛ', 'CEO-1', 'Подразделение', 'Руководитель', 'Сотрудник'].forEach(function (title) {
+            var th = document.createElement('th');
+            th.textContent = title;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        employees.forEach(function (employee) {
+            var row = document.createElement('tr');
+            ['LEGAL_ENTITY', 'CEO1', 'DEPARTMENT', 'HEAD', 'EMPLOYEE'].forEach(function (field) {
+                var cell = document.createElement('td');
+                cell.textContent = employee[field] || '';
+                row.appendChild(cell);
+            });
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+    }
+
     document.querySelectorAll('.head-modal-trigger').forEach(function (button) {
         button.addEventListener('click', function () {
             var employees = [];
@@ -1199,8 +1259,15 @@ foreach ($periodDays as $dateKey) {
             }
             if (!Array.isArray(employees)) { employees = []; }
 
-            subtitle.textContent = 'Руководитель: ' + (button.getAttribute('data-head') || '') + '. Кабинет: ' + (button.getAttribute('data-cabinet') || '') + '. Дата: ' + (button.getAttribute('data-date') || '') + '.';
-            renderEmployees(employees);
+            var isAssignedModal = button.classList.contains('assigned-modal-trigger');
+            if (isAssignedModal) {
+                subtitle.textContent = 'Кабинет: ' + (button.getAttribute('data-cabinet') || '') + '.';
+                renderAssignedEmployees(employees);
+            } else {
+                subtitle.textContent = 'Руководитель: ' + (button.getAttribute('data-head') || '') + '. Кабинет: ' + (button.getAttribute('data-cabinet') || '') + '. Дата: ' + (button.getAttribute('data-date') || '') + '.';
+                renderEmployees(employees);
+            }
+            document.getElementById('departmentCabinetModalTitle').textContent = isAssignedModal ? 'Сотрудники, закрепленные за кабинетом' : 'Сотрудники подразделения';
             modal.classList.add('is-open');
             modal.setAttribute('aria-hidden', 'false');
             closeButton.focus();
