@@ -37,12 +37,62 @@ if ($dateFrom > $dateTo) { [$dateFrom, $dateTo] = [$dateTo, $dateFrom]; }
 $dateFrom->setTime(0, 0, 0);
 $dateTo->setTime(0, 0, 0);
 
+$defaultOfficeFilter = 'Московский пр., 139/1';
 $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
 $ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
+$officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
 
 $normalizeLegalEntity = static function ($value): string {
     $legalEntity = trim((string)$value);
     return $legalEntity !== '' ? $legalEntity : 'НСК';
+};
+
+$normalizeListValue = static function ($value): string {
+    if (is_array($value)) {
+        $value = isset($value['VALUE']) ? $value['VALUE'] : reset($value);
+    }
+    return trim((string)$value);
+};
+
+$getEnumValueMap = static function (string $entityId, string $fieldName): array {
+    $map = [];
+    $field = \CUserTypeEntity::GetList([], ['ENTITY_ID' => $entityId, 'FIELD_NAME' => $fieldName])->Fetch();
+    if (!$field || empty($field['ID'])) { return $map; }
+
+    $enumRows = \CUserFieldEnum::GetList(['SORT' => 'ASC'], ['USER_FIELD_ID' => (int)$field['ID']]);
+    while ($enum = $enumRows->Fetch()) {
+        $map[(string)$enum['ID']] = trim((string)$enum['VALUE']);
+    }
+    return $map;
+};
+
+$resolveListDisplayValue = static function ($value, array $enumValueMap) use ($normalizeListValue): string {
+    $normalizedValue = $normalizeListValue($value);
+    return isset($enumValueMap[$normalizedValue]) ? $enumValueMap[$normalizedValue] : $normalizedValue;
+};
+
+$isTemporaryOrGuestPass = static function (string $name): bool {
+    return preg_match('/(Временный|Гостевой|Vendex)/ui', $name) === 1;
+};
+
+$companyLegalEntityMap = [
+    'НСК' => 'НСК',
+    'УК ТМ' => 'ТМХ',
+    'ТТ' => 'ТТ',
+];
+
+$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
+    $email = mb_strtolower(trim((string)($user['EMAIL'] ?? '')));
+    if ($email !== '') {
+        if (substr($email, -12) === '@tricolor.ru') { return 'НСК'; }
+        if (substr($email, -18) === '@tricolormedia.ru') { return 'ТМХ'; }
+        if (substr($email, -16) === '@monobrand-tt.ru') { return 'ТТ'; }
+        if (substr($email, -8) === '@n-l-e.ru') { return 'НЛЕ'; }
+        if (substr($email, -11) === '@telemag.ru') { return 'СМ'; }
+    }
+
+    $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
+    return isset($companyLegalEntityMap[$company]) ? $companyLegalEntityMap[$company] : $normalizeLegalEntity('');
 };
 
 $parseReverseEventDateTime = static function ($rawValue): ?\DateTime {
@@ -264,11 +314,14 @@ if (!empty($headIds)) {
 $departmentUsers = [];
 $userDepartmentsMap = [];
 $userCabinetMap = [];
+$userLegalEntityMap = [];
 $cabinetAssignedTotal = [];
+$companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
 
-$rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET'], 'FIELDS' => ['ID', 'UF_DEPARTMENT', 'UF_CABINET']]);
+$rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY'], 'FIELDS' => ['ID', 'EMAIL', 'UF_DEPARTMENT', 'UF_CABINET']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
+    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap);
     $userDepartments = is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']];
     $headDepartments = [];
     foreach ($userDepartments as $departmentId) {
@@ -300,16 +353,21 @@ while ($user = $rsUsers->Fetch()) {
 
 $cabinetDirectory = [];
 $cabinetDirectoryById = [];
+$availableOfficesMap = [];
+$officeEnumValueMap = $getEnumValueMap('HLBLOCK_74', 'UF_OFFICE');
 $cabinetHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(74)->fetch();
 if ($cabinetHl) {
     $cabinetEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($cabinetHl);
     $cabinetClass = $cabinetEntity->getDataClass();
-    $rsCabinets = $cabinetClass::getList(['select' => ['ID', 'UF_NAME', 'UF_WORKPLACES']]);
+    $rsCabinets = $cabinetClass::getList(['select' => ['ID', 'UF_NAME', 'UF_WORKPLACES', 'UF_OFFICE']]);
     while ($row = $rsCabinets->fetch()) {
         $title = trim((string)$row['UF_NAME']);
         $normalized = $normalizeDirectoryCabinet($title);
         if ($normalized === '') { continue; }
-        $cabinetData = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES']];
+        $office = $resolveListDisplayValue(isset($row['UF_OFFICE']) ? $row['UF_OFFICE'] : '', $officeEnumValueMap);
+        if ($office !== '') { $availableOfficesMap[$office] = true; }
+        if ($officeFilterRaw !== '' && $office !== $officeFilterRaw) { continue; }
+        $cabinetData = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES'], 'OFFICE' => $office];
         $cabinetDirectory[$normalized] = $cabinetData;
         $cabinetDirectoryById[(int)$row['ID']] = $cabinetData + ['NORM' => $normalized];
     }
@@ -355,7 +413,7 @@ if ($reverseUsersHl) {
     $reverseUsersEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($reverseUsersHl);
     $reverseUsersClass = $reverseUsersEntity->getDataClass();
     $reverseUsersRows = $reverseUsersClass::getList([
-        'select' => ['UF_EXT_ID', 'UF_LAST_NAME', 'UF_FIRST_NAME', 'UF_SECOND_NAME', 'UF_TAB_NUM', 'UF_CABINET'],
+        'select' => ['UF_EXT_ID', 'UF_LAST_NAME', 'UF_FIRST_NAME', 'UF_SECOND_NAME', 'UF_CABINET'],
         'filter' => ['=UF_SOURCE' => 'Reverse'],
     ]);
     while ($row = $reverseUsersRows->fetch()) {
@@ -364,7 +422,7 @@ if ($reverseUsersHl) {
         $reverseCabinet = $resolveReverseCabinet(isset($row['UF_CABINET']) ? $row['UF_CABINET'] : '');
         $reverseUsersByPass[$passId] = [
             'FIO' => trim((string)$row['UF_LAST_NAME'] . ' ' . (string)$row['UF_FIRST_NAME'] . ' ' . (string)$row['UF_SECOND_NAME']),
-            'LEGAL_ENTITY' => $normalizeLegalEntity($row['UF_TAB_NUM']),
+            'LEGAL_ENTITY' => 'НСК',
             'CABINET' => (string)$reverseCabinet['TITLE'],
             'CABINET_NORM' => (string)$reverseCabinet['NORM'],
         ];
@@ -409,6 +467,7 @@ if ($reverseHl) {
 $officePresenceKeys = [];
 $shortOfficePresenceKeys = [];
 $unknownEmployees = [];
+$temporaryGuestVisits = [];
 foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
     foreach ($passes as $passId => $events) {
         $openEntry = null;
@@ -439,7 +498,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $isShortOfficePresence = $hasSingleInputWithoutOutput || $workedSeconds < $fourHoursSeconds;
 
         $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК', 'CABINET' => '', 'CABINET_NORM' => ''];
-        $legalEntity = $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
+        $legalEntity = $portalUserId > 0 && isset($userLegalEntityMap[$portalUserId]) ? $userLegalEntityMap[$portalUserId] : $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
         $employeeKey = $portalUserId > 0 ? 'U' . $portalUserId : 'P' . $passId;
         if ($isShortOfficePresence) {
             if (isset($shortOfficePresenceKeys[$dateKey][$employeeKey])) { continue; }
@@ -453,6 +512,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
 
         if ($userCabinetNorm !== '' && !empty($userDepartmentIds)) {
+            if ($officeFilterRaw !== '' && !isset($cabinetDirectory[$userCabinetNorm])) { continue; }
             if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
                 $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
             }
@@ -506,6 +566,13 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         if ($cabinetFilterNorm !== '' && $reverseCabinetNorm !== $cabinetFilterNorm) { continue; }
         $employeeName = trim((string)$reverseUser['FIO']);
         if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
+        if ($isTemporaryOrGuestPass($employeeName)) {
+            $temporaryGuestVisits[] = [
+                'NAME' => $employeeName,
+                'DATE' => $dateKey,
+            ];
+            continue;
+        }
         $unknownEmployees[] = [
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
@@ -514,6 +581,13 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         ];
     }
 }
+
+usort($temporaryGuestVisits, static function (array $left, array $right): int {
+    $nameCompare = strnatcasecmp((string)$left['NAME'], (string)$right['NAME']);
+    if ($nameCompare !== 0) { return $nameCompare; }
+
+    return strcmp((string)$left['DATE'], (string)$right['DATE']);
+});
 
 usort($unknownEmployees, static function (array $left, array $right): int {
     $legalCompare = strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
@@ -527,9 +601,16 @@ usort($unknownEmployees, static function (array $left, array $right): int {
 
 $allCabinets = [];
 foreach ($cabinetDirectory as $cabKey => $cabData) { $allCabinets[$cabData['TITLE']] = true; }
-foreach ($userCabinetMap as $cabName) { $allCabinets[(string)$cabName] = true; }
+foreach ($userCabinetMap as $cabName) {
+    $cabNorm = $normalizeCabinet((string)$cabName);
+    if ($officeFilterRaw !== '' && ($cabNorm === '' || !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    $allCabinets[(string)$cabName] = true;
+}
 $availableCabinets = array_keys($allCabinets);
 sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
+
+$availableOffices = array_keys($availableOfficesMap);
+sort($availableOffices, SORT_NATURAL | SORT_FLAG_CASE);
 
 $availableCeo1 = [];
 foreach ($departments as $departmentId => $department) {
@@ -563,9 +644,11 @@ header('Content-Type: text/html; charset=UTF-8');
 <form method="get" class="filters">
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+    <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
     <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
     <label style="margin-left:8px;">CEO-1: <select name="ceo1_filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
     <button type="submit" style="margin-left:8px;">Показать</button>
+    <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
 </form>
 
 <table>
@@ -596,7 +679,7 @@ header('Content-Type: text/html; charset=UTF-8');
         foreach ($userCabinetMap as $userId => $cabName) {
             if (!isset($userDepartmentsMap[$userId]) || !in_array($departmentId, $userDepartmentsMap[$userId], true)) { continue; }
             $norm = $normalizeCabinet((string)$cabName);
-            if ($norm === '') { continue; }
+            if ($norm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
             $departmentCabinets[$norm] = true;
         }
 
@@ -639,7 +722,7 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 
-<h2>Сотрудники не определены</h2>
+<h2>Прочие посетители</h2>
 <table>
     <thead>
     <tr>
@@ -652,7 +735,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <tbody>
     <?php if (empty($unknownEmployees)): ?>
         <tr>
-            <td colspan="4">Нет сотрудников без определенной структуры или кабинета.</td>
+            <td colspan="4">Нет прочих посетителей без определенной структуры или кабинета.</td>
         </tr>
     <?php else: ?>
         <?php foreach ($unknownEmployees as $employee): ?>
@@ -661,6 +744,31 @@ header('Content-Type: text/html; charset=UTF-8');
                 <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
                 <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
+            </tr>
+        <?php endforeach; ?>
+    <?php endif; ?>
+    </tbody>
+</table>
+
+
+<h2>Посещения по временным и гостевым пропускам</h2>
+<table>
+    <thead>
+    <tr>
+        <th>Название</th>
+        <th>Дата</th>
+    </tr>
+    </thead>
+    <tbody>
+    <?php if (empty($temporaryGuestVisits)): ?>
+        <tr>
+            <td colspan="2">Нет посещений по временным и гостевым пропускам.</td>
+        </tr>
+    <?php else: ?>
+        <?php foreach ($temporaryGuestVisits as $visit): ?>
+            <tr>
+                <td><?=htmlspecialcharsbx((string)$visit['NAME'])?></td>
+                <td><?=htmlspecialcharsbx((new \DateTime((string)$visit['DATE']))->format('d.m.Y'))?></td>
             </tr>
         <?php endforeach; ?>
     <?php endif; ?>
@@ -678,7 +786,7 @@ foreach ($cabinetDirectory as $cabNorm => $cabData) {
 }
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
-    if ($cabNorm === '' || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm)) { continue; }
+    if ($cabNorm === '' || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
     if (!isset($summaryCabinets[$cabNorm])) {
         $summaryCabinets[$cabNorm] = [
             'TITLE' => (string)$cabName,
