@@ -76,19 +76,17 @@ $isTemporaryOrGuestPass = static function (string $name): bool {
 };
 
 $companyLegalEntityMap = [
+    '26' => 'НСК',
     'НСК' => 'НСК',
+    '1723' => 'ТМХ',
     'УК ТМ' => 'ТМХ',
-    'ТМ' => 'ТМХ',
-    'ТМХ' => 'ТМХ',
+    '27' => 'ТТ',
     'ТТ' => 'ТТ',
-    'НЛЕ' => 'НЛЕ',
-    'СМ' => 'СМ',
+    '28' => 'КЦ',
+    'КЦ' => 'КЦ',
 ];
 
-$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap, array $userOfficeEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
-    $office = $resolveListDisplayValue($user['UF_OFFICE'] ?? '', $userOfficeEnumValueMap);
-    if (isset($companyLegalEntityMap[$office])) { return $companyLegalEntityMap[$office]; }
-
+$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
     $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
     if (isset($companyLegalEntityMap[$company])) { return $companyLegalEntityMap[$company]; }
 
@@ -328,14 +326,13 @@ $userLegalEntityByName = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
-$userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
 
-$rsUsers = \CUser::GetList($by='id', $order='asc', [], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY', 'UF_OFFICE'], 'FIELDS' => ['ID', 'ACTIVE', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
+$rsUsers = \CUser::GetList($by='id', $order='asc', [], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY'], 'FIELDS' => ['ID', 'ACTIVE', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
     $userName = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME'] . ' ' . (string)$user['SECOND_NAME']);
     if ($userName === '') { $userName = (string)$user['LOGIN']; }
-    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap, $userOfficeEnumValueMap);
+    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap);
     if ($userName !== '' && $userLegalEntityMap[$userId] !== '') {
         if (!isset($userLegalEntityByName[$userName])) {
             $userLegalEntityByName[$userName] = $userLegalEntityMap[$userId];
