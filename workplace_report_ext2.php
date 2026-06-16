@@ -728,6 +728,7 @@ foreach ($cabinetDirectory as $cabKey => $cabData) { $allCabinets[$cabData['TITL
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
     if ($officeFilterRaw !== '' && ($cabNorm === '' || !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) { continue; }
     $allCabinets[(string)$cabName] = true;
 }
 $availableCabinets = array_keys($allCabinets);
