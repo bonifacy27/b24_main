@@ -319,6 +319,7 @@ if (!empty($headIds)) {
 }
 
 $departmentUsers = [];
+$departmentLegalEntities = [];
 $userDepartmentsMap = [];
 $userCabinetMap = [];
 $userLegalEntityMap = [];
@@ -357,7 +358,11 @@ while ($user = $rsUsers->Fetch()) {
     $userDepartmentsMap[$userId] = array_keys($headDepartments);
     foreach ($userDepartmentsMap[$userId] as $headDepId) {
         if (!isset($departmentUsers[$headDepId])) { $departmentUsers[$headDepId] = []; }
+        if (!isset($departmentLegalEntities[$headDepId])) { $departmentLegalEntities[$headDepId] = []; }
         $departmentUsers[$headDepId][$userId] = true;
+        if (isset($userLegalEntityMap[$userId]) && $userLegalEntityMap[$userId] !== '') {
+            $departmentLegalEntities[$headDepId][$userLegalEntityMap[$userId]] = true;
+        }
     }
 
     $cabinet = trim((string)$user['UF_CABINET']);
@@ -739,15 +744,15 @@ header('Content-Type: text/html; charset=UTF-8');
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
-                $legalEntities = array_fill_keys(array_merge(array_keys($departmentLegalCounts), array_keys($shortDepartmentLegalCounts)), true);
-                if (empty($legalEntities)) { $legalEntities = [$undefinedLegalEntity => true]; }
-                $departmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $departmentLegalCounts);
-                $shortDepartmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $shortDepartmentLegalCounts);
-                ksort($departmentLegalCounts, SORT_NATURAL | SORT_FLAG_CASE);
+                $departmentLegalEntityList = isset($departmentLegalEntities[$departmentId]) ? array_keys($departmentLegalEntities[$departmentId]) : [];
+                $departmentLegalEntityList = array_values(array_filter($departmentLegalEntityList, static function ($legalEntity): bool { return trim((string)$legalEntity) !== ''; }));
+                sort($departmentLegalEntityList, SORT_NATURAL | SORT_FLAG_CASE);
+                $departmentLegalEntityText = !empty($departmentLegalEntityList) ? implode(', ', $departmentLegalEntityList) : $undefinedLegalEntity;
+                $officeCount = array_sum(array_map('intval', $departmentLegalCounts));
+                $shortOfficeCount = array_sum(array_map('intval', $shortDepartmentLegalCounts));
                 ?>
-                <?php foreach ($departmentLegalCounts as $legalEntity => $officeCount): ?>
                 <tr>
-                    <td><?=htmlspecialcharsbx((string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity))?></td>
+                    <td><?=htmlspecialcharsbx($departmentLegalEntityText)?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
                     <?php
@@ -771,10 +776,9 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?= $workplaces ?></td>
                     <td><?= $assignedCount ?></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                    <td><?= isset($shortDepartmentLegalCounts[$legalEntity]) ? (int)$shortDepartmentLegalCounts[$legalEntity] : 0 ?></td>
-                    <td><?= (int)$officeCount ?></td>
+                    <td><?= $shortOfficeCount ?></td>
+                    <td><?= $officeCount ?></td>
                 </tr>
-                <?php endforeach; ?>
                 <?php
             }
         }
