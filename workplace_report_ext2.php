@@ -89,6 +89,9 @@ $resolveLegalEntityByUser = static function (array $user, array $companyLegalEnt
     $office = $resolveListDisplayValue($user['UF_OFFICE'] ?? '', $userOfficeEnumValueMap);
     if (isset($companyLegalEntityMap[$office])) { return $companyLegalEntityMap[$office]; }
 
+    $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
+    if (isset($companyLegalEntityMap[$company])) { return $companyLegalEntityMap[$company]; }
+
     $email = mb_strtolower(trim((string)($user['EMAIL'] ?? '')));
     if ($email !== '') {
         if (substr($email, -12) === '@tricolor.ru') { return 'НСК'; }
@@ -98,8 +101,7 @@ $resolveLegalEntityByUser = static function (array $user, array $companyLegalEnt
         if (substr($email, -11) === '@telemag.ru') { return 'СМ'; }
     }
 
-    $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
-    return isset($companyLegalEntityMap[$company]) ? $companyLegalEntityMap[$company] : $normalizeLegalEntity('');
+    return $normalizeLegalEntity('');
 };
 
 $parseReverseEventDateTime = static function ($rawValue): ?\DateTime {
