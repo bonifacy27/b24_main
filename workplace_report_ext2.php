@@ -316,11 +316,14 @@ $userDepartmentsMap = [];
 $userCabinetMap = [];
 $userLegalEntityMap = [];
 $cabinetAssignedTotal = [];
+$cabinetAssignedUsers = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
 
-$rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY'], 'FIELDS' => ['ID', 'EMAIL', 'UF_DEPARTMENT', 'UF_CABINET']]);
+$rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY'], 'FIELDS' => ['ID', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
+    $userName = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME'] . ' ' . (string)$user['SECOND_NAME']);
+    if ($userName === '') { $userName = (string)$user['LOGIN']; }
     $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap);
     $userDepartments = is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']];
     $headDepartments = [];
@@ -347,7 +350,9 @@ while ($user = $rsUsers->Fetch()) {
     $cabNorm = $normalizeCabinet($cabinet);
     if ($cabNorm !== '') {
         if (!isset($cabinetAssignedTotal[$cabNorm])) { $cabinetAssignedTotal[$cabNorm] = 0; }
+        if (!isset($cabinetAssignedUsers[$cabNorm])) { $cabinetAssignedUsers[$cabNorm] = []; }
         $cabinetAssignedTotal[$cabNorm]++;
+        $cabinetAssignedUsers[$cabNorm][] = $userName;
     }
 }
 
@@ -637,6 +642,10 @@ header('Content-Type: text/html; charset=UTF-8');
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
         .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
+        .assigned-count { position: relative; display: inline-block; cursor: help; border-bottom: 1px dotted #6b7f99; }
+        .assigned-tooltip { display: none; position: absolute; z-index: 20; left: 0; top: 100%; min-width: 260px; max-width: 420px; max-height: 320px; overflow: auto; margin-top: 6px; padding: 8px 10px; background: #fff; border: 1px solid #b7c7db; border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.16); color: #1f2933; text-align: left; white-space: normal; line-height: 1.35; }
+        .assigned-count:hover .assigned-tooltip, .assigned-count:focus .assigned-tooltip { display: block; }
+        .assigned-tooltip__empty { color: #7a8794; }
     </style>
 </head>
 <body>
@@ -689,6 +698,9 @@ header('Content-Type: text/html; charset=UTF-8');
             $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
             $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
             $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
+            $assignedUsers = isset($cabinetAssignedUsers[$cabNorm]) && is_array($cabinetAssignedUsers[$cabNorm]) ? $cabinetAssignedUsers[$cabNorm] : [];
+            $assignedUsers = array_values(array_unique(array_filter($assignedUsers, static function ($name): bool { return trim((string)$name) !== ''; })));
+            sort($assignedUsers, SORT_NATURAL | SORT_FLAG_CASE);
 
             foreach ($periodDays as $dateKey) {
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
@@ -708,7 +720,7 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?=htmlspecialcharsbx($headName)?></td>
                     <td><?=htmlspecialcharsbx($cabTitle)?></td>
                     <td><?= $workplaces ?></td>
-                    <td><?= $assignedCount ?></td>
+                    <td><span class="assigned-count" tabindex="0"><?= $assignedCount ?><span class="assigned-tooltip"><?php if (empty($assignedUsers)): ?><span class="assigned-tooltip__empty">Нет закрепленных сотрудников</span><?php else: ?><?php foreach ($assignedUsers as $assignedUser): ?><?=htmlspecialcharsbx((string)$assignedUser)?><br><?php endforeach; ?><?php endif; ?></span></span></td>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
                     <td><?= isset($shortDepartmentLegalCounts[$legalEntity]) ? (int)$shortDepartmentLegalCounts[$legalEntity] : 0 ?></td>
                     <td><?= (int)$officeCount ?></td>
