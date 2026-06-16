@@ -78,10 +78,17 @@ $isTemporaryOrGuestPass = static function (string $name): bool {
 $companyLegalEntityMap = [
     'НСК' => 'НСК',
     'УК ТМ' => 'ТМХ',
+    'ТМ' => 'ТМХ',
+    'ТМХ' => 'ТМХ',
     'ТТ' => 'ТТ',
+    'НЛЕ' => 'НЛЕ',
+    'СМ' => 'СМ',
 ];
 
-$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
+$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap, array $userOfficeEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
+    $office = $resolveListDisplayValue($user['UF_OFFICE'] ?? '', $userOfficeEnumValueMap);
+    if (isset($companyLegalEntityMap[$office])) { return $companyLegalEntityMap[$office]; }
+
     $email = mb_strtolower(trim((string)($user['EMAIL'] ?? '')));
     if ($email !== '') {
         if (substr($email, -12) === '@tricolor.ru') { return 'НСК'; }
@@ -318,13 +325,14 @@ $userLegalEntityMap = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
+$userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
 
-$rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY'], 'FIELDS' => ['ID', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
+$rsUsers = \CUser::GetList($by='id', $order='asc', ['ACTIVE' => 'Y'], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY', 'UF_OFFICE'], 'FIELDS' => ['ID', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
     $userName = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME'] . ' ' . (string)$user['SECOND_NAME']);
     if ($userName === '') { $userName = (string)$user['LOGIN']; }
-    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap);
+    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap, $userOfficeEnumValueMap);
     $userDepartments = is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']];
     $headDepartments = [];
     foreach ($userDepartments as $departmentId) {
