@@ -102,6 +102,63 @@ $resolveLegalEntityByUser = static function (array $user, array $companyLegalEnt
     return $normalizeLegalEntity('');
 };
 
+$normalizeListValue = static function ($value): string {
+    if (is_array($value)) {
+        $value = isset($value['VALUE']) ? $value['VALUE'] : reset($value);
+    }
+    return trim((string)$value);
+};
+
+$getEnumValueMap = static function (string $entityId, string $fieldName): array {
+    $map = [];
+    $field = \CUserTypeEntity::GetList([], ['ENTITY_ID' => $entityId, 'FIELD_NAME' => $fieldName])->Fetch();
+    if (!$field || empty($field['ID'])) { return $map; }
+
+    $enumRows = \CUserFieldEnum::GetList(['SORT' => 'ASC'], ['USER_FIELD_ID' => (int)$field['ID']]);
+    while ($enum = $enumRows->Fetch()) {
+        $map[(string)$enum['ID']] = trim((string)$enum['VALUE']);
+    }
+    return $map;
+};
+
+$resolveListDisplayValue = static function ($value, array $enumValueMap) use ($normalizeListValue): string {
+    $normalizedValue = $normalizeListValue($value);
+    return isset($enumValueMap[$normalizedValue]) ? $enumValueMap[$normalizedValue] : $normalizedValue;
+};
+
+$isTemporaryOrGuestPass = static function (string $name): bool {
+    return preg_match('/(Временный|Гостевой|Vendex)/ui', $name) === 1;
+};
+
+$companyLegalEntityMap = [
+    'НСК' => 'НСК',
+    'УК ТМ' => 'ТМХ',
+    'ТМ' => 'ТМХ',
+    'ТМХ' => 'ТМХ',
+    'ТТ' => 'ТТ',
+    'НЛЕ' => 'НЛЕ',
+    'СМ' => 'СМ',
+];
+
+$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap, array $userOfficeEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
+    $office = $resolveListDisplayValue($user['UF_OFFICE'] ?? '', $userOfficeEnumValueMap);
+    if (isset($companyLegalEntityMap[$office])) { return $companyLegalEntityMap[$office]; }
+
+    $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
+    if (isset($companyLegalEntityMap[$company])) { return $companyLegalEntityMap[$company]; }
+
+    $email = mb_strtolower(trim((string)($user['EMAIL'] ?? '')));
+    if ($email !== '') {
+        if (substr($email, -12) === '@tricolor.ru') { return 'НСК'; }
+        if (substr($email, -18) === '@tricolormedia.ru') { return 'ТМХ'; }
+        if (substr($email, -16) === '@monobrand-tt.ru') { return 'ТТ'; }
+        if (substr($email, -8) === '@n-l-e.ru') { return 'НЛЕ'; }
+        if (substr($email, -11) === '@telemag.ru') { return 'СМ'; }
+    }
+
+    return $normalizeLegalEntity('');
+};
+
 $parseReverseEventDateTime = static function ($rawValue): ?\DateTime {
     if ($rawValue instanceof \DateTimeInterface) {
         return (new \DateTime())->setTimestamp($rawValue->getTimestamp());
