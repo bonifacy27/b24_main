@@ -772,11 +772,10 @@ header('Content-Type: text/html; charset=UTF-8');
     <tbody>
     <?php
     $mainTableTotals = [
-        'WORKPLACES' => 0,
-        'ASSIGNED' => 0,
-        'SHORT_OFFICE' => 0,
-        'OFFICE' => 0,
-        'ROWS' => 0,
+        'WORKPLACES_BY_CABINET' => [],
+        'ASSIGNED_BY_CABINET' => [],
+        'SHORT_OFFICE_BY_CABINET_DATE' => [],
+        'OFFICE_BY_CABINET_DATE' => [],
     ];
     foreach ($departments as $departmentId => $department) {
         if ((int)$department['UF_HEAD'] <= 0) { continue; }
@@ -835,11 +834,11 @@ header('Content-Type: text/html; charset=UTF-8');
                     <td><?=htmlspecialcharsbx($cabTitle)?></td>
                     <?php
                     $shortOfficeCount = isset($shortDepartmentLegalCounts[$legalEntity]) ? (int)$shortDepartmentLegalCounts[$legalEntity] : 0;
-                    $mainTableTotals['WORKPLACES'] += $workplaces;
-                    $mainTableTotals['ASSIGNED'] += $assignedCount;
-                    $mainTableTotals['SHORT_OFFICE'] += $shortOfficeCount;
-                    $mainTableTotals['OFFICE'] += (int)$officeCount;
-                    $mainTableTotals['ROWS']++;
+                    $cabinetDateTotalKey = $cabNorm . '|' . $dateKey;
+                    $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
+                    $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
+                    $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+                    $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
                     ?>
                     <td><?= $workplaces ?></td>
                     <td><?= $assignedCount ?></td>
@@ -853,17 +852,23 @@ header('Content-Type: text/html; charset=UTF-8');
         }
     }
     ?>
+    <?php
+    $mainTotalWorkplaces = array_sum($mainTableTotals['WORKPLACES_BY_CABINET']);
+    $mainTotalAssigned = array_sum($mainTableTotals['ASSIGNED_BY_CABINET']);
+    $mainTotalShortOffice = array_sum($mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE']);
+    $mainTotalOffice = array_sum($mainTableTotals['OFFICE_BY_CABINET_DATE']);
+    ?>
     <tr style="font-weight: bold;">
         <td>Итого</td>
         <td></td>
         <td></td>
         <td></td>
         <td></td>
-        <td><?= (int)$mainTableTotals['WORKPLACES'] ?></td>
-        <td><?= (int)$mainTableTotals['ASSIGNED'] ?></td>
+        <td><?= (int)$mainTotalWorkplaces ?></td>
+        <td><?= (int)$mainTotalAssigned ?></td>
         <td><?=htmlspecialcharsbx($dateFrom->format('d.m.Y') . ($dateFrom->format('Y-m-d') !== $dateTo->format('Y-m-d') ? ' - ' . $dateTo->format('d.m.Y') : ''))?></td>
-        <td><?= (int)$mainTableTotals['SHORT_OFFICE'] ?></td>
-        <td><?= (int)$mainTableTotals['OFFICE'] ?></td>
+        <td><?= (int)$mainTotalShortOffice ?></td>
+        <td><?= (int)$mainTotalOffice ?></td>
     </tr>
     </tbody>
 </table>
@@ -1026,17 +1031,17 @@ foreach ($periodDays as $dateKey) {
     <tbody>
     <?php
     $legalEntitySummaryTotals = [
-        'WORKPLACES' => 0,
+        'WORKPLACES_BY_DATE' => [],
         'OCCUPIED' => 0,
-        'FREE' => 0,
+        'FREE_BY_DATE' => [],
     ];
     ?>
     <?php foreach ($legalEntitySummary as $dateKey => $legalEntityCounts): ?>
         <?php if (empty($legalEntityCounts)): ?>
             <?php
             $free = max(0, $officeWorkplacesTotal);
-            $legalEntitySummaryTotals['WORKPLACES'] += $officeWorkplacesTotal;
-            $legalEntitySummaryTotals['FREE'] += $free;
+            $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
+            $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = $free;
             ?>
             <tr>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
@@ -1052,9 +1057,12 @@ foreach ($periodDays as $dateKey) {
                 $occupied = (int)$occupied;
                 $free = max(0, $officeWorkplacesTotal - $occupied);
                 $utilization = $officeWorkplacesTotal > 0 ? round(($occupied / $officeWorkplacesTotal) * 100, 1) : 0;
-                $legalEntitySummaryTotals['WORKPLACES'] += $officeWorkplacesTotal;
+                $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
                 $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
-                $legalEntitySummaryTotals['FREE'] += $free;
+                if (!isset($legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey])) {
+                    $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
+                }
+                $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = max(0, $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] - $occupied);
                 ?>
                 <tr>
                     <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
@@ -1067,13 +1075,17 @@ foreach ($periodDays as $dateKey) {
             <?php endforeach; ?>
         <?php endif; ?>
     <?php endforeach; ?>
-    <?php $totalUtilization = $legalEntitySummaryTotals['WORKPLACES'] > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntitySummaryTotals['WORKPLACES']) * 100, 1) : 0; ?>
+    <?php
+    $legalEntityTotalWorkplaces = array_sum($legalEntitySummaryTotals['WORKPLACES_BY_DATE']);
+    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE']);
+    $totalUtilization = $legalEntityTotalWorkplaces > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalWorkplaces) * 100, 1) : 0;
+    ?>
     <tr style="font-weight: bold;">
         <td>Итого</td>
         <td></td>
-        <td><?= (int)$legalEntitySummaryTotals['WORKPLACES'] ?></td>
+        <td><?= (int)$legalEntityTotalWorkplaces ?></td>
         <td><?= (int)$legalEntitySummaryTotals['OCCUPIED'] ?></td>
-        <td><?= (int)$legalEntitySummaryTotals['FREE'] ?></td>
+        <td><?= (int)$legalEntityTotalFree ?></td>
         <td><?= $totalUtilization ?>%</td>
     </tr>
     </tbody>
