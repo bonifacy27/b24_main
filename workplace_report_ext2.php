@@ -42,9 +42,64 @@ $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet
 $ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
 $officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
 
+$undefinedLegalEntity = 'Не определено';
 $normalizeLegalEntity = static function ($value): string {
-    $legalEntity = trim((string)$value);
-    return $legalEntity !== '' ? $legalEntity : 'НСК';
+    return trim((string)$value);
+};
+
+$normalizeListValue = static function ($value): string {
+    if (is_array($value)) {
+        $value = isset($value['VALUE']) ? $value['VALUE'] : reset($value);
+    }
+    return trim((string)$value);
+};
+
+$getEnumValueMap = static function (string $entityId, string $fieldName): array {
+    $map = [];
+    $field = \CUserTypeEntity::GetList([], ['ENTITY_ID' => $entityId, 'FIELD_NAME' => $fieldName])->Fetch();
+    if (!$field || empty($field['ID'])) { return $map; }
+
+    $enumRows = \CUserFieldEnum::GetList(['SORT' => 'ASC'], ['USER_FIELD_ID' => (int)$field['ID']]);
+    while ($enum = $enumRows->Fetch()) {
+        $map[(string)$enum['ID']] = trim((string)$enum['VALUE']);
+    }
+    return $map;
+};
+
+$resolveListDisplayValue = static function ($value, array $enumValueMap) use ($normalizeListValue): string {
+    $normalizedValue = $normalizeListValue($value);
+    return isset($enumValueMap[$normalizedValue]) ? $enumValueMap[$normalizedValue] : $normalizedValue;
+};
+
+$isTemporaryOrGuestPass = static function (string $name): bool {
+    return preg_match('/(Временный|Гостевой|Vendex)/ui', $name) === 1;
+};
+
+$companyLegalEntityMap = [
+    '26' => 'НСК',
+    'НСК' => 'НСК',
+    '1723' => 'ТМХ',
+    'УК ТМ' => 'ТМХ',
+    '27' => 'ТТ',
+    'ТТ' => 'ТТ',
+    '28' => 'КЦ',
+    'КЦ' => 'КЦ',
+];
+
+$resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
+    $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
+    if (isset($companyLegalEntityMap[$company])) { return $companyLegalEntityMap[$company]; }
+
+    $email = mb_strtolower(trim((string)($user['EMAIL'] ?? '')));
+    if ($email !== '') {
+        if (substr($email, -12) === '@tricolor.ru') { return 'НСК'; }
+        if (substr($email, -18) === '@tricolormedia.ru') { return 'ТМХ'; }
+        if (substr($email, -16) === '@monobrand-tt.ru') { return 'ТТ'; }
+        if (substr($email, -8) === '@n-l-e.ru') { return 'НЛЕ'; }
+        if (substr($email, -11) === '@telemag.ru') { return 'СМ'; }
+    }
+
+    return $normalizeLegalEntity('');
 };
 
 $normalizeListValue = static function ($value): string {
@@ -324,17 +379,24 @@ $departmentUsers = [];
 $userDepartmentsMap = [];
 $userCabinetMap = [];
 $userLegalEntityMap = [];
+$userLegalEntityByName = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
-$userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
 
-$rsUsers = \CUser::GetList($by='id', $order='asc', [], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY', 'UF_OFFICE'], 'FIELDS' => ['ID', 'ACTIVE', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
+$rsUsers = \CUser::GetList($by='id', $order='asc', [], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY'], 'FIELDS' => ['ID', 'ACTIVE', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
     $userName = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME'] . ' ' . (string)$user['SECOND_NAME']);
     if ($userName === '') { $userName = (string)$user['LOGIN']; }
-    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap, $userOfficeEnumValueMap);
+    $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap);
+    if ($userName !== '' && $userLegalEntityMap[$userId] !== '') {
+        if (!isset($userLegalEntityByName[$userName])) {
+            $userLegalEntityByName[$userName] = $userLegalEntityMap[$userId];
+        } elseif ($userLegalEntityByName[$userName] !== $userLegalEntityMap[$userId]) {
+            $userLegalEntityByName[$userName] = '';
+        }
+    }
     if ((string)$user['ACTIVE'] !== 'Y') { continue; }
 
     $userDepartments = is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']];
@@ -442,7 +504,7 @@ if ($reverseUsersHl) {
         $reverseCabinet = $resolveReverseCabinet(isset($row['UF_CABINET']) ? $row['UF_CABINET'] : '');
         $reverseUsersByPass[$passId] = [
             'FIO' => trim((string)$row['UF_LAST_NAME'] . ' ' . (string)$row['UF_FIRST_NAME'] . ' ' . (string)$row['UF_SECOND_NAME']),
-            'LEGAL_ENTITY' => 'НСК',
+            'LEGAL_ENTITY' => '',
             'CABINET' => (string)$reverseCabinet['TITLE'],
             'CABINET_NORM' => (string)$reverseCabinet['NORM'],
         ];
@@ -517,8 +579,15 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         if ($workedSeconds <= 0 || (!$hasSingleInputWithoutOutput && $workedSeconds === $fourHoursSeconds)) { continue; }
         $isShortOfficePresence = $hasSingleInputWithoutOutput || $workedSeconds < $fourHoursSeconds;
 
-        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => 'НСК', 'CABINET' => '', 'CABINET_NORM' => ''];
-        $legalEntity = $portalUserId > 0 && isset($userLegalEntityMap[$portalUserId]) ? $userLegalEntityMap[$portalUserId] : $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
+        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => '', 'CABINET' => '', 'CABINET_NORM' => ''];
+        $reverseUserName = trim((string)$reverseUser['FIO']);
+        if ($portalUserId > 0 && isset($userLegalEntityMap[$portalUserId]) && $userLegalEntityMap[$portalUserId] !== '') {
+            $legalEntity = $userLegalEntityMap[$portalUserId];
+        } elseif ($reverseUserName !== '' && isset($userLegalEntityByName[$reverseUserName]) && $userLegalEntityByName[$reverseUserName] !== '') {
+            $legalEntity = $userLegalEntityByName[$reverseUserName];
+        } else {
+            $legalEntity = $normalizeLegalEntity($reverseUser['LEGAL_ENTITY']);
+        }
         $employeeKey = $portalUserId > 0 ? 'U' . $portalUserId : 'P' . $passId;
         if ($isShortOfficePresence) {
             if (isset($shortOfficePresenceKeys[$dateKey][$employeeKey])) { continue; }
@@ -728,14 +797,14 @@ header('Content-Type: text/html; charset=UTF-8');
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
                 $legalEntities = array_fill_keys(array_merge(array_keys($departmentLegalCounts), array_keys($shortDepartmentLegalCounts)), true);
-                if (empty($legalEntities)) { $legalEntities = ['НСК' => true]; }
+                if (empty($legalEntities)) { $legalEntities = [$undefinedLegalEntity => true]; }
                 $departmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $departmentLegalCounts);
                 $shortDepartmentLegalCounts = array_replace(array_fill_keys(array_keys($legalEntities), 0), $shortDepartmentLegalCounts);
                 ksort($departmentLegalCounts, SORT_NATURAL | SORT_FLAG_CASE);
                 ?>
                 <?php foreach ($departmentLegalCounts as $legalEntity => $officeCount): ?>
                 <tr>
-                    <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
+                    <td><?=htmlspecialcharsbx((string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity))?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
                     <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
                     <?php
@@ -789,7 +858,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php else: ?>
         <?php foreach ($unknownEmployees as $employee): ?>
             <tr>
-                <td><?=htmlspecialcharsbx((string)$employee['LEGAL_ENTITY'])?></td>
+                <td><?=htmlspecialcharsbx((string)($employee['LEGAL_ENTITY'] !== '' ? $employee['LEGAL_ENTITY'] : $undefinedLegalEntity))?></td>
                 <td><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
                 <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
