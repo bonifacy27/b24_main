@@ -765,6 +765,7 @@ header('Content-Type: text/html; charset=UTF-8');
                         $isAssignedUserInOffice = isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey]);
                         $departmentAssignedUsers[] = [
                             'NAME' => $assignedUserName,
+                            'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
                             'STATUS' => $isAssignedUserInOffice ? 'В офисе' : 'Не в офисе',
                         ];
                     }
@@ -945,7 +946,7 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
         table.className = 'modal-table';
         var thead = document.createElement('thead');
         var headerRow = document.createElement('tr');
-        ['ФИО', 'В офисе/не в офисе за отчетный день'].forEach(function (title) {
+        ['ФИО', 'ЮЛ', 'В офисе/не в офисе за отчетный день'].forEach(function (title) {
             var th = document.createElement('th');
             th.textContent = title;
             headerRow.appendChild(th);
@@ -957,12 +958,15 @@ uasort($summaryCabinets, static function (array $left, array $right): int {
         employees.forEach(function (employee) {
             var row = document.createElement('tr');
             var nameCell = document.createElement('td');
+            var legalEntityCell = document.createElement('td');
             var statusCell = document.createElement('td');
             var status = employee.STATUS || 'Не в офисе';
             nameCell.textContent = employee.NAME || '';
+            legalEntityCell.textContent = employee.LEGAL_ENTITY || 'Не определено';
             statusCell.textContent = status;
             statusCell.className = status === 'В офисе' ? 'modal-status-in' : 'modal-status-out';
             row.appendChild(nameCell);
+            row.appendChild(legalEntityCell);
             row.appendChild(statusCell);
             tbody.appendChild(row);
         });
