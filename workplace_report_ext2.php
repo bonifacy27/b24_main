@@ -187,30 +187,47 @@ $normalizeReverseEvent = static function ($value): string {
     return '';
 };
 
-$normalizeCabinet = static function (string $cabinetRaw): string {
-    $value = trim(mb_strtolower($cabinetRaw));
-    if ($value === '' || $value === 'не указан') { return ''; }
-    if (!preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) { return ''; }
-    $cabinetCode = str_replace([' ', ','], '', $match[1]);
-    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
-    if (mb_strpos($value, 'москов') !== false) { return 'moskovskiy|' . $cabinetCode; }
-    if (mb_strpos($value, 'новоладож') !== false) { return 'novoladozhskaya|' . $cabinetCode; }
-    if (mb_strpos($value, 'рентген') !== false) { return 'rentgena|' . $cabinetCode; }
-    return 'other|' . $cabinetCode;
+$normalizeCabinetCode = static function (string $cabinetCode): string {
+    $cabinetCode = trim(mb_strtolower($cabinetCode));
+    $cabinetCode = str_replace([' ', ','], '', $cabinetCode);
+    return str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
 };
 
-$normalizeDirectoryCabinet = static function (string $cabinetName): string {
+$resolveCabinetLocationKey = static function (string $value): string {
+    if (mb_strpos($value, 'москов') !== false) { return 'moskovskiy'; }
+    if (mb_strpos($value, 'новоладож') !== false) { return 'novoladozhskaya'; }
+    if (mb_strpos($value, 'рентген') !== false) { return 'rentgena'; }
+    return 'other';
+};
+
+$normalizeCabinet = static function (string $cabinetRaw) use ($normalizeCabinetCode, $resolveCabinetLocationKey): string {
+    $value = trim(mb_strtolower($cabinetRaw));
+    if ($value === '' || $value === 'не указан') { return ''; }
+
+    if (preg_match('/каб\.?\s*([0-9]+[a-zа-я0-9\.-]*)/ui', $value, $match)) {
+        return $resolveCabinetLocationKey($value) . '|' . $normalizeCabinetCode($match[1]);
+    }
+
+    if (preg_match('/(?:^|[,\s])([0-9]+[a-zа-я0-9\.-]*)(?:$|[,\s])/ui', $value, $match)) {
+        return $resolveCabinetLocationKey($value) . '|' . $normalizeCabinetCode($match[1]);
+    }
+
+    return '';
+};
+
+$normalizeDirectoryCabinet = static function (string $cabinetName) use ($normalizeCabinet, $normalizeCabinetCode, $resolveCabinetLocationKey): string {
     $value = trim(mb_strtolower($cabinetName));
     if ($value === '') { return ''; }
-    $parts = array_map('trim', explode(',', $value, 2));
+
+    $normalized = $normalizeCabinet($value);
+    if ($normalized !== '') { return $normalized; }
+
+    $parts = array_map('trim', explode(',', $value));
     if (count($parts) < 2) { return ''; }
-    $location = $parts[0];
-    $cabinetCode = str_replace([' ', ','], '', $parts[1]);
-    $cabinetCode = str_replace(['а', 'б', 'в', 'г'], ['a', 'b', 'v', 'g'], $cabinetCode);
-    if (mb_strpos($location, 'москов') !== false) { return 'moskovskiy|' . $cabinetCode; }
-    if (mb_strpos($location, 'новоладож') !== false) { return 'novoladozhskaya|' . $cabinetCode; }
-    if (mb_strpos($location, 'рентген') !== false) { return 'rentgena|' . $cabinetCode; }
-    return 'other|' . $cabinetCode;
+
+    $cabinetCode = (string)array_pop($parts);
+    $location = implode(', ', $parts);
+    return $resolveCabinetLocationKey($location) . '|' . $normalizeCabinetCode($cabinetCode);
 };
 
 $normalizeOrgNodeIds = static function ($rawValue): array {
