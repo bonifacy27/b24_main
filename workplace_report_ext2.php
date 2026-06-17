@@ -616,7 +616,9 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $userCabinetRaw = (string)$portalUserInfoById[$portalUserId]['CABINET'];
         }
         $userCabinetNorm = $userCabinetRaw !== '' ? $normalizeCabinet($userCabinetRaw) : '';
+        $userCabinetTitle = $userCabinetRaw !== '' ? $userCabinetRaw : '';
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
+        $countedInCabinetDailyOffice = false;
 
         if ($userCabinetNorm !== '' && !empty($userDepartmentIds)) {
             if ($officeFilterRaw !== '' && !isset($cabinetDirectory[$userCabinetNorm])) { continue; }
@@ -646,6 +648,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
                 }
                 $cabinetDailyOffice[$dateKey][$userCabinetNorm][$departmentKey][$departmentId][$legalEntity]++;
             }
+            $countedInCabinetDailyOffice = true;
             continue;
         }
 
@@ -668,9 +671,30 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             }
             $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$totalKey]++;
             $cabinetDailyOffice[$dateKey][$reverseCabinetNorm][$legalKey][$legalEntity]++;
+            $countedInCabinetDailyOffice = true;
         }
 
-        if ($cabinetFilterNorm !== '' && $reverseCabinetNorm !== $cabinetFilterNorm) { continue; }
+        $unknownCabinetNorm = $reverseCabinetNorm !== '' ? $reverseCabinetNorm : $userCabinetNorm;
+        $unknownCabinetTitle = $reverseCabinetTitle !== '' ? $reverseCabinetTitle : $userCabinetTitle;
+        if ($unknownCabinetNorm !== '' && !$countedInCabinetDailyOffice && ($officeFilterRaw === '' || isset($cabinetDirectory[$unknownCabinetNorm]))) {
+            if (!isset($cabinetDailyOffice[$dateKey][$unknownCabinetNorm])) {
+                $cabinetDailyOffice[$dateKey][$unknownCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
+            }
+            foreach (['SHORT_TOTAL', 'BY_DEPARTMENT', 'SHORT_BY_DEPARTMENT', 'BY_LEGAL_ENTITY', 'SHORT_BY_LEGAL_ENTITY'] as $officeKey) {
+                if (!isset($cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$officeKey])) {
+                    $cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$officeKey] = in_array($officeKey, ['SHORT_TOTAL'], true) ? 0 : [];
+                }
+            }
+            $totalKey = $isShortOfficePresence ? 'SHORT_TOTAL' : 'TOTAL';
+            $legalKey = $isShortOfficePresence ? 'SHORT_BY_LEGAL_ENTITY' : 'BY_LEGAL_ENTITY';
+            if (!isset($cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$legalKey][$legalEntity])) {
+                $cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$legalKey][$legalEntity] = 0;
+            }
+            $cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$totalKey]++;
+            $cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$legalKey][$legalEntity]++;
+        }
+
+        if ($cabinetFilterNorm !== '' && $unknownCabinetNorm !== $cabinetFilterNorm) { continue; }
         $employeeName = trim((string)$reverseUser['FIO']);
         if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
         if ($isTemporaryOrGuestPass($employeeName)) {
@@ -699,7 +723,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $unknownEmployees[] = [
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
-            'CABINET' => $reverseCabinetTitle,
+            'CABINET' => $unknownCabinetTitle,
             'DATE' => $dateKey,
             'REASON' => $unknownReason,
         ];
@@ -1018,12 +1042,15 @@ foreach ($periodDays as $dateKey) {
     foreach ($summaryCabinets as $cabNorm => $cabData) {
         $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : [];
         $legalCounts = isset($dayData['BY_LEGAL_ENTITY']) && is_array($dayData['BY_LEGAL_ENTITY']) ? $dayData['BY_LEGAL_ENTITY'] : [];
-        foreach ($legalCounts as $legalEntity => $count) {
-            $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
-            if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
-                $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
+        $shortLegalCounts = isset($dayData['SHORT_BY_LEGAL_ENTITY']) && is_array($dayData['SHORT_BY_LEGAL_ENTITY']) ? $dayData['SHORT_BY_LEGAL_ENTITY'] : [];
+        foreach ([$legalCounts, $shortLegalCounts] as $countsByLegalEntity) {
+            foreach ($countsByLegalEntity as $legalEntity => $count) {
+                $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
+                if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+                    $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
+                }
+                $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
             }
-            $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
         }
     }
     ksort($legalEntitySummary[$dateKey], SORT_NATURAL | SORT_FLAG_CASE);
