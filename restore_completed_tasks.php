@@ -40,12 +40,14 @@ final class RestoreConfig
     public $onlyTaskId = null;
     /** @var bool */
     public $overwrite = false;
+    /** @var bool */
+    public $withSubtasks = true;
 }
 
 function usage()
 {
     echo "Usage:\n";
-    echo "  php -f restore_completed_tasks.php -- --mode=export --file=/path/tasks.json [--group-id=167] [--closed-before='2024-01-01 00:00:00'] [--limit=N] [--task-id=N]\n";
+    echo "  php -f restore_completed_tasks.php -- --mode=export --file=/path/tasks.json [--group-id=167] [--closed-before='2024-01-01 00:00:00'] [--limit=N] [--task-id=N] [--without-subtasks]\n";
     echo "  php -f restore_completed_tasks.php -- --mode=import --file=/path/tasks.json [--dry-run|--run] [--overwrite]\n";
 }
 
@@ -97,6 +99,10 @@ function parseConfig(array $argv): RestoreConfig
         }
         if ($arg === '--overwrite') {
             $config->overwrite = true;
+            continue;
+        }
+        if ($arg === '--without-subtasks') {
+            $config->withSubtasks = false;
             continue;
         }
         throw new InvalidArgumentException('Unknown argument: ' . $arg);
@@ -199,6 +205,14 @@ function getTableColumns(string $tableName): array
     return $cache[$tableName];
 }
 
+function columnExists(string $tableName, string $columnName): bool
+{
+    if (!tableExists($tableName)) {
+        return false;
+    }
+    return in_array($columnName, getTableColumns($tableName), true);
+}
+
 function getPrimaryKeyColumns(string $tableName): array
 {
     static $cache = [];
@@ -286,6 +300,29 @@ function selectRows(string $tableName, string $where, string $order = ''): array
     return $rows;
 }
 
+function selectRowsByColumn(string $tableName, string $columnName, int $value, string $order = ''): array
+{
+    if (!columnExists($tableName, $columnName)) {
+        return [];
+    }
+
+    return selectRows($tableName, connection()->getSqlHelper()->quote($columnName) . ' = ' . $value, $order);
+}
+
+function selectRowsByIds(string $tableName, string $columnName, array $ids, string $order = ''): array
+{
+    if (!$ids || !columnExists($tableName, $columnName)) {
+        return [];
+    }
+
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if (!$ids) {
+        return [];
+    }
+
+    return selectRows($tableName, connection()->getSqlHelper()->quote($columnName) . ' IN (' . implode(',', $ids) . ')', $order);
+}
+
 function taskFilterSql(RestoreConfig $config): string
 {
     if ($config->onlyTaskId !== null) {
@@ -309,7 +346,65 @@ function getTaskIds(RestoreConfig $config): array
     while ($row = $result->fetch()) {
         $ids[] = (int)$row['ID'];
     }
-    return $ids;
+
+    if ($config->withSubtasks) {
+        $ids = expandTaskIdsWithSubtasks($ids);
+    }
+
+    sort($ids, SORT_NUMERIC);
+    return array_values(array_unique($ids));
+}
+
+function expandTaskIdsWithSubtasks(array $taskIds): array
+{
+    if (!$taskIds || !columnExists('b_tasks', 'PARENT_ID')) {
+        return $taskIds;
+    }
+
+    $allTaskIds = array_values(array_unique(array_filter(array_map('intval', $taskIds))));
+    $queue = $allTaskIds;
+
+    while ($queue) {
+        $parentId = array_shift($queue);
+        $children = selectRows('b_tasks', 'PARENT_ID = ' . (int)$parentId);
+        foreach ($children as $child) {
+            $childId = (int)($child['ID'] ?? 0);
+            if ($childId <= 0 || in_array($childId, $allTaskIds, true)) {
+                continue;
+            }
+            $allTaskIds[] = $childId;
+            $queue[] = $childId;
+        }
+    }
+
+    return $allTaskIds;
+}
+
+function exportTaskTags(int $taskId): array
+{
+    $tables = [];
+
+    $oldTagRows = selectRowsByColumn('b_tasks_tag', 'TASK_ID', $taskId, buildOrder('b_tasks_tag', ['NAME' => 'ASC', 'ID' => 'ASC']));
+    if ($oldTagRows) {
+        $tables['b_tasks_tag'] = $oldTagRows;
+    }
+
+    $taskTagRows = selectRowsByColumn('b_tasks_task_tag', 'TASK_ID', $taskId, buildOrder('b_tasks_task_tag', ['TASK_ID' => 'ASC', 'TAG_ID' => 'ASC']));
+    if ($taskTagRows) {
+        $tagIds = [];
+        foreach ($taskTagRows as $row) {
+            if (isset($row['TAG_ID'])) {
+                $tagIds[] = (int)$row['TAG_ID'];
+            }
+        }
+        $tagRows = selectRowsByIds('b_tasks_tag', 'ID', $tagIds, buildOrder('b_tasks_tag', ['NAME' => 'ASC', 'ID' => 'ASC']));
+        if ($tagRows) {
+            $tables['b_tasks_tag'] = array_merge($tables['b_tasks_tag'] ?? [], $tagRows);
+        }
+        $tables['b_tasks_task_tag'] = $taskTagRows;
+    }
+
+    return $tables;
 }
 
 function exportTask(int $taskId): array
@@ -326,17 +421,18 @@ function exportTask(int $taskId): array
         'taskId' => $taskId,
         'tables' => [
             'b_tasks' => [$task],
-            'b_tasks_member' => selectRows('b_tasks_member', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_member', ['TYPE' => 'ASC', 'USER_ID' => 'ASC'])),
-            'b_tasks_checklist_items' => selectRows('b_tasks_checklist_items', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_checklist_items', ['SORT_INDEX' => 'ASC', 'ID' => 'ASC'])),
-            'b_tasks_elapsed_time' => selectRows('b_tasks_elapsed_time', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_elapsed_time', ['ID' => 'ASC', 'CREATED_DATE' => 'ASC'])),
-            'b_tasks_reminder' => selectRows('b_tasks_reminder', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_reminder', ['ID' => 'ASC', 'REMIND_DATE' => 'ASC'])),
-            'b_tasks_tag' => selectRows('b_tasks_tag', 'TASK_ID = ' . $taskId, 'NAME ASC'),
-            'b_tasks_result' => selectRows('b_tasks_result', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_result', ['ID' => 'ASC', 'CREATED_AT' => 'ASC'])),
-            'b_tasks_viewed' => selectRows('b_tasks_viewed', 'TASK_ID = ' . $taskId),
-            'b_uts_tasks_task' => selectRows('b_uts_tasks_task', 'VALUE_ID = ' . $taskId),
-            'b_utm_tasks_task' => selectRows('b_utm_tasks_task', 'VALUE_ID = ' . $taskId),
+            'b_tasks_member' => selectRowsByColumn('b_tasks_member', 'TASK_ID', $taskId, buildOrder('b_tasks_member', ['TYPE' => 'ASC', 'USER_ID' => 'ASC'])),
+            'b_tasks_checklist_items' => selectRowsByColumn('b_tasks_checklist_items', 'TASK_ID', $taskId, buildOrder('b_tasks_checklist_items', ['SORT_INDEX' => 'ASC', 'ID' => 'ASC'])),
+            'b_tasks_elapsed_time' => selectRowsByColumn('b_tasks_elapsed_time', 'TASK_ID', $taskId, buildOrder('b_tasks_elapsed_time', ['ID' => 'ASC', 'CREATED_DATE' => 'ASC'])),
+            'b_tasks_reminder' => selectRowsByColumn('b_tasks_reminder', 'TASK_ID', $taskId, buildOrder('b_tasks_reminder', ['ID' => 'ASC', 'REMIND_DATE' => 'ASC'])),
+            'b_tasks_result' => selectRowsByColumn('b_tasks_result', 'TASK_ID', $taskId, buildOrder('b_tasks_result', ['ID' => 'ASC', 'CREATED_AT' => 'ASC'])),
+            'b_tasks_viewed' => selectRowsByColumn('b_tasks_viewed', 'TASK_ID', $taskId),
+            'b_uts_tasks_task' => selectRowsByColumn('b_uts_tasks_task', 'VALUE_ID', $taskId),
+            'b_utm_tasks_task' => selectRowsByColumn('b_utm_tasks_task', 'VALUE_ID', $taskId),
         ],
     ];
+
+    $data['tables'] = array_merge($data['tables'], exportTaskTags($taskId));
 
     if ($forumTopicId > 0) {
         $messages = selectRows('b_forum_message', 'TOPIC_ID = ' . $forumTopicId, buildOrder('b_forum_message', ['ID' => 'ASC']));
@@ -373,6 +469,7 @@ function exportTasks(RestoreConfig $config)
             'completedStatus' => COMPLETED_STATUS,
             'preserveDates' => true,
             'preserveIds' => true,
+            'withSubtasks' => $config->withSubtasks,
         ],
         'tasks' => [],
     ];
