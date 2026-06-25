@@ -216,6 +216,26 @@ function quoteValue($value): string
     return "'" . connection()->getSqlHelper()->forSql((string)$value) . "'";
 }
 
+
+function buildOrder(string $tableName, array $columns): string
+{
+    if (!tableExists($tableName)) {
+        return '';
+    }
+
+    $availableColumns = array_flip(getTableColumns($tableName));
+    $orderParts = [];
+    foreach ($columns as $column => $direction) {
+        if (!isset($availableColumns[$column])) {
+            continue;
+        }
+        $direction = strtoupper((string)$direction) === 'DESC' ? 'DESC' : 'ASC';
+        $orderParts[] = connection()->getSqlHelper()->quote((string)$column) . ' ' . $direction;
+    }
+
+    return implode(', ', $orderParts);
+}
+
 function selectRows(string $tableName, string $where, string $order = ''): array
 {
     if (!tableExists($tableName)) {
@@ -275,12 +295,12 @@ function exportTask(int $taskId): array
         'taskId' => $taskId,
         'tables' => [
             'b_tasks' => [$task],
-            'b_tasks_member' => selectRows('b_tasks_member', 'TASK_ID = ' . $taskId, 'ID ASC'),
-            'b_tasks_checklist_items' => selectRows('b_tasks_checklist_items', 'TASK_ID = ' . $taskId, 'SORT_INDEX ASC, ID ASC'),
-            'b_tasks_elapsed_time' => selectRows('b_tasks_elapsed_time', 'TASK_ID = ' . $taskId, 'ID ASC'),
-            'b_tasks_reminder' => selectRows('b_tasks_reminder', 'TASK_ID = ' . $taskId, 'ID ASC'),
+            'b_tasks_member' => selectRows('b_tasks_member', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_member', ['TYPE' => 'ASC', 'USER_ID' => 'ASC'])),
+            'b_tasks_checklist_items' => selectRows('b_tasks_checklist_items', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_checklist_items', ['SORT_INDEX' => 'ASC', 'ID' => 'ASC'])),
+            'b_tasks_elapsed_time' => selectRows('b_tasks_elapsed_time', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_elapsed_time', ['ID' => 'ASC', 'CREATED_DATE' => 'ASC'])),
+            'b_tasks_reminder' => selectRows('b_tasks_reminder', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_reminder', ['ID' => 'ASC', 'REMIND_DATE' => 'ASC'])),
             'b_tasks_tag' => selectRows('b_tasks_tag', 'TASK_ID = ' . $taskId, 'NAME ASC'),
-            'b_tasks_result' => selectRows('b_tasks_result', 'TASK_ID = ' . $taskId, 'ID ASC'),
+            'b_tasks_result' => selectRows('b_tasks_result', 'TASK_ID = ' . $taskId, buildOrder('b_tasks_result', ['ID' => 'ASC', 'CREATED_AT' => 'ASC'])),
             'b_tasks_viewed' => selectRows('b_tasks_viewed', 'TASK_ID = ' . $taskId),
             'b_uts_tasks_task' => selectRows('b_uts_tasks_task', 'VALUE_ID = ' . $taskId),
             'b_utm_tasks_task' => selectRows('b_utm_tasks_task', 'VALUE_ID = ' . $taskId),
@@ -288,7 +308,7 @@ function exportTask(int $taskId): array
     ];
 
     if ($forumTopicId > 0) {
-        $messages = selectRows('b_forum_message', 'TOPIC_ID = ' . $forumTopicId, 'ID ASC');
+        $messages = selectRows('b_forum_message', 'TOPIC_ID = ' . $forumTopicId, buildOrder('b_forum_message', ['ID' => 'ASC']));
         $messageIds = array_map(static function (array $row): int { return (int)$row['ID']; }, $messages);
         $data['tables']['b_forum_topic'] = selectRows('b_forum_topic', 'ID = ' . $forumTopicId);
         $data['tables']['b_forum_message'] = $messages;
