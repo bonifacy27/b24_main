@@ -38,13 +38,15 @@ final class RestoreConfig
     public $limit = 0;
     /** @var int|null */
     public $onlyTaskId = null;
+    /** @var bool */
+    public $overwrite = false;
 }
 
 function usage()
 {
     echo "Usage:\n";
     echo "  php -f restore_completed_tasks.php -- --mode=export --file=/path/tasks.json [--group-id=167] [--closed-before='2024-01-01 00:00:00'] [--limit=N] [--task-id=N]\n";
-    echo "  php -f restore_completed_tasks.php -- --mode=import --file=/path/tasks.json [--dry-run|--run]\n";
+    echo "  php -f restore_completed_tasks.php -- --mode=import --file=/path/tasks.json [--dry-run|--run] [--overwrite]\n";
 }
 
 function startsWith(string $value, string $prefix): bool
@@ -91,6 +93,10 @@ function parseConfig(array $argv): RestoreConfig
         }
         if (startsWith($arg, '--task-id=')) {
             $config->onlyTaskId = max(1, (int)substr($arg, 10));
+            continue;
+        }
+        if ($arg === '--overwrite') {
+            $config->overwrite = true;
             continue;
         }
         throw new InvalidArgumentException('Unknown argument: ' . $arg);
@@ -213,7 +219,32 @@ function quoteValue($value): string
     if ($value === null) {
         return 'NULL';
     }
+    if ($value instanceof DateTimeInterface) {
+        $value = $value->format('Y-m-d H:i:s');
+    }
     return "'" . connection()->getSqlHelper()->forSql((string)$value) . "'";
+}
+
+function normalizeDbValue($value)
+{
+    if ($value instanceof DateTimeInterface) {
+        return $value->format('Y-m-d H:i:s');
+    }
+    if (is_object($value) && method_exists($value, 'format')) {
+        return $value->format('Y-m-d H:i:s');
+    }
+    if (is_object($value) && method_exists($value, 'toString')) {
+        return $value->toString();
+    }
+    return $value;
+}
+
+function normalizeDbRow(array $row): array
+{
+    foreach ($row as $column => $value) {
+        $row[$column] = normalizeDbValue($value);
+    }
+    return $row;
 }
 
 
@@ -250,7 +281,7 @@ function selectRows(string $tableName, string $where, string $order = ''): array
     $rows = [];
     $result = connection()->query($sql);
     while ($row = $result->fetch()) {
-        $rows[] = $row;
+        $rows[] = normalizeDbRow($row);
     }
     return $rows;
 }
@@ -403,7 +434,7 @@ function insertRawRow(string $tableName, array $row)
     $filtered = [];
     foreach ($row as $column => $value) {
         if (isset($tableColumns[$column])) {
-            $filtered[$column] = $value;
+            $filtered[$column] = normalizeDbValue($value);
         }
     }
     if (!$filtered) {
@@ -423,7 +454,36 @@ function insertRawRow(string $tableName, array $row)
     );
 }
 
-function importTableRows(string $tableName, array $rows, bool $dryRun): array
+function updateRawRow(string $tableName, array $primaryKey, array $row)
+{
+    $tableColumns = array_flip(getTableColumns($tableName));
+    $sets = [];
+    $where = [];
+
+    foreach ($row as $column => $value) {
+        if (!isset($tableColumns[$column])) {
+            continue;
+        }
+        $quotedColumn = connection()->getSqlHelper()->quote($column);
+        if (in_array($column, $primaryKey, true)) {
+            $where[] = $quotedColumn . ' = ' . quoteValue($value);
+            continue;
+        }
+        $sets[] = $quotedColumn . ' = ' . quoteValue(normalizeDbValue($value));
+    }
+
+    if (!$sets || count($where) !== count($primaryKey)) {
+        return;
+    }
+
+    connection()->queryExecute(
+        'UPDATE ' . connection()->getSqlHelper()->quote($tableName)
+        . ' SET ' . implode(', ', $sets)
+        . ' WHERE ' . implode(' AND ', $where)
+    );
+}
+
+function importTableRows(string $tableName, array $rows, bool $dryRun, bool $overwrite = false): array
 {
     if (!tableExists($tableName)) {
         return ['inserted' => 0, 'skipped' => count($rows), 'message' => 'table is absent'];
@@ -431,6 +491,7 @@ function importTableRows(string $tableName, array $rows, bool $dryRun): array
 
     $primaryKey = getPrimaryKeyColumns($tableName);
     $inserted = 0;
+    $updated = 0;
     $skipped = 0;
 
     foreach ($rows as $row) {
@@ -438,7 +499,14 @@ function importTableRows(string $tableName, array $rows, bool $dryRun): array
             continue;
         }
         if (rowExists($tableName, $primaryKey, $row)) {
-            $skipped++;
+            if ($overwrite) {
+                if (!$dryRun) {
+                    updateRawRow($tableName, $primaryKey, $row);
+                }
+                $updated++;
+            } else {
+                $skipped++;
+            }
             continue;
         }
         if (!$dryRun) {
@@ -447,7 +515,7 @@ function importTableRows(string $tableName, array $rows, bool $dryRun): array
         $inserted++;
     }
 
-    return ['inserted' => $inserted, 'skipped' => $skipped, 'message' => ''];
+    return ['inserted' => $inserted, 'updated' => $updated, 'skipped' => $skipped, 'message' => ''];
 }
 
 function importTasks(RestoreConfig $config)
@@ -456,6 +524,7 @@ function importTasks(RestoreConfig $config)
     $tasks = isset($export['tasks']) && is_array($export['tasks']) ? $export['tasks'] : [];
     echo 'Tasks in export: ' . count($tasks) . "\n";
     echo $config->dryRun ? "Dry-run: database will not be changed.\n" : "Run mode: database will be changed.\n";
+    echo $config->overwrite ? "Overwrite mode: existing rows will be updated from export.\n" : "Skip mode: existing rows will not be changed.\n";
 
     $connection = connection();
     if (!$config->dryRun) {
@@ -472,9 +541,10 @@ function importTasks(RestoreConfig $config)
                 if (!is_array($rows)) {
                     continue;
                 }
-                $result = importTableRows((string)$tableName, $rows, $config->dryRun);
+                $result = importTableRows((string)$tableName, $rows, $config->dryRun, $config->overwrite);
                 $note = $result['message'] !== '' ? ' (' . $result['message'] . ')' : '';
-                echo '  ' . $tableName . ': insert ' . $result['inserted'] . ', skip ' . $result['skipped'] . $note . "\n";
+                $updated = isset($result['updated']) ? (int)$result['updated'] : 0;
+                echo '  ' . $tableName . ': insert ' . $result['inserted'] . ', update ' . $updated . ', skip ' . $result['skipped'] . $note . "\n";
             }
         }
 
