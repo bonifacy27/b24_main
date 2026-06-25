@@ -106,27 +106,59 @@ function parseConfig(array $argv): RestoreConfig
     return $config;
 }
 
+function findBitrixDocumentRoot(): string
+{
+    $candidates = [];
+
+    if (!empty($_SERVER['DOCUMENT_ROOT'])) {
+        $candidates[] = (string)$_SERVER['DOCUMENT_ROOT'];
+    }
+
+    $envDocumentRoot = getenv('DOCUMENT_ROOT');
+    if ($envDocumentRoot !== false && trim((string)$envDocumentRoot) !== '') {
+        $candidates[] = trim((string)$envDocumentRoot);
+    }
+
+    $current = realpath(__DIR__) ?: __DIR__;
+    while ($current !== '' && $current !== dirname($current)) {
+        $candidates[] = $current;
+        $current = dirname($current);
+    }
+
+    $candidates[] = '/home/bitrix/www';
+
+    foreach (array_unique($candidates) as $candidate) {
+        $documentRoot = rtrim($candidate, '/');
+        if ($documentRoot === '') {
+            continue;
+        }
+
+        $prolog = $documentRoot . '/bitrix/modules/main/include/prolog_before.php';
+        if (file_exists($prolog)) {
+            return $documentRoot;
+        }
+    }
+
+    throw new RuntimeException(
+        'Bitrix prolog not found. Checked from script directory up to filesystem root and /home/bitrix/www. '
+        . 'Run from the portal tree or set DOCUMENT_ROOT=/home/bitrix/www.'
+    );
+}
+
 function bootstrapBitrix()
 {
     if (PHP_SAPI !== 'cli') {
         throw new RuntimeException('This script is intended to be run from CLI.');
     }
 
-    if (empty($_SERVER['DOCUMENT_ROOT'])) {
-        $_SERVER['DOCUMENT_ROOT'] = realpath(__DIR__) ?: __DIR__;
-    }
+    $_SERVER['DOCUMENT_ROOT'] = findBitrixDocumentRoot();
 
     define('NO_KEEP_STATISTIC', true);
     define('NO_AGENT_STATISTIC', true);
     define('NO_AGENT_CHECK', true);
     define('NOT_CHECK_PERMISSIONS', true);
 
-    $prolog = rtrim((string)$_SERVER['DOCUMENT_ROOT'], '/') . '/bitrix/modules/main/include/prolog_before.php';
-    if (!file_exists($prolog)) {
-        throw new RuntimeException('Bitrix prolog not found: ' . $prolog . '. Run the script from the portal document root or set DOCUMENT_ROOT.');
-    }
-
-    require_once $prolog;
+    require_once rtrim((string)$_SERVER['DOCUMENT_ROOT'], '/') . '/bitrix/modules/main/include/prolog_before.php';
 
     if (!class_exists('Bitrix\\Main\\Application')) {
         throw new RuntimeException('Bitrix main module is not available.');
