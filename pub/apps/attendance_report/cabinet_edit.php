@@ -1,6 +1,6 @@
 <?php
 /**
- * Редактор справочника кабинетов (HL-блок 74).
+ * Рабочее место администратора АХС: управление рабочими местами (HL-блок 74).
  *
  * URL: /pub/apps/attendance_report/cabinet_edit.php
  */
@@ -16,19 +16,18 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 
 const CABINET_HL_BLOCK_ID = 74;
-const ORG_IBLOCK_ID = 308;
-const DEFAULT_ORG_ELEMENT_ID = 3197820;
+const REPORT_URL = '/workplace_report_ext2.php';
 
 header('Content-Type: text/html; charset=UTF-8');
 
-if (!Loader::includeModule('main') || !Loader::includeModule('highloadblock') || !Loader::includeModule('iblock')) {
+if (!Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
     echo '<!doctype html><meta charset="utf-8"><p>Ошибка: не удалось подключить обязательные модули Bitrix.</p>';
     exit;
 }
 
 global $USER, $APPLICATION;
 if (!is_object($USER) || !$USER->IsAuthorized() || !$USER->IsAdmin()) {
-    echo '<!doctype html><meta charset="utf-8"><p>Доступ запрещен. Для редактирования справочника кабинетов нужны права администратора.</p>';
+    echo '<!doctype html><meta charset="utf-8"><p>Доступ запрещен. Для управления рабочими местами нужны права администратора.</p>';
     exit;
 }
 
@@ -49,33 +48,93 @@ function cabinetEditorHtml(string $value): string
     return htmlspecialcharsbx($value);
 }
 
-function cabinetEditorNormalizeOrgIds($orgIds): array
+function cabinetEditorGetOfficeEnums(): array
 {
-    if (!is_array($orgIds)) {
-        $orgIds = [$orgIds];
+    $offices = [];
+    $field = \CUserTypeEntity::GetList([], ['ENTITY_ID' => 'HLBLOCK_' . CABINET_HL_BLOCK_ID, 'FIELD_NAME' => 'UF_OFFICE'])->Fetch();
+    if (!$field || empty($field['ID'])) {
+        return $offices;
     }
 
-    $normalized = [DEFAULT_ORG_ELEMENT_ID => DEFAULT_ORG_ELEMENT_ID];
-    foreach ($orgIds as $orgId) {
-        $orgId = (int)$orgId;
-        if ($orgId > 0) {
-            $normalized[$orgId] = $orgId;
+    $enumRows = \CUserFieldEnum::GetList(['SORT' => 'ASC', 'VALUE' => 'ASC'], ['USER_FIELD_ID' => (int)$field['ID']]);
+    while ($enum = $enumRows->Fetch()) {
+        $id = (int)$enum['ID'];
+        $offices[$id] = trim((string)$enum['VALUE']);
+    }
+
+    return $offices;
+}
+
+function cabinetEditorNormalizeOfficeValue($value): int
+{
+    if (is_array($value)) {
+        $value = isset($value['VALUE']) ? $value['VALUE'] : reset($value);
+    }
+
+    return (int)$value;
+}
+
+function cabinetEditorOfficeName($value, array $offices): string
+{
+    $officeId = cabinetEditorNormalizeOfficeValue($value);
+    return isset($offices[$officeId]) ? $offices[$officeId] : '';
+}
+
+function cabinetEditorGetNextCabinetId(string $cabinetClass): int
+{
+    $maxCabinetId = 0;
+    $rows = $cabinetClass::getList(['select' => ['UF_CABINET_ID']]);
+    while ($row = $rows->fetch()) {
+        $cabinetId = trim((string)$row['UF_CABINET_ID']);
+        if ($cabinetId !== '' && ctype_digit($cabinetId)) {
+            $maxCabinetId = max($maxCabinetId, (int)$cabinetId);
         }
     }
 
-    return array_values($normalized);
+    return $maxCabinetId + 1;
 }
 
-function cabinetEditorFindDuplicateCabinetId(string $cabinetId, string $cabinetClass, int $excludeRowId = 0): int
+function cabinetEditorBuildCabinetName(string $officeName, string $cabinetNumber): string
 {
-    $cabinetId = trim($cabinetId);
-    if ($cabinetId === '') {
-        return 0;
+    return trim($officeName) . ', каб. ' . trim($cabinetNumber);
+}
+
+function cabinetEditorNormalizeFlexWorkplaces(string $value, int $workplaces, array &$errors): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
     }
 
+    $parts = preg_split('/\s*,\s*/', $value, -1, PREG_SPLIT_NO_EMPTY);
+    $numbers = [];
+    foreach ($parts as $part) {
+        if (!ctype_digit($part) || (int)$part <= 0) {
+            $errors[] = 'Номера гибридных рабочих мест должны быть положительными целыми числами через запятую.';
+            return '';
+        }
+        $number = (int)$part;
+        if ($workplaces > 0 && $number > $workplaces) {
+            $errors[] = 'Номер гибридного рабочего места ' . $number . ' больше общего количества рабочих мест (' . $workplaces . ').';
+            return '';
+        }
+        $numbers[$number] = $number;
+    }
+
+    ksort($numbers, SORT_NUMERIC);
+    if (count($numbers) > $workplaces) {
+        $errors[] = 'Гибридных мест не может быть больше, чем общее количество рабочих мест.';
+        return '';
+    }
+
+    return implode(',', $numbers);
+}
+
+function cabinetEditorFindDuplicateName(string $name, string $cabinetClass, int $excludeRowId = 0): int
+{
     $row = $cabinetClass::getList([
-        'select' => ['ID', 'UF_CABINET_ID'],
-        'filter' => ['=UF_CABINET_ID' => $cabinetId],
+        'select' => ['ID'],
+        'filter' => ['=UF_NAME' => $name],
         'limit' => 1,
     ])->fetch();
 
@@ -87,246 +146,181 @@ function cabinetEditorFindDuplicateCabinetId(string $cabinetId, string $cabinetC
     return $rowId === $excludeRowId ? 0 : $rowId;
 }
 
-function cabinetEditorGetNextCabinetId(string $cabinetClass): string
+function cabinetEditorLoadCabinets(string $cabinetClass, array $offices, string $search, int $officeFilter, string $sortDirection): array
 {
-    $maxCabinetId = 0;
-    $rows = $cabinetClass::getList(['select' => ['UF_CABINET_ID']]);
+    $cabinets = [];
+    $rows = $cabinetClass::getList([
+        'select' => ['ID', 'UF_CABINET_ID', 'UF_NAME', 'UF_WORKPLACES', 'UF_FLEX_WORKPLACES', 'UF_OFFICE'],
+        'order' => ['UF_NAME' => $sortDirection === 'DESC' ? 'DESC' : 'ASC', 'ID' => 'ASC'],
+    ]);
+
+    $searchLower = mb_strtolower($search);
     while ($row = $rows->fetch()) {
-        $cabinetId = trim((string)$row['UF_CABINET_ID']);
-        if ($cabinetId !== '' && ctype_digit($cabinetId)) {
-            $maxCabinetId = max($maxCabinetId, (int)$cabinetId);
+        $officeId = cabinetEditorNormalizeOfficeValue($row['UF_OFFICE'] ?? 0);
+        $row['OFFICE_ID'] = $officeId;
+        $row['OFFICE_NAME'] = cabinetEditorOfficeName($officeId, $offices);
+
+        if ($officeFilter > 0 && $officeId !== $officeFilter) {
+            continue;
         }
-    }
 
-    return (string)($maxCabinetId + 1);
-}
-
-function cabinetEditorLoadOrganizations(): array
-{
-    $organizations = [];
-    $rsElements = \CIBlockElement::GetList(
-        ['NAME' => 'ASC'],
-        ['IBLOCK_ID' => ORG_IBLOCK_ID, 'ACTIVE' => 'Y'],
-        false,
-        false,
-        ['ID', 'NAME']
-    );
-
-    while ($element = $rsElements->Fetch()) {
-        $organizations[(int)$element['ID']] = [
-            'ID' => (int)$element['ID'],
-            'NAME' => (string)$element['NAME'],
-        ];
-    }
-
-    if (!isset($organizations[DEFAULT_ORG_ELEMENT_ID])) {
-        $rsDefault = \CIBlockElement::GetList(
-            [],
-            ['IBLOCK_ID' => ORG_IBLOCK_ID, 'ID' => DEFAULT_ORG_ELEMENT_ID],
-            false,
-            ['nTopCount' => 1],
-            ['ID', 'NAME']
-        );
-        if ($defaultElement = $rsDefault->Fetch()) {
-            $organizations[(int)$defaultElement['ID']] = [
-                'ID' => (int)$defaultElement['ID'],
-                'NAME' => (string)$defaultElement['NAME'],
-            ];
+        if ($searchLower !== '') {
+            $haystack = mb_strtolower((string)$row['UF_NAME'] . ' ' . (string)$row['UF_CABINET_ID'] . ' ' . $row['OFFICE_NAME']);
+            if (mb_strpos($haystack, $searchLower) === false) {
+                continue;
+            }
         }
+
+        $cabinets[] = $row;
     }
 
-    return $organizations;
+    return $cabinets;
 }
 
-function cabinetEditorRenderOrgCheckboxes(array $organizations, array $selectedOrgIds, string $fieldName, string $idPrefix, string $formId = ''): string
+function cabinetEditorExportExcel(array $cabinets): void
 {
-    $selectedMap = array_fill_keys(cabinetEditorNormalizeOrgIds($selectedOrgIds), true);
-    $html = '<div class="org-list">';
-    foreach ($organizations as $organization) {
-        $orgId = (int)$organization['ID'];
-        $isDefault = $orgId === DEFAULT_ORG_ELEMENT_ID;
-        $checked = isset($selectedMap[$orgId]) ? ' checked' : '';
-        $disabled = $isDefault ? ' disabled' : '';
-        $hidden = $isDefault ? '<input type="hidden" name="' . cabinetEditorHtml($fieldName) . '[]" value="' . $orgId . '">' : '';
-        $labelClass = $isDefault ? ' class="default-org"' : '';
-        $formAttr = $formId !== '' ? ' form="' . cabinetEditorHtml($formId) . '"' : '';
-        $hidden = $isDefault && $formId !== ''
-            ? '<input type="hidden" form="' . cabinetEditorHtml($formId) . '" name="' . cabinetEditorHtml($fieldName) . '[]" value="' . $orgId . '">'
-            : $hidden;
-        $html .= '<label' . $labelClass . '>' . $hidden
-            . '<input type="checkbox" id="' . cabinetEditorHtml($idPrefix . '_' . $orgId) . '" name="' . cabinetEditorHtml($fieldName) . '[]" value="' . $orgId . '"' . $formAttr . $checked . $disabled . '> '
-            . cabinetEditorHtml($organization['NAME']) . ' <span class="muted">#' . $orgId . '</span>'
-            . ($isDefault ? ' <span class="badge">обязательно</span>' : '')
-            . '</label>';
+    while (ob_get_level() > 0) {
+        ob_end_clean();
     }
-    $html .= '</div>';
 
-    return $html;
+    header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="workplaces_' . date('Y-m-d_H-i-s') . '.xls"');
+    echo "\xEF\xBB\xBF";
+    echo '<table border="1">';
+    echo '<tr><th>ID кабинета</th><th>Название</th><th>Офис</th><th>Рабочих мест</th><th>Гибридные места</th></tr>';
+    foreach ($cabinets as $cabinet) {
+        echo '<tr>';
+        echo '<td>' . cabinetEditorHtml((string)$cabinet['UF_CABINET_ID']) . '</td>';
+        echo '<td>' . cabinetEditorHtml((string)$cabinet['UF_NAME']) . '</td>';
+        echo '<td>' . cabinetEditorHtml((string)$cabinet['OFFICE_NAME']) . '</td>';
+        echo '<td>' . (int)$cabinet['UF_WORKPLACES'] . '</td>';
+        echo '<td>' . cabinetEditorHtml((string)($cabinet['UF_FLEX_WORKPLACES'] ?? '')) . '</td>';
+        echo '</tr>';
+    }
+    echo '</table>';
+    exit;
 }
 
-$organizations = cabinetEditorLoadOrganizations();
-$nextCabinetId = cabinetEditorGetNextCabinetId($cabinetClass);
+$offices = cabinetEditorGetOfficeEnums();
+$search = trim((string)$request->getQuery('q'));
+$officeFilter = (int)$request->getQuery('office');
+$sortDirection = mb_strtolower((string)$request->getQuery('sort')) === 'desc' ? 'DESC' : 'ASC';
 
 if ($request->isPost()) {
     if (!check_bitrix_sessid()) {
         $errors[] = 'Сессия истекла. Обновите страницу и повторите действие.';
     } else {
         $action = (string)$request->getPost('action');
+        $workplaces = (int)$request->getPost('workplaces');
+        $flexErrors = [];
+        $flexWorkplaces = cabinetEditorNormalizeFlexWorkplaces((string)$request->getPost('flex_workplaces'), $workplaces, $flexErrors);
+        $errors = array_merge($errors, $flexErrors);
 
-        if ($action === 'add' || $action === 'save') {
-            $rowId = $action === 'save' ? (int)$request->getPost('row_id') : 0;
-            $cabinetId = trim((string)$request->getPost('cabinet_id'));
-            $cabinetName = trim((string)$request->getPost('name'));
-            $workplaces = max(0, (int)$request->getPost('workplaces'));
-            $orgIds = cabinetEditorNormalizeOrgIds($request->getPost('org_ids'));
+        if ($workplaces <= 0) {
+            $errors[] = 'Укажите количество рабочих мест больше нуля.';
+        }
 
-            if ($cabinetId === '') {
-                $errors[] = 'Укажите ID кабинета.';
+        if ($action === 'add') {
+            $officeId = (int)$request->getPost('office_id');
+            $cabinetNumber = trim((string)$request->getPost('cabinet_number'));
+            $officeName = isset($offices[$officeId]) ? $offices[$officeId] : '';
+            $cabinetName = $officeName !== '' && $cabinetNumber !== '' ? cabinetEditorBuildCabinetName($officeName, $cabinetNumber) : '';
+
+            if ($officeId <= 0 || $officeName === '') {
+                $errors[] = 'Выберите офис.';
             }
-            if ($cabinetName === '') {
-                $errors[] = 'Укажите название кабинета.';
+            if ($cabinetNumber === '') {
+                $errors[] = 'Укажите номер кабинета.';
             }
-            if (cabinetEditorFindDuplicateCabinetId($cabinetId, $cabinetClass, $rowId) > 0) {
-                $errors[] = 'ID кабинета «' . cabinetEditorHtml($cabinetId) . '» уже используется.';
+            if ($cabinetName !== '' && cabinetEditorFindDuplicateName($cabinetName, $cabinetClass) > 0) {
+                $errors[] = 'Кабинет «' . cabinetEditorHtml($cabinetName) . '» уже есть в справочнике.';
             }
 
             if (empty($errors)) {
-                $fields = [
-                    'UF_CABINET_ID' => $cabinetId,
+                $result = $cabinetClass::add([
+                    'UF_CABINET_ID' => cabinetEditorGetNextCabinetId($cabinetClass),
                     'UF_NAME' => $cabinetName,
                     'UF_WORKPLACES' => $workplaces,
-                    'UF_ORG' => $orgIds,
-                ];
-
-                if ($action === 'add') {
-                    $result = $cabinetClass::add($fields);
-                    if ($result->isSuccess()) {
-                        $messages[] = 'Кабинет добавлен.';
-                    } else {
-                        $errors = array_merge($errors, $result->getErrorMessages());
-                    }
+                    'UF_FLEX_WORKPLACES' => $flexWorkplaces,
+                    'UF_OFFICE' => $officeId,
+                ]);
+                if ($result->isSuccess()) {
+                    $messages[] = 'Кабинет добавлен: ' . $cabinetName . '.';
                 } else {
-                    if ($rowId <= 0) {
-                        $errors[] = 'Не найден ID строки для сохранения.';
-                    } else {
-                        $result = $cabinetClass::update($rowId, $fields);
-                        if ($result->isSuccess()) {
-                            $messages[] = 'Кабинет сохранен.';
-                        } else {
-                            $errors = array_merge($errors, $result->getErrorMessages());
-                        }
-                    }
+                    $errors = array_merge($errors, $result->getErrorMessages());
                 }
             }
-        } elseif ($action === 'bulk_assign') {
-            $selectedIds = $request->getPost('selected_ids');
-            if (!is_array($selectedIds)) {
-                $selectedIds = [];
-            }
-            $selectedIds = array_values(array_filter(array_map('intval', $selectedIds)));
-            $bulkOrgIds = cabinetEditorNormalizeOrgIds($request->getPost('bulk_org_ids'));
-            $bulkMode = (string)$request->getPost('bulk_mode') === 'replace' ? 'replace' : 'append';
-
-            if (empty($selectedIds)) {
-                $errors[] = 'Отметьте хотя бы один кабинет для массовой привязки.';
+        } elseif ($action === 'save') {
+            $rowId = (int)$request->getPost('row_id');
+            if ($rowId <= 0) {
+                $errors[] = 'Не найден ID строки для сохранения.';
             }
 
             if (empty($errors)) {
-                $updatedCount = 0;
-                foreach ($selectedIds as $selectedId) {
-                    $row = $cabinetClass::getById($selectedId)->fetch();
-                    if (!$row) {
-                        continue;
-                    }
-
-                    $currentOrgIds = cabinetEditorNormalizeOrgIds($row['UF_ORG']);
-                    $newOrgIds = $bulkMode === 'replace'
-                        ? $bulkOrgIds
-                        : cabinetEditorNormalizeOrgIds(array_merge($currentOrgIds, $bulkOrgIds));
-
-                    $result = $cabinetClass::update($selectedId, ['UF_ORG' => $newOrgIds]);
-                    if ($result->isSuccess()) {
-                        $updatedCount++;
-                    } else {
-                        $errors = array_merge($errors, $result->getErrorMessages());
-                    }
-                }
-                if ($updatedCount > 0) {
-                    $messages[] = 'Массовая привязка выполнена. Обновлено кабинетов: ' . $updatedCount . '.';
+                $result = $cabinetClass::update($rowId, [
+                    'UF_WORKPLACES' => $workplaces,
+                    'UF_FLEX_WORKPLACES' => $flexWorkplaces,
+                ]);
+                if ($result->isSuccess()) {
+                    $messages[] = 'Рабочие места кабинета сохранены.';
+                } else {
+                    $errors = array_merge($errors, $result->getErrorMessages());
                 }
             }
         }
     }
-
-    $nextCabinetId = cabinetEditorGetNextCabinetId($cabinetClass);
 }
 
-$search = trim((string)$request->getQuery('q'));
-$cabinets = [];
-$rows = $cabinetClass::getList([
-    'select' => ['ID', 'UF_CABINET_ID', 'UF_NAME', 'UF_WORKPLACES', 'UF_ORG'],
-    'order' => ['UF_NAME' => 'ASC', 'ID' => 'ASC'],
-]);
-while ($row = $rows->fetch()) {
-    $row['UF_ORG'] = cabinetEditorNormalizeOrgIds($row['UF_ORG']);
-    if ($search !== '') {
-        $haystack = mb_strtolower((string)$row['UF_CABINET_ID'] . ' ' . (string)$row['UF_NAME']);
-        if (mb_strpos($haystack, mb_strtolower($search)) === false) {
-            continue;
-        }
-    }
-    $cabinets[] = $row;
+$cabinets = cabinetEditorLoadCabinets($cabinetClass, $offices, $search, $officeFilter, $sortDirection);
+if ((string)$request->getQuery('export') === 'excel') {
+    cabinetEditorExportExcel($cabinets);
 }
 
-$APPLICATION->SetTitle('Редактор кабинетов');
+$APPLICATION->SetTitle('Рабочее место администратора АХС');
+$sortToggle = $sortDirection === 'ASC' ? 'desc' : 'asc';
 ?>
 <!doctype html>
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Редактор кабинетов</title>
+    <title>Рабочее место администратора АХС</title>
     <style>
-        body { margin: 0; padding: 24px; background: #f5f7fb; color: #1f2937; font: 14px/1.45 Arial, sans-serif; }
-        h1 { margin: 0 0 18px; font-size: 26px; }
-        h2 { margin: 0 0 14px; font-size: 19px; }
+        body { margin: 0; padding: 20px; background: #f5f7fb; color: #1f2937; font: 13px/1.4 Arial, sans-serif; }
+        h1 { margin: 0 0 14px; font-size: 24px; }
+        h2 { margin: 0 0 12px; font-size: 18px; }
         a { color: #2563eb; }
-        .panel { margin-bottom: 18px; padding: 18px; background: #fff; border: 1px solid #d9e2ef; border-radius: 12px; box-shadow: 0 2px 8px rgba(15, 23, 42, .05); }
-        .grid { display: grid; grid-template-columns: minmax(150px, 220px) minmax(240px, 1fr) minmax(110px, 150px); gap: 12px; align-items: start; }
-        .bulk-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) auto; gap: 16px; align-items: end; }
-        label.title { display: block; margin-bottom: 5px; color: #4b5563; font-weight: 700; }
-        input[type="text"], input[type="number"], select { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; }
-        button, .button { display: inline-block; padding: 9px 14px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; font-weight: 700; cursor: pointer; text-decoration: none; }
-        button.secondary { background: #475569; }
+        .panel { margin-bottom: 14px; padding: 14px; background: #fff; border: 1px solid #d9e2ef; border-radius: 10px; box-shadow: 0 2px 8px rgba(15, 23, 42, .05); }
+        .top-links { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+        .grid { display: grid; grid-template-columns: minmax(210px, 1.2fr) minmax(130px, .7fr) minmax(120px, .5fr) minmax(170px, .8fr) auto; gap: 10px; align-items: end; }
+        .toolbar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+        label.title { display: block; margin-bottom: 4px; color: #4b5563; font-weight: 700; }
+        input[type="text"], input[type="number"], select { box-sizing: border-box; width: 100%; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; }
+        button, .button { display: inline-block; padding: 8px 12px; border: 0; border-radius: 7px; background: #2563eb; color: #fff; font-weight: 700; cursor: pointer; text-decoration: none; white-space: nowrap; }
+        .button.secondary, button.secondary { background: #475569; }
         button.success { background: #16a34a; }
         table { width: 100%; border-collapse: collapse; background: #fff; }
-        th, td { padding: 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; text-align: left; }
-        th { position: sticky; top: 0; z-index: 1; background: #f8fafc; color: #475569; }
+        th, td { padding: 7px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; text-align: left; }
+        th { position: sticky; top: 0; z-index: 1; background: #f8fafc; color: #475569; font-size: 12px; }
         tr:hover td { background: #f8fafc; }
-        .row-form { display: contents; }
-        .org-list { max-height: 190px; overflow: auto; padding: 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fbfdff; }
-        .org-list label { display: block; margin: 0 0 6px; }
-        .default-org { font-weight: 700; }
-        .badge { display: inline-block; margin-left: 4px; padding: 2px 6px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 12px; }
-        .muted { color: #64748b; font-size: 12px; }
-        .messages, .errors { margin-bottom: 18px; padding: 12px 14px; border-radius: 10px; }
+        .table-wrap { overflow: auto; border: 1px solid #d9e2ef; border-radius: 10px; max-height: 68vh; }
+        .messages, .errors { margin-bottom: 14px; padding: 10px 12px; border-radius: 9px; }
         .messages { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; }
         .errors { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-        .toolbar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
-        .toolbar .search { min-width: 280px; }
-        .table-wrap { overflow: auto; border: 1px solid #d9e2ef; border-radius: 12px; }
-        .actions { white-space: nowrap; }
-        .hint { margin-top: 8px; color: #64748b; font-size: 12px; }
+        .muted { color: #64748b; font-size: 12px; }
+        .id-col { width: 80px; }
+        .name-col { min-width: 290px; }
+        .office-col { min-width: 190px; }
+        .num-col { width: 110px; }
+        .flex-col { width: 170px; }
+        .actions { width: 110px; white-space: nowrap; }
     </style>
-    <script>
-        function cabinetEditorToggleAll(source) {
-            document.querySelectorAll('.cabinet-select').forEach(function (checkbox) {
-                checkbox.checked = source.checked;
-            });
-        }
-    </script>
 </head>
 <body>
-    <h1>Редактор кабинетов</h1>
+    <h1>Рабочее место администратора АХС</h1>
+    <div class="top-links">
+        <a class="button secondary" href="<?= cabinetEditorHtml(REPORT_URL) ?>">Отчеты по рабочим местам</a>
+        <a class="button secondary" href="/bitrix/admin/highloadblock_rows_list.php?ENTITY_ID=74&amp;lang=ru">Справочник кабинетов HL-блока</a>
+    </div>
 
     <?php if (!empty($messages)): ?>
         <div class="messages"><?php foreach ($messages as $message): ?><div><?= cabinetEditorHtml((string)$message) ?></div><?php endforeach; ?></div>
@@ -337,78 +331,66 @@ $APPLICATION->SetTitle('Редактор кабинетов');
 
     <div class="panel">
         <h2>Добавить кабинет</h2>
-        <form method="post">
+        <form method="post" class="grid">
             <?= bitrix_sessid_post() ?>
             <input type="hidden" name="action" value="add">
-            <div class="grid">
-                <div>
-                    <label class="title" for="new_cabinet_id">ID кабинета</label>
-                    <input id="new_cabinet_id" type="text" name="cabinet_id" value="<?= cabinetEditorHtml($nextCabinetId) ?>" required>
-                    <div class="hint">Заполняется автоматически как максимум + 1, но поле можно изменить.</div>
-                </div>
-                <div>
-                    <label class="title" for="new_name">Название кабинета</label>
-                    <input id="new_name" type="text" name="name" placeholder="Например: Московский, 601" required>
-                </div>
-                <div>
-                    <label class="title" for="new_workplaces">Количество мест</label>
-                    <input id="new_workplaces" type="number" min="0" step="1" name="workplaces" value="0">
-                </div>
+            <div>
+                <label class="title" for="new_office">Офис *</label>
+                <select id="new_office" name="office_id" required>
+                    <option value="">Выберите офис</option>
+                    <?php foreach ($offices as $officeId => $officeName): ?>
+                        <option value="<?= (int)$officeId ?>"><?= cabinetEditorHtml($officeName) ?></option>
+                    <?php endforeach; ?>
+                </select>
             </div>
-            <div style="margin-top:12px;">
-                <label class="title">Юридические лица</label>
-                <?= cabinetEditorRenderOrgCheckboxes($organizations, [DEFAULT_ORG_ELEMENT_ID], 'org_ids', 'new_org') ?>
-                <div class="hint">Юр. лицо по умолчанию всегда выбрано и не может быть отвязано.</div>
+            <div>
+                <label class="title" for="new_number">Номер кабинета *</label>
+                <input id="new_number" type="text" name="cabinet_number" placeholder="609б" required>
             </div>
-            <div style="margin-top:14px;"><button class="success" type="submit">Добавить кабинет</button></div>
+            <div>
+                <label class="title" for="new_workplaces">Мест *</label>
+                <input id="new_workplaces" type="number" min="1" step="1" name="workplaces" value="1" required>
+            </div>
+            <div>
+                <label class="title" for="new_flex">Гибридные места</label>
+                <input id="new_flex" type="text" name="flex_workplaces" placeholder="1,5,12">
+            </div>
+            <div><button class="success" type="submit">Добавить</button></div>
         </form>
+        <div class="muted">Название будет создано автоматически по шаблону: «Офис, каб. номер». ID кабинета будет присвоен как максимум UF_CABINET_ID + 1.</div>
     </div>
 
     <div class="panel">
-        <h2>Массовая привязка отмеченных кабинетов</h2>
-        <form method="post" id="bulkForm">
-            <?= bitrix_sessid_post() ?>
-            <input type="hidden" name="action" value="bulk_assign">
-            <div class="bulk-grid">
-                <div>
-                    <label class="title">Юридические лица для привязки</label>
-                    <?= cabinetEditorRenderOrgCheckboxes($organizations, [DEFAULT_ORG_ELEMENT_ID], 'bulk_org_ids', 'bulk_org') ?>
-                </div>
-                <div>
-                    <label class="title" for="bulk_mode">Режим</label>
-                    <select id="bulk_mode" name="bulk_mode">
-                        <option value="append">Добавить к текущим</option>
-                        <option value="replace">Заменить текущие</option>
-                    </select>
-                    <div class="hint">При замене обязательное юр. лицо останется привязанным.</div>
-                </div>
-                <div><button class="secondary" type="submit">Применить к отмеченным</button></div>
+        <form method="get" class="toolbar">
+            <div style="min-width:280px;">
+                <label class="title" for="q">Поиск по названию</label>
+                <input id="q" type="text" name="q" value="<?= cabinetEditorHtml($search) ?>" placeholder="Введите часть названия">
             </div>
+            <div style="min-width:230px;">
+                <label class="title" for="office">Фильтр по офису</label>
+                <select id="office" name="office">
+                    <option value="0">Все офисы</option>
+                    <?php foreach ($offices as $officeId => $officeName): ?>
+                        <option value="<?= (int)$officeId ?>"<?= (int)$officeId === $officeFilter ? ' selected' : '' ?>><?= cabinetEditorHtml($officeName) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <input type="hidden" name="sort" value="<?= cabinetEditorHtml(mb_strtolower($sortDirection)) ?>">
+            <button type="submit">Применить</button>
+            <a class="button secondary" href="<?= cabinetEditorHtml($request->getRequestedPage()) ?>">Сбросить</a>
+            <a class="button" href="?q=<?= urlencode($search) ?>&amp;office=<?= (int)$officeFilter ?>&amp;sort=<?= cabinetEditorHtml(mb_strtolower($sortDirection)) ?>&amp;export=excel">Выгрузить в Excel</a>
         </form>
-    </div>
-
-    <div class="panel">
-        <div class="toolbar">
-            <form method="get" class="toolbar">
-                <div class="search">
-                    <label class="title" for="q">Поиск по ID или названию</label>
-                    <input id="q" type="text" name="q" value="<?= cabinetEditorHtml($search) ?>" placeholder="Введите часть названия или ID">
-                </div>
-                <button type="submit">Найти</button>
-                <?php if ($search !== ''): ?><a class="button" href="<?= cabinetEditorHtml($request->getRequestedPage()) ?>">Сбросить</a><?php endif; ?>
-            </form>
-        </div>
-        <p class="muted">Всего кабинетов в списке: <?= count($cabinets) ?>.</p>
+        <p class="muted">Найдено кабинетов: <?= count($cabinets) ?>. Сотрудник АХС может менять только количество рабочих мест и номера гибридных мест.</p>
         <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
-                        <th><input type="checkbox" onclick="cabinetEditorToggleAll(this)" title="Отметить все"></th>
-                        <th>ID кабинета</th>
-                        <th>Название</th>
-                        <th>Мест</th>
-                        <th>Юридические лица</th>
-                        <th>Действия</th>
+                        <th class="id-col">ID</th>
+                        <th class="name-col"><a href="?q=<?= urlencode($search) ?>&amp;office=<?= (int)$officeFilter ?>&amp;sort=<?= cabinetEditorHtml($sortToggle) ?>">Название <?= $sortDirection === 'ASC' ? '↑' : '↓' ?></a></th>
+                        <th class="office-col">Офис</th>
+                        <th class="num-col">Мест</th>
+                        <th class="flex-col">Гибридные места</th>
+                        <th class="actions">Действия</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -418,20 +400,18 @@ $APPLICATION->SetTitle('Редактор кабинетов');
                 <?php foreach ($cabinets as $cabinet): ?>
                     <?php $rowId = (int)$cabinet['ID']; ?>
                     <tr>
-                        <td>
-                            <input form="bulkForm" class="cabinet-select" type="checkbox" name="selected_ids[]" value="<?= $rowId ?>">
-                        </td>
+                        <td><?= cabinetEditorHtml((string)$cabinet['UF_CABINET_ID']) ?></td>
+                        <td><?= cabinetEditorHtml((string)$cabinet['UF_NAME']) ?></td>
+                        <td><?= cabinetEditorHtml((string)$cabinet['OFFICE_NAME']) ?></td>
                         <td>
                             <form method="post" id="rowForm<?= $rowId ?>">
                                 <?= bitrix_sessid_post() ?>
                                 <input type="hidden" name="action" value="save">
                                 <input type="hidden" name="row_id" value="<?= $rowId ?>">
-                                <input type="text" name="cabinet_id" value="<?= cabinetEditorHtml((string)$cabinet['UF_CABINET_ID']) ?>" required>
+                                <input type="number" min="1" step="1" name="workplaces" value="<?= (int)$cabinet['UF_WORKPLACES'] ?>" required>
                             </form>
                         </td>
-                        <td><input form="rowForm<?= $rowId ?>" type="text" name="name" value="<?= cabinetEditorHtml((string)$cabinet['UF_NAME']) ?>" required></td>
-                        <td><input form="rowForm<?= $rowId ?>" type="number" min="0" step="1" name="workplaces" value="<?= (int)$cabinet['UF_WORKPLACES'] ?>"></td>
-                        <td><?= cabinetEditorRenderOrgCheckboxes($organizations, $cabinet['UF_ORG'], 'org_ids', 'row_' . $rowId . '_org', 'rowForm' . $rowId) ?></td>
+                        <td><input form="rowForm<?= $rowId ?>" type="text" name="flex_workplaces" value="<?= cabinetEditorHtml((string)($cabinet['UF_FLEX_WORKPLACES'] ?? '')) ?>" placeholder="1,5,12"></td>
                         <td class="actions"><button form="rowForm<?= $rowId ?>" type="submit">Сохранить</button></td>
                     </tr>
                 <?php endforeach; ?>
