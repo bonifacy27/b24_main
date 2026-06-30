@@ -1097,6 +1097,7 @@ foreach ($userCabinetMap as $userId => $cabName) {
 ksort($legalEntityAssignedWorkplaces, SORT_NATURAL | SORT_FLAG_CASE);
 
 $otherVisitorsLegalSummary = [];
+$otherVisitorsAssignedWorkplaces = [];
 foreach ($unknownEmployees as $employee) {
     $legalEntityTitle = trim((string)($employee['LEGAL_ENTITY'] ?? ''));
     $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
@@ -1109,6 +1110,13 @@ foreach ($unknownEmployees as $employee) {
         $otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle] = 0;
     }
     $otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle]++;
+
+    if (!isset($otherVisitorsAssignedWorkplaces[$dateKey])) { $otherVisitorsAssignedWorkplaces[$dateKey] = []; }
+    if (!isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntityTitle])) { $otherVisitorsAssignedWorkplaces[$dateKey][$legalEntityTitle] = []; }
+    $otherVisitorAssignedKey = mb_strtolower(trim((string)($employee['EMPLOYEE'] ?? ''))) . '|' . $cabNorm;
+    if ($otherVisitorAssignedKey !== '|') {
+        $otherVisitorsAssignedWorkplaces[$dateKey][$legalEntityTitle][$otherVisitorAssignedKey] = true;
+    }
 }
 
 $legalEntitySummary = [];
@@ -1222,6 +1230,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
             <?php
             $occupied = (int)$occupied;
             $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
+            $assigned += isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) && is_array($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) ? count($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) : 0;
             $free = max(0, $assigned - $occupied);
             $utilization = $assigned > 0 ? round(($occupied / $assigned) * 100, 1) : 0;
             $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
