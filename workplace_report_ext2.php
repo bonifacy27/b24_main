@@ -1082,25 +1082,41 @@ foreach ($summaryCabinets as $cabData) {
     $officeWorkplacesTotal += (int)$cabData['WORKPLACES'];
 }
 
+$legalEntityAssignedWorkplaces = [];
+foreach ($userCabinetMap as $userId => $cabName) {
+    $cabNorm = $normalizeCabinet((string)$cabName);
+    if ($cabNorm === '' || !isset($summaryCabinets[$cabNorm])) { continue; }
+
+    $legalEntityTitle = isset($userLegalEntityMap[(int)$userId]) && $userLegalEntityMap[(int)$userId] !== '' ? $userLegalEntityMap[(int)$userId] : $undefinedLegalEntity;
+    if (!isset($legalEntityAssignedWorkplaces[$legalEntityTitle])) {
+        $legalEntityAssignedWorkplaces[$legalEntityTitle] = 0;
+    }
+    $legalEntityAssignedWorkplaces[$legalEntityTitle]++;
+}
+ksort($legalEntityAssignedWorkplaces, SORT_NATURAL | SORT_FLAG_CASE);
+
 $legalEntitySummary = [];
 foreach ($periodDays as $dateKey) {
     if (!isset($legalEntitySummary[$dateKey])) { $legalEntitySummary[$dateKey] = []; }
     foreach ($summaryCabinets as $cabNorm => $cabData) {
         $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : [];
         $legalCounts = isset($dayData['BY_LEGAL_ENTITY']) && is_array($dayData['BY_LEGAL_ENTITY']) ? $dayData['BY_LEGAL_ENTITY'] : [];
-        $shortLegalCounts = isset($dayData['SHORT_BY_LEGAL_ENTITY']) && is_array($dayData['SHORT_BY_LEGAL_ENTITY']) ? $dayData['SHORT_BY_LEGAL_ENTITY'] : [];
-        foreach ([$legalCounts, $shortLegalCounts] as $countsByLegalEntity) {
-            foreach ($countsByLegalEntity as $legalEntity => $count) {
-                $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
-                if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
-                    $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
-                }
-                $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
+        foreach ($legalCounts as $legalEntity => $count) {
+            $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
+            if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+                $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
             }
+            $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
+        }
+    }
+    foreach ($legalEntityAssignedWorkplaces as $legalEntityTitle => $assignedCount) {
+        if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+            $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
         }
     }
     ksort($legalEntitySummary[$dateKey], SORT_NATURAL | SORT_FLAG_CASE);
 }
+$legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
 <section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
@@ -1158,8 +1174,9 @@ foreach ($periodDays as $dateKey) {
     <tr>
         <th>Дата</th>
         <th>ЮЛ</th>
-        <th class="col-narrow">Кол-во рабочих мест в офисе</th>
-        <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4 ч)</th>
+        <th class="col-narrow">Кол-во рабочих мест в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?></th>
+        <th class="col-narrow">Кол-во привязанных РМ в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> к ЮЛ</th>
+        <th class="col-narrow">Кол-во сотрудников в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> (&gt;4 ч)</th>
         <th class="col-narrow">Кол-во свободных рм</th>
         <th>% загрузки офиса</th>
     </tr>
@@ -1168,58 +1185,48 @@ foreach ($periodDays as $dateKey) {
     <?php
     $legalEntitySummaryTotals = [
         'WORKPLACES_BY_DATE' => [],
+        'ASSIGNED_BY_DATE_LEGAL_ENTITY' => [],
         'OCCUPIED' => 0,
-        'FREE_BY_DATE' => [],
+        'FREE_BY_DATE_LEGAL_ENTITY' => [],
     ];
     ?>
     <?php foreach ($legalEntitySummary as $dateKey => $legalEntityCounts): ?>
         <?php if (empty($legalEntityCounts)): ?>
+            <?php $legalEntityCounts = [$undefinedLegalEntity => 0]; ?>
+        <?php endif; ?>
+        <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
             <?php
-            $free = max(0, $officeWorkplacesTotal);
+            $occupied = (int)$occupied;
+            $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
+            $free = max(0, $assigned - $occupied);
+            $utilization = $assigned > 0 ? round(($occupied / $assigned) * 100, 1) : 0;
             $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-            $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = $free;
+            $legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $assigned;
+            $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
+            $legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $free;
             ?>
             <tr>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                <td><?=htmlspecialcharsbx($undefinedLegalEntity)?></td>
+                <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
                 <td><?= $officeWorkplacesTotal ?></td>
-                <td>0</td>
+                <td><?= $assigned ?></td>
+                <td><?= $occupied ?></td>
                 <td><?= $free ?></td>
-                <td>0%</td>
+                <td><?= $utilization ?>%</td>
             </tr>
-        <?php else: ?>
-            <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
-                <?php
-                $occupied = (int)$occupied;
-                $free = max(0, $officeWorkplacesTotal - $occupied);
-                $utilization = $officeWorkplacesTotal > 0 ? round(($occupied / $officeWorkplacesTotal) * 100, 1) : 0;
-                $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-                $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
-                if (!isset($legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey])) {
-                    $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-                }
-                $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = max(0, $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] - $occupied);
-                ?>
-                <tr>
-                    <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                    <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
-                    <td><?= $officeWorkplacesTotal ?></td>
-                    <td><?= $occupied ?></td>
-                    <td><?= $free ?></td>
-                    <td><?= $utilization ?>%</td>
-                </tr>
-            <?php endforeach; ?>
-        <?php endif; ?>
+        <?php endforeach; ?>
     <?php endforeach; ?>
     <?php
     $legalEntityTotalWorkplaces = array_sum($legalEntitySummaryTotals['WORKPLACES_BY_DATE']);
-    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE']);
-    $totalUtilization = $legalEntityTotalWorkplaces > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalWorkplaces) * 100, 1) : 0;
+    $legalEntityTotalAssigned = array_sum($legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY']);
+    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY']);
+    $totalUtilization = $legalEntityTotalAssigned > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalAssigned) * 100, 1) : 0;
     ?>
     <tr style="font-weight: bold;">
         <td>Итого</td>
         <td></td>
         <td><?= (int)$legalEntityTotalWorkplaces ?></td>
+        <td><?= (int)$legalEntityTotalAssigned ?></td>
         <td><?= (int)$legalEntitySummaryTotals['OCCUPIED'] ?></td>
         <td><?= (int)$legalEntityTotalFree ?></td>
         <td><?= $totalUtilization ?>%</td>
