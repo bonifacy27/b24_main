@@ -848,6 +848,29 @@ header('Content-Type: text/html; charset=UTF-8');
         .modal-table th, .modal-table td { border: 1px solid #d8e0ea; padding: 6px 8px; }
         .modal-status-in { color: #166534; font-weight: 600; }
         .modal-status-out { color: #991b1b; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 14px 0 18px; }
+        .dashboard-card { border: 1px solid #d8e0ea; border-radius: 14px; padding: 16px; background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%); box-shadow: 0 8px 24px rgba(15, 79, 147, .08); }
+        .dashboard-card-title { margin: 0 0 8px; color: #52616f; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+        .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
+        .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
+        .dashboard-section { margin: 18px 0 24px; }
+        .dashboard-section h3 { margin: 0 0 12px; font-size: 18px; }
+        .office-load-chart { display: grid; gap: 10px; max-width: 980px; }
+        .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
+        .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
+        .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
+        .cabinet-heatmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+        .cabinet-tile { border: 1px solid #d8e0ea; border-radius: 12px; padding: 12px; background: #fff; }
+        .cabinet-tile-title { font-weight: 700; margin-bottom: 6px; }
+        .cabinet-tile-meta { display: flex; justify-content: space-between; gap: 10px; color: #52616f; margin-bottom: 8px; }
+        .cabinet-progress { height: 10px; background: #edf4fb; border-radius: 999px; overflow: hidden; }
+        .cabinet-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); }
+        .dashboard-muted { color: #7a8794; }
+        .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
+        .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
+        .date-group-row.is-collapsed .date-group-toggle::after { content: " раскрыть"; }
+        .date-group-row:not(.is-collapsed) .date-group-toggle::after { content: " свернуть"; }
+        .date-detail-row.is-hidden { display: none; }
     </style>
 </head>
 <body>
@@ -869,12 +892,14 @@ header('Content-Type: text/html; charset=UTF-8');
     <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
     <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
     <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
+    <button type="button" class="tab-button" data-tab-target="dashboard" role="tab" aria-selected="false">Дашборд загрузки</button>
     <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
 </div>
 
 <section class="tab-pane is-active" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
+<p class="dashboard-muted">Если выбран период, строки сгруппированы по датам. Нажмите на строку даты, чтобы раскрыть или свернуть детализацию за день.</p>
 <table id="employees-report-table">
     <thead>
     <tr>
@@ -892,35 +917,41 @@ header('Content-Type: text/html; charset=UTF-8');
     </thead>
     <tbody>
     <?php
-    $mainTableTotals = [
-        'WORKPLACES_BY_CABINET' => [],
-        'ASSIGNED_BY_CABINET' => [],
-        'SHORT_OFFICE_BY_CABINET_DATE' => [],
-        'OFFICE_BY_CABINET_DATE' => [],
-    ];
-    foreach ($departments as $departmentId => $department) {
-        if ((int)$department['UF_HEAD'] <= 0) { continue; }
-        $headUserId = (int)$department['UF_HEAD'];
-        $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
-        $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-        if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
+    $employeeRowsByDate = [];
+    foreach ($periodDays as $dateIndex => $dateKey) {
+        $dateGroupId = 'employees-date-' . $dateIndex;
+        $employeeRowsByDate[$dateKey] = [
+            'GROUP_ID' => $dateGroupId,
+            'ROWS' => [],
+            'TOTALS' => [
+                'WORKPLACES_BY_CABINET' => [],
+                'ASSIGNED_BY_CABINET' => [],
+                'SHORT_OFFICE_BY_CABINET' => [],
+                'OFFICE_BY_CABINET' => [],
+            ],
+        ];
 
-        $departmentCabinets = [];
-        foreach ($userCabinetMap as $userId => $cabName) {
-            if (!isset($userDepartmentsMap[$userId]) || !in_array($departmentId, $userDepartmentsMap[$userId], true)) { continue; }
-            $norm = $normalizeCabinet((string)$cabName);
-            if ($norm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
-            $departmentCabinets[$norm] = true;
-        }
+        foreach ($departments as $departmentId => $department) {
+            if ((int)$department['UF_HEAD'] <= 0) { continue; }
+            $headUserId = (int)$department['UF_HEAD'];
+            $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
+            $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+            if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
 
-        foreach (array_keys($departmentCabinets) as $cabNorm) {
-            if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+            $departmentCabinets = [];
+            foreach ($userCabinetMap as $userId => $cabName) {
+                if (!isset($userDepartmentsMap[$userId]) || !in_array($departmentId, $userDepartmentsMap[$userId], true)) { continue; }
+                $norm = $normalizeCabinet((string)$cabName);
+                if ($norm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
+                $departmentCabinets[$norm] = true;
+            }
 
-            $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
-            $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
-            $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
+            foreach (array_keys($departmentCabinets) as $cabNorm) {
+                if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
 
-            foreach ($periodDays as $dateKey) {
+                $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
+                $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
+                $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
@@ -928,100 +959,102 @@ header('Content-Type: text/html; charset=UTF-8');
                 sort($departmentLegalEntityNames, SORT_NATURAL | SORT_FLAG_CASE);
                 $departmentLegalEntitiesTitle = !empty($departmentLegalEntityNames) ? implode(', ', $departmentLegalEntityNames) : $undefinedLegalEntity;
                 $officeCount = array_sum($departmentLegalCounts);
-                $shortOfficeTotal = array_sum($shortDepartmentLegalCounts);
-                ?>
-                <tr>
-                    <td><?=htmlspecialcharsbx($departmentLegalEntitiesTitle)?></td>
-                    <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
-                    <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
-                    <?php
-                    $departmentAssignedUsersRaw = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
-                    $departmentAssignedUsers = [];
-                    foreach ($departmentAssignedUsersRaw as $assignedUserId => $assignedUserName) {
+                $shortOfficeCount = array_sum($shortDepartmentLegalCounts);
+
+                $departmentAssignedUsersRaw = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
+                $departmentAssignedUsers = [];
+                foreach ($departmentAssignedUsersRaw as $assignedUserId => $assignedUserName) {
+                    $assignedUserName = trim((string)$assignedUserName);
+                    if ($assignedUserName === '') { continue; }
+                    $assignedEmployeeKey = 'U' . (int)$assignedUserId;
+                    $isAssignedUserInOffice = isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey]);
+                    $departmentAssignedUsers[] = [
+                        'NAME' => $assignedUserName,
+                        'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
+                        'STATUS' => $isAssignedUserInOffice ? 'В офисе' : 'Не в офисе',
+                    ];
+                }
+                usort($departmentAssignedUsers, static function (array $left, array $right): int { return strnatcasecmp((string)$left['NAME'], (string)$right['NAME']); });
+                $departmentAssignedUsersJson = htmlspecialcharsbx(json_encode($departmentAssignedUsers, JSON_UNESCAPED_UNICODE));
+
+                $cabinetAssignedEmployees = [];
+                foreach ($departmentCabinetAssignedUsers as $assignedDepartmentId => $assignedCabinets) {
+                    if (!isset($assignedCabinets[$cabNorm]) || !isset($departments[$assignedDepartmentId])) { continue; }
+                    $assignedHeadUserId = (int)$departments[$assignedDepartmentId]['UF_HEAD'];
+                    $assignedHeadName = isset($headsMap[$assignedHeadUserId]) ? $headsMap[$assignedHeadUserId] : 'Не назначен';
+                    $assignedDepartmentSummary = isset($headOrgSummaryMap[$assignedHeadUserId]) ? $headOrgSummaryMap[$assignedHeadUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+                    foreach ($assignedCabinets[$cabNorm] as $assignedUserId => $assignedUserName) {
                         $assignedUserName = trim((string)$assignedUserName);
                         if ($assignedUserName === '') { continue; }
-                        $assignedEmployeeKey = 'U' . (int)$assignedUserId;
-                        $isAssignedUserInOffice = isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey]);
-                        $departmentAssignedUsers[] = [
-                            'NAME' => $assignedUserName,
+                        $cabinetAssignedEmployees[] = [
                             'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
-                            'STATUS' => $isAssignedUserInOffice ? 'В офисе' : 'Не в офисе',
+                            'CEO1' => (string)$assignedDepartmentSummary['CEO1'],
+                            'DEPARTMENT' => (string)$assignedDepartmentSummary['DEPARTMENT'],
+                            'HEAD' => $assignedHeadName,
+                            'EMPLOYEE' => $assignedUserName,
                         ];
                     }
-                    usort($departmentAssignedUsers, static function (array $left, array $right): int { return strnatcasecmp((string)$left['NAME'], (string)$right['NAME']); });
-                    $departmentAssignedUsersJson = htmlspecialcharsbx(json_encode($departmentAssignedUsers, JSON_UNESCAPED_UNICODE));
-                    ?>
-                    <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx($headName)?>" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$departmentAssignedUsersJson?>"><?=htmlspecialcharsbx($headName)?></button></td>
-                    <td><?=htmlspecialcharsbx($cabTitle)?></td>
-                    <?php
-                    $shortOfficeCount = (int)$shortOfficeTotal;
-                    $cabinetDateTotalKey = $cabNorm . '|' . $dateKey;
-                    $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
-                    $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
-                    $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
-                    $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
-                    $cabinetAssignedEmployees = [];
-                    foreach ($departmentCabinetAssignedUsers as $assignedDepartmentId => $assignedCabinets) {
-                        if (!isset($assignedCabinets[$cabNorm]) || !isset($departments[$assignedDepartmentId])) { continue; }
-                        $assignedHeadUserId = (int)$departments[$assignedDepartmentId]['UF_HEAD'];
-                        $assignedHeadName = isset($headsMap[$assignedHeadUserId]) ? $headsMap[$assignedHeadUserId] : 'Не назначен';
-                        $assignedDepartmentSummary = isset($headOrgSummaryMap[$assignedHeadUserId]) ? $headOrgSummaryMap[$assignedHeadUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-                        foreach ($assignedCabinets[$cabNorm] as $assignedUserId => $assignedUserName) {
-                            $assignedUserName = trim((string)$assignedUserName);
-                            if ($assignedUserName === '') { continue; }
-                            $cabinetAssignedEmployees[] = [
-                                'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
-                                'CEO1' => (string)$assignedDepartmentSummary['CEO1'],
-                                'DEPARTMENT' => (string)$assignedDepartmentSummary['DEPARTMENT'],
-                                'HEAD' => $assignedHeadName,
-                                'EMPLOYEE' => $assignedUserName,
-                            ];
-                        }
-                    }
-                    usort($cabinetAssignedEmployees, static function (array $left, array $right): int {
-                        $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
-                        if ($departmentCompare !== 0) { return $departmentCompare; }
-                        return strnatcasecmp((string)$left['EMPLOYEE'], (string)$right['EMPLOYEE']);
-                    });
-                    $cabinetAssignedEmployeesJson = htmlspecialcharsbx(json_encode($cabinetAssignedEmployees, JSON_UNESCAPED_UNICODE));
-                    ?>
-                    <td><?= $workplaces ?></td>
-                    <td><button type="button" class="head-modal-trigger assigned-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-employees="<?=$cabinetAssignedEmployeesJson?>"><?= $assignedCount ?></button></td>
-                    <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                    <td><?= $shortOfficeCount ?></td>
-                    <td><?= (int)$officeCount ?></td>
-                </tr>
-                <?php
+                }
+                usort($cabinetAssignedEmployees, static function (array $left, array $right): int {
+                    $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
+                    if ($departmentCompare !== 0) { return $departmentCompare; }
+                    return strnatcasecmp((string)$left['EMPLOYEE'], (string)$right['EMPLOYEE']);
+                });
+                $cabinetAssignedEmployeesJson = htmlspecialcharsbx(json_encode($cabinetAssignedEmployees, JSON_UNESCAPED_UNICODE));
+
+                $employeeRowsByDate[$dateKey]['ROWS'][] = [
+                    'LEGAL_ENTITY' => $departmentLegalEntitiesTitle,
+                    'CEO1' => (string)$departmentSummary['CEO1'],
+                    'DEPARTMENT' => (string)$departmentSummary['DEPARTMENT'],
+                    'HEAD' => $headName,
+                    'CABINET' => $cabTitle,
+                    'WORKPLACES' => $workplaces,
+                    'ASSIGNED' => $assignedCount,
+                    'DATE' => (new \DateTime($dateKey))->format('d.m.Y'),
+                    'SHORT_OFFICE' => (int)$shortOfficeCount,
+                    'OFFICE' => (int)$officeCount,
+                    'DEPARTMENT_EMPLOYEES_JSON' => $departmentAssignedUsersJson,
+                    'CABINET_EMPLOYEES_JSON' => $cabinetAssignedEmployeesJson,
+                ];
+                $employeeRowsByDate[$dateKey]['TOTALS']['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
+                $employeeRowsByDate[$dateKey]['TOTALS']['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
+                $employeeRowsByDate[$dateKey]['TOTALS']['SHORT_OFFICE_BY_CABINET'][$cabNorm] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+                $employeeRowsByDate[$dateKey]['TOTALS']['OFFICE_BY_CABINET'][$cabNorm] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
             }
         }
     }
     ?>
-    <?php
-    $mainTotalWorkplaces = array_sum($mainTableTotals['WORKPLACES_BY_CABINET']);
-    $mainTotalAssigned = array_sum($mainTableTotals['ASSIGNED_BY_CABINET']);
-    ?>
-    <?php foreach ($periodDays as $dateKey): ?>
+    <?php foreach ($employeeRowsByDate as $dateKey => $dateGroup): ?>
         <?php
-        $mainTotalShortOffice = 0;
-        $mainTotalOffice = 0;
-        foreach (array_keys($mainTableTotals['WORKPLACES_BY_CABINET']) as $totalCabNorm) {
-            $cabinetDateTotalKey = $totalCabNorm . '|' . $dateKey;
-            $mainTotalShortOffice += isset($mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey]) ? (int)$mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] : 0;
-            $mainTotalOffice += isset($mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey]) ? (int)$mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] : 0;
-        }
+        $dateTotals = $dateGroup['TOTALS'];
+        $dateWorkplacesTotal = array_sum($dateTotals['WORKPLACES_BY_CABINET']);
+        $dateAssignedTotal = array_sum($dateTotals['ASSIGNED_BY_CABINET']);
+        $dateShortTotal = array_sum($dateTotals['SHORT_OFFICE_BY_CABINET']);
+        $dateOfficeTotal = array_sum($dateTotals['OFFICE_BY_CABINET']);
+        $isCollapsed = count($periodDays) > 1;
         ?>
-        <tr style="font-weight: bold;">
-            <td>Итого</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td><?= (int)$mainTotalWorkplaces ?></td>
-            <td><?= (int)$mainTotalAssigned ?></td>
-            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-            <td><?= (int)$mainTotalShortOffice ?></td>
-            <td><?= (int)$mainTotalOffice ?></td>
+        <tr class="date-group-row<?= $isCollapsed ? ' is-collapsed' : '' ?>" data-date-group="<?=htmlspecialcharsbx((string)$dateGroup['GROUP_ID'])?>">
+            <td colspan="5"><button type="button" class="date-group-toggle" aria-expanded="<?= $isCollapsed ? 'false' : 'true' ?>"></button> <?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?> — строк: <?= count($dateGroup['ROWS']) ?></td>
+            <td><?= (int)$dateWorkplacesTotal ?></td>
+            <td><?= (int)$dateAssignedTotal ?></td>
+            <td>Итого за день</td>
+            <td><?= (int)$dateShortTotal ?></td>
+            <td><?= (int)$dateOfficeTotal ?></td>
         </tr>
+        <?php foreach ($dateGroup['ROWS'] as $row): ?>
+            <tr class="date-detail-row<?= $isCollapsed ? ' is-hidden' : '' ?>" data-date-group="<?=htmlspecialcharsbx((string)$dateGroup['GROUP_ID'])?>">
+                <td><?=htmlspecialcharsbx((string)$row['LEGAL_ENTITY'])?></td>
+                <td><?=htmlspecialcharsbx((string)$row['CEO1'])?></td>
+                <td><?=htmlspecialcharsbx((string)$row['DEPARTMENT'])?></td>
+                <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx((string)$row['HEAD'])?>" data-cabinet="<?=htmlspecialcharsbx((string)$row['CABINET'])?>" data-date="<?=htmlspecialcharsbx((string)$row['DATE'])?>" data-employees="<?=$row['DEPARTMENT_EMPLOYEES_JSON']?>"><?=htmlspecialcharsbx((string)$row['HEAD'])?></button></td>
+                <td><?=htmlspecialcharsbx((string)$row['CABINET'])?></td>
+                <td><?= (int)$row['WORKPLACES'] ?></td>
+                <td><button type="button" class="head-modal-trigger assigned-modal-trigger" data-cabinet="<?=htmlspecialcharsbx((string)$row['CABINET'])?>" data-employees="<?=$row['CABINET_EMPLOYEES_JSON']?>"><?= (int)$row['ASSIGNED'] ?></button></td>
+                <td><?=htmlspecialcharsbx((string)$row['DATE'])?></td>
+                <td><?= (int)$row['SHORT_OFFICE'] ?></td>
+                <td><?= (int)$row['OFFICE'] ?></td>
+            </tr>
+        <?php endforeach; ?>
     <?php endforeach; ?>
     </tbody>
 </table>
@@ -1178,8 +1211,118 @@ foreach ($periodDays as $dateKey) {
     }
     ksort($legalEntitySummary[$dateKey], SORT_NATURAL | SORT_FLAG_CASE);
 }
+
+$dashboardOfficeByDate = [];
+$dashboardCabinetTotals = [];
+$dashboardTotalWorkplaces = $officeWorkplacesTotal * max(1, count($periodDays));
+$dashboardTotalOccupied = 0;
+$dashboardPeakOfficeLoad = 0;
+$dashboardPeakOfficeDate = '';
+foreach ($periodDays as $dateKey) {
+    $dayOccupied = 0;
+    $dayShortOccupied = 0;
+    foreach ($summaryCabinets as $cabNorm => $cabData) {
+        $workplaces = (int)$cabData['WORKPLACES'];
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+        $occupied = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $shortOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+        $dayOccupied += $occupied;
+        $dayShortOccupied += $shortOccupied;
+        if (!isset($dashboardCabinetTotals[$cabNorm])) {
+            $dashboardCabinetTotals[$cabNorm] = [
+                'TITLE' => (string)$cabData['TITLE'],
+                'WORKPLACES_DAYS' => 0,
+                'OCCUPIED' => 0,
+                'SHORT_OCCUPIED' => 0,
+                'PEAK' => 0,
+            ];
+        }
+        $dashboardCabinetTotals[$cabNorm]['WORKPLACES_DAYS'] += $workplaces;
+        $dashboardCabinetTotals[$cabNorm]['OCCUPIED'] += $occupied;
+        $dashboardCabinetTotals[$cabNorm]['SHORT_OCCUPIED'] += $shortOccupied;
+        $dashboardCabinetTotals[$cabNorm]['PEAK'] = max((int)$dashboardCabinetTotals[$cabNorm]['PEAK'], $occupied);
+    }
+    $dayUtilization = $officeWorkplacesTotal > 0 ? round(($dayOccupied / $officeWorkplacesTotal) * 100, 1) : 0;
+    $dashboardOfficeByDate[$dateKey] = [
+        'OCCUPIED' => $dayOccupied,
+        'SHORT_OCCUPIED' => $dayShortOccupied,
+        'WORKPLACES' => $officeWorkplacesTotal,
+        'UTILIZATION' => $dayUtilization,
+    ];
+    $dashboardTotalOccupied += $dayOccupied;
+    if ($dayUtilization > $dashboardPeakOfficeLoad) {
+        $dashboardPeakOfficeLoad = $dayUtilization;
+        $dashboardPeakOfficeDate = $dateKey;
+    }
+}
+$dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
+foreach ($dashboardCabinetTotals as $cabNorm => $cabData) {
+    $dashboardCabinetTotals[$cabNorm]['UTILIZATION'] = (int)$cabData['WORKPLACES_DAYS'] > 0 ? round(((int)$cabData['OCCUPIED'] / (int)$cabData['WORKPLACES_DAYS']) * 100, 1) : 0;
+}
+uasort($dashboardCabinetTotals, static function (array $left, array $right): int {
+    if ((float)$left['UTILIZATION'] === (float)$right['UTILIZATION']) {
+        return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
+    }
+    return (float)$left['UTILIZATION'] < (float)$right['UTILIZATION'] ? 1 : -1;
+});
+$dashboardTopCabinets = array_slice($dashboardCabinetTotals, 0, 12, true);
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
+
+
+<section class="tab-pane" id="tab-dashboard" role="tabpanel">
+<h2>Дашборд загрузки кабинетов</h2>
+<div class="dashboard-grid">
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Средняя загрузка офиса</p>
+        <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
+        <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Пик загрузки офиса</p>
+        <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
+        <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Кабинетов в выборке</p>
+        <div class="dashboard-card-value"><?= count($summaryCabinets) ?></div>
+        <div class="dashboard-card-note">Рабочих мест: <?= (int)$officeWorkplacesTotal ?></div>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h3>Загрузка всего офиса по дням</h3>
+    <div class="office-load-chart">
+        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+            <div class="office-load-row">
+                <div><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></div>
+                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
+                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
+                </div>
+                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h3>Топ кабинетов по средней загрузке</h3>
+    <?php if (empty($dashboardTopCabinets)): ?>
+        <p class="dashboard-muted">Нет данных для построения дашборда.</p>
+    <?php else: ?>
+        <div class="cabinet-heatmap">
+            <?php foreach ($dashboardTopCabinets as $cabData): ?>
+                <div class="cabinet-tile">
+                    <div class="cabinet-tile-title"><?=htmlspecialcharsbx((string)$cabData['TITLE'])?></div>
+                    <div class="cabinet-tile-meta"><span>Средняя загрузка</span><strong><?= $cabData['UTILIZATION'] ?>%</strong></div>
+                    <div class="cabinet-progress"><div class="cabinet-progress-fill" style="width: <?= min(100, (float)$cabData['UTILIZATION']) ?>%;"></div></div>
+                    <div class="dashboard-card-note">Пик: <?= (int)$cabData['PEAK'] ?> чел.; &lt;4ч: <?= (int)$cabData['SHORT_OCCUPIED'] ?></div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+</div>
+</section>
 
 <section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
@@ -1321,6 +1464,22 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
             });
             document.querySelectorAll('.tab-pane').forEach(function (pane) {
                 pane.classList.toggle('is-active', pane.id === 'tab-' + target);
+            });
+        });
+    });
+
+
+    document.querySelectorAll('.date-group-row').forEach(function (row) {
+        row.addEventListener('click', function (event) {
+            if (event.target && event.target.closest && event.target.closest('.head-modal-trigger')) { return; }
+            var groupId = row.getAttribute('data-date-group');
+            if (!groupId) { return; }
+            var shouldCollapse = !row.classList.contains('is-collapsed');
+            row.classList.toggle('is-collapsed', shouldCollapse);
+            var toggle = row.querySelector('.date-group-toggle');
+            if (toggle) { toggle.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true'); }
+            document.querySelectorAll('.date-detail-row[data-date-group="' + groupId + '"]').forEach(function (detailRow) {
+                detailRow.classList.toggle('is-hidden', shouldCollapse);
             });
         });
     });
