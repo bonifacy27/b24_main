@@ -746,6 +746,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
             'CABINET' => $unknownCabinetTitle,
+            'CABINET_NORM' => $unknownCabinetNorm,
             'DATE' => $dateKey,
             'REASON' => $unknownReason,
             'CABINET_SOURCE' => $unknownCabinetSource !== '' ? $unknownCabinetSource : 'Другой источник',
@@ -1095,6 +1096,21 @@ foreach ($userCabinetMap as $userId => $cabName) {
 }
 ksort($legalEntityAssignedWorkplaces, SORT_NATURAL | SORT_FLAG_CASE);
 
+$otherVisitorsLegalSummary = [];
+foreach ($unknownEmployees as $employee) {
+    $legalEntityTitle = trim((string)($employee['LEGAL_ENTITY'] ?? ''));
+    $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+    $dateKey = (string)($employee['DATE'] ?? '');
+    if ($legalEntityTitle === '' || $legalEntityTitle === $undefinedLegalEntity || $cabNorm === '' || $dateKey === '' || !isset($summaryCabinets[$cabNorm])) { continue; }
+
+    if (!isset($otherVisitorsLegalSummary[$dateKey])) { $otherVisitorsLegalSummary[$dateKey] = []; }
+    if (!isset($otherVisitorsLegalSummary[$dateKey][$cabNorm])) { $otherVisitorsLegalSummary[$dateKey][$cabNorm] = []; }
+    if (!isset($otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle])) {
+        $otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle] = 0;
+    }
+    $otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle]++;
+}
+
 $legalEntitySummary = [];
 foreach ($periodDays as $dateKey) {
     if (!isset($legalEntitySummary[$dateKey])) { $legalEntitySummary[$dateKey] = []; }
@@ -1103,6 +1119,14 @@ foreach ($periodDays as $dateKey) {
         $legalCounts = isset($dayData['BY_LEGAL_ENTITY']) && is_array($dayData['BY_LEGAL_ENTITY']) ? $dayData['BY_LEGAL_ENTITY'] : [];
         foreach ($legalCounts as $legalEntity => $count) {
             $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
+            if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+                $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
+            }
+            $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
+        }
+        $otherVisitorsLegalCounts = isset($otherVisitorsLegalSummary[$dateKey][$cabNorm]) && is_array($otherVisitorsLegalSummary[$dateKey][$cabNorm]) ? $otherVisitorsLegalSummary[$dateKey][$cabNorm] : [];
+        foreach ($otherVisitorsLegalCounts as $legalEntityTitle => $count) {
+            if (isset($legalCounts[$legalEntityTitle])) { continue; }
             if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
                 $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
             }
