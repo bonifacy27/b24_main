@@ -894,6 +894,7 @@ header('Content-Type: text/html; charset=UTF-8');
 
 <section class="tab-pane is-active" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
+<p class="dashboard-muted">Для ускорения отчета строки сгруппированы по связке «ЮЛ + CEO-1 + подразделение + руководитель + кабинет» за весь выбранный период. Детализация по дням остается в сводных вкладках.</p>
 <table id="employees-report-table">
     <thead>
     <tr>
@@ -904,9 +905,9 @@ header('Content-Type: text/html; charset=UTF-8');
         <th>Кабинет</th>
         <th class="col-narrow">Кол-во рабочих мест в кабинете</th>
         <th class="col-narrow">Кол-во закрепленных чел. за кабинетом</th>
-        <th>Дата</th>
-        <th class="col-narrow">Кол-во сотрудников в офисе (&lt;4ч)</th>
-        <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4ч)</th>
+        <th>Период</th>
+        <th class="col-narrow">Сумма посещений (&lt;4ч)</th>
+        <th class="col-narrow">Сумма посещений (&gt;4ч)</th>
     </tr>
     </thead>
     <tbody>
@@ -914,8 +915,8 @@ header('Content-Type: text/html; charset=UTF-8');
     $mainTableTotals = [
         'WORKPLACES_BY_CABINET' => [],
         'ASSIGNED_BY_CABINET' => [],
-        'SHORT_OFFICE_BY_CABINET_DATE' => [],
-        'OFFICE_BY_CABINET_DATE' => [],
+        'SHORT_OFFICE_PERIOD' => 0,
+        'OFFICE_PERIOD' => 0,
     ];
     foreach ($departments as $departmentId => $department) {
         if ((int)$department['UF_HEAD'] <= 0) { continue; }
@@ -939,79 +940,84 @@ header('Content-Type: text/html; charset=UTF-8');
             $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
             $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
 
+            $departmentLegalEntityNames = isset($departmentCabinetLegalEntities[$departmentId][$cabNorm]) ? array_keys($departmentCabinetLegalEntities[$departmentId][$cabNorm]) : [];
+            sort($departmentLegalEntityNames, SORT_NATURAL | SORT_FLAG_CASE);
+            $departmentLegalEntitiesTitle = !empty($departmentLegalEntityNames) ? implode(', ', $departmentLegalEntityNames) : $undefinedLegalEntity;
+            $periodShortOfficeCount = 0;
+            $periodOfficeCount = 0;
             foreach ($periodDays as $dateKey) {
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
-                $departmentLegalEntityNames = isset($departmentCabinetLegalEntities[$departmentId][$cabNorm]) ? array_keys($departmentCabinetLegalEntities[$departmentId][$cabNorm]) : [];
-                sort($departmentLegalEntityNames, SORT_NATURAL | SORT_FLAG_CASE);
-                $departmentLegalEntitiesTitle = !empty($departmentLegalEntityNames) ? implode(', ', $departmentLegalEntityNames) : $undefinedLegalEntity;
-                $officeCount = array_sum($departmentLegalCounts);
-                $shortOfficeTotal = array_sum($shortDepartmentLegalCounts);
-                ?>
-                <tr>
-                    <td><?=htmlspecialcharsbx($departmentLegalEntitiesTitle)?></td>
-                    <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
-                    <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
-                    <?php
-                    $departmentAssignedUsersRaw = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
-                    $departmentAssignedUsers = [];
-                    foreach ($departmentAssignedUsersRaw as $assignedUserId => $assignedUserName) {
-                        $assignedUserName = trim((string)$assignedUserName);
-                        if ($assignedUserName === '') { continue; }
-                        $assignedEmployeeKey = 'U' . (int)$assignedUserId;
-                        $isAssignedUserInOffice = isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey]);
-                        $departmentAssignedUsers[] = [
-                            'NAME' => $assignedUserName,
-                            'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
-                            'STATUS' => $isAssignedUserInOffice ? 'В офисе' : 'Не в офисе',
-                        ];
-                    }
-                    usort($departmentAssignedUsers, static function (array $left, array $right): int { return strnatcasecmp((string)$left['NAME'], (string)$right['NAME']); });
-                    $departmentAssignedUsersJson = htmlspecialcharsbx(json_encode($departmentAssignedUsers, JSON_UNESCAPED_UNICODE));
-                    ?>
-                    <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx($headName)?>" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$departmentAssignedUsersJson?>"><?=htmlspecialcharsbx($headName)?></button></td>
-                    <td><?=htmlspecialcharsbx($cabTitle)?></td>
-                    <?php
-                    $shortOfficeCount = (int)$shortOfficeTotal;
-                    $cabinetDateTotalKey = $cabNorm . '|' . $dateKey;
-                    $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
-                    $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
-                    $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
-                    $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
-                    $cabinetAssignedEmployees = [];
-                    foreach ($departmentCabinetAssignedUsers as $assignedDepartmentId => $assignedCabinets) {
-                        if (!isset($assignedCabinets[$cabNorm]) || !isset($departments[$assignedDepartmentId])) { continue; }
-                        $assignedHeadUserId = (int)$departments[$assignedDepartmentId]['UF_HEAD'];
-                        $assignedHeadName = isset($headsMap[$assignedHeadUserId]) ? $headsMap[$assignedHeadUserId] : 'Не назначен';
-                        $assignedDepartmentSummary = isset($headOrgSummaryMap[$assignedHeadUserId]) ? $headOrgSummaryMap[$assignedHeadUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-                        foreach ($assignedCabinets[$cabNorm] as $assignedUserId => $assignedUserName) {
-                            $assignedUserName = trim((string)$assignedUserName);
-                            if ($assignedUserName === '') { continue; }
-                            $cabinetAssignedEmployees[] = [
-                                'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
-                                'CEO1' => (string)$assignedDepartmentSummary['CEO1'],
-                                'DEPARTMENT' => (string)$assignedDepartmentSummary['DEPARTMENT'],
-                                'HEAD' => $assignedHeadName,
-                                'EMPLOYEE' => $assignedUserName,
-                            ];
+                $periodOfficeCount += array_sum($departmentLegalCounts);
+                $periodShortOfficeCount += array_sum($shortDepartmentLegalCounts);
+            }
+            ?>
+            <tr>
+                <td><?=htmlspecialcharsbx($departmentLegalEntitiesTitle)?></td>
+                <td><?=htmlspecialcharsbx((string)$departmentSummary['CEO1'])?></td>
+                <td><?=htmlspecialcharsbx((string)$departmentSummary['DEPARTMENT'])?></td>
+                <?php
+                $departmentAssignedUsersRaw = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
+                $departmentAssignedUsers = [];
+                foreach ($departmentAssignedUsersRaw as $assignedUserId => $assignedUserName) {
+                    $assignedUserName = trim((string)$assignedUserName);
+                    if ($assignedUserName === '') { continue; }
+                    $assignedEmployeeKey = 'U' . (int)$assignedUserId;
+                    $presentDays = 0;
+                    foreach ($periodDays as $dateKey) {
+                        if (isset($officePresenceKeys[$dateKey][$assignedEmployeeKey]) || isset($shortOfficePresenceKeys[$dateKey][$assignedEmployeeKey])) {
+                            $presentDays++;
                         }
                     }
-                    usort($cabinetAssignedEmployees, static function (array $left, array $right): int {
-                        $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
-                        if ($departmentCompare !== 0) { return $departmentCompare; }
-                        return strnatcasecmp((string)$left['EMPLOYEE'], (string)$right['EMPLOYEE']);
-                    });
-                    $cabinetAssignedEmployeesJson = htmlspecialcharsbx(json_encode($cabinetAssignedEmployees, JSON_UNESCAPED_UNICODE));
-                    ?>
-                    <td><?= $workplaces ?></td>
-                    <td><button type="button" class="head-modal-trigger assigned-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-employees="<?=$cabinetAssignedEmployeesJson?>"><?= $assignedCount ?></button></td>
-                    <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                    <td><?= $shortOfficeCount ?></td>
-                    <td><?= (int)$officeCount ?></td>
-                </tr>
+                    $departmentAssignedUsers[] = [
+                        'NAME' => $assignedUserName,
+                        'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
+                        'STATUS' => 'Дней в офисе: ' . $presentDays . ' из ' . count($periodDays),
+                    ];
+                }
+                usort($departmentAssignedUsers, static function (array $left, array $right): int { return strnatcasecmp((string)$left['NAME'], (string)$right['NAME']); });
+                $departmentAssignedUsersJson = htmlspecialcharsbx(json_encode($departmentAssignedUsers, JSON_UNESCAPED_UNICODE));
+                ?>
+                <td><button type="button" class="head-modal-trigger" data-head="<?=htmlspecialcharsbx($headName)?>" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx($dateFrom->format('d.m.Y') . ' — ' . $dateTo->format('d.m.Y'))?>" data-employees="<?=$departmentAssignedUsersJson?>"><?=htmlspecialcharsbx($headName)?></button></td>
+                <td><?=htmlspecialcharsbx($cabTitle)?></td>
                 <?php
-            }
+                $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
+                $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
+                $mainTableTotals['SHORT_OFFICE_PERIOD'] += (int)$periodShortOfficeCount;
+                $mainTableTotals['OFFICE_PERIOD'] += (int)$periodOfficeCount;
+                $cabinetAssignedEmployees = [];
+                foreach ($departmentCabinetAssignedUsers as $assignedDepartmentId => $assignedCabinets) {
+                    if (!isset($assignedCabinets[$cabNorm]) || !isset($departments[$assignedDepartmentId])) { continue; }
+                    $assignedHeadUserId = (int)$departments[$assignedDepartmentId]['UF_HEAD'];
+                    $assignedHeadName = isset($headsMap[$assignedHeadUserId]) ? $headsMap[$assignedHeadUserId] : 'Не назначен';
+                    $assignedDepartmentSummary = isset($headOrgSummaryMap[$assignedHeadUserId]) ? $headOrgSummaryMap[$assignedHeadUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+                    foreach ($assignedCabinets[$cabNorm] as $assignedUserId => $assignedUserName) {
+                        $assignedUserName = trim((string)$assignedUserName);
+                        if ($assignedUserName === '') { continue; }
+                        $cabinetAssignedEmployees[] = [
+                            'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$assignedUserId]) && $userLegalEntityMap[(int)$assignedUserId] !== '' ? $userLegalEntityMap[(int)$assignedUserId] : $undefinedLegalEntity,
+                            'CEO1' => (string)$assignedDepartmentSummary['CEO1'],
+                            'DEPARTMENT' => (string)$assignedDepartmentSummary['DEPARTMENT'],
+                            'HEAD' => $assignedHeadName,
+                            'EMPLOYEE' => $assignedUserName,
+                        ];
+                    }
+                }
+                usort($cabinetAssignedEmployees, static function (array $left, array $right): int {
+                    $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
+                    if ($departmentCompare !== 0) { return $departmentCompare; }
+                    return strnatcasecmp((string)$left['EMPLOYEE'], (string)$right['EMPLOYEE']);
+                });
+                $cabinetAssignedEmployeesJson = htmlspecialcharsbx(json_encode($cabinetAssignedEmployees, JSON_UNESCAPED_UNICODE));
+                ?>
+                <td><?= $workplaces ?></td>
+                <td><button type="button" class="head-modal-trigger assigned-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-employees="<?=$cabinetAssignedEmployeesJson?>"><?= $assignedCount ?></button></td>
+                <td><?=htmlspecialcharsbx($dateFrom->format('d.m.Y') . ' — ' . $dateTo->format('d.m.Y'))?></td>
+                <td><?= (int)$periodShortOfficeCount ?></td>
+                <td><?= (int)$periodOfficeCount ?></td>
+            </tr>
+            <?php
         }
     }
     ?>
@@ -1019,29 +1025,18 @@ header('Content-Type: text/html; charset=UTF-8');
     $mainTotalWorkplaces = array_sum($mainTableTotals['WORKPLACES_BY_CABINET']);
     $mainTotalAssigned = array_sum($mainTableTotals['ASSIGNED_BY_CABINET']);
     ?>
-    <?php foreach ($periodDays as $dateKey): ?>
-        <?php
-        $mainTotalShortOffice = 0;
-        $mainTotalOffice = 0;
-        foreach (array_keys($mainTableTotals['WORKPLACES_BY_CABINET']) as $totalCabNorm) {
-            $cabinetDateTotalKey = $totalCabNorm . '|' . $dateKey;
-            $mainTotalShortOffice += isset($mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey]) ? (int)$mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] : 0;
-            $mainTotalOffice += isset($mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey]) ? (int)$mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] : 0;
-        }
-        ?>
-        <tr style="font-weight: bold;">
-            <td>Итого</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td><?= (int)$mainTotalWorkplaces ?></td>
-            <td><?= (int)$mainTotalAssigned ?></td>
-            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-            <td><?= (int)$mainTotalShortOffice ?></td>
-            <td><?= (int)$mainTotalOffice ?></td>
-        </tr>
-    <?php endforeach; ?>
+    <tr style="font-weight: bold;">
+        <td>Итого</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td><?= (int)$mainTotalWorkplaces ?></td>
+        <td><?= (int)$mainTotalAssigned ?></td>
+        <td><?=htmlspecialcharsbx($dateFrom->format('d.m.Y') . ' — ' . $dateTo->format('d.m.Y'))?></td>
+        <td><?= (int)$mainTableTotals['SHORT_OFFICE_PERIOD'] ?></td>
+        <td><?= (int)$mainTableTotals['OFFICE_PERIOD'] ?></td>
+    </tr>
     </tbody>
 </table>
 </section>
@@ -1497,7 +1492,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
         table.className = 'modal-table';
         var thead = document.createElement('thead');
         var headerRow = document.createElement('tr');
-        ['ФИО', 'ЮЛ', 'В офисе/не в офисе за отчетный день'].forEach(function (title) {
+        ['ФИО', 'ЮЛ', 'Присутствие за выбранный период'].forEach(function (title) {
             var th = document.createElement('th');
             th.textContent = title;
             headerRow.appendChild(th);
