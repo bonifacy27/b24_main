@@ -16,7 +16,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 
 const CABINET_HL_BLOCK_ID = 74;
-const REPORT_URL = '/workplace_report_ext2.php';
+const REPORT_URL = '/pub/apps/attendance_report/workplace_report_ext2.php';
 
 header('Content-Type: text/html; charset=UTF-8');
 
@@ -276,14 +276,14 @@ if ((string)$request->getQuery('export') === 'excel') {
     cabinetEditorExportExcel($cabinets);
 }
 
-$APPLICATION->SetTitle('Рабочее место администратора АХС');
+$APPLICATION->SetTitle('Управление РМ');
 $sortToggle = $sortDirection === 'ASC' ? 'desc' : 'asc';
 ?>
 <!doctype html>
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Рабочее место администратора АХС</title>
+    <title>Управление РМ</title>
     <style>
         body { margin: 0; padding: 20px; background: #f5f7fb; color: #1f2937; font: 13px/1.4 Arial, sans-serif; }
         h1 { margin: 0 0 14px; font-size: 24px; }
@@ -316,10 +316,9 @@ $sortToggle = $sortDirection === 'ASC' ? 'desc' : 'asc';
     </style>
 </head>
 <body>
-    <h1>Рабочее место администратора АХС</h1>
+    <h1>Управление РМ</h1>
     <div class="top-links">
         <a class="button secondary" href="<?= cabinetEditorHtml(REPORT_URL) ?>">Отчеты по рабочим местам</a>
-        <a class="button secondary" href="/bitrix/admin/highloadblock_rows_list.php?ENTITY_ID=74&amp;lang=ru">Справочник кабинетов HL-блока</a>
     </div>
 
     <?php if (!empty($messages)): ?>
