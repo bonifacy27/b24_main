@@ -1,9 +1,8 @@
 <?php
 /**
- * workplace_report_ext2.php
+ * workplace_report.php
  *
- * Расширенный отчет по рабочим местам по данным турникетов Reverse:
- * строка = юр. лицо + подразделение + кабинет + дата.
+ * Отчет руководителя по рабочим местам по данным турникетов Reverse.
  */
 
 define('NO_KEEP_STATISTIC', true);
@@ -16,11 +15,6 @@ require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime as BitrixDateTime;
 
-$reportRoles = [
-    'AHS_ADMIN' => [4945, 3532, 5060],
-    'HR_DIRECTOR' => [3696, 5209],
-];
-
 if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
     header('Content-Type: text/plain; charset=UTF-8');
     echo 'Ошибка: не удалось подключить обязательные модули.';
@@ -28,10 +22,10 @@ if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loade
 }
 
 global $USER;
-$currentUserId = is_object($USER) ? (int)$USER->GetID() : 0;
-$isAhsAdmin = in_array($currentUserId, $reportRoles['AHS_ADMIN'], true);
-$isHrDirector = in_array($currentUserId, $reportRoles['HR_DIRECTOR'], true);
-if (!$isAhsAdmin && !$isHrDirector) {
+$authorizedUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$debugChiefUserId = isset($_GET['chief']) ? (int)$_GET['chief'] : 0;
+$currentUserId = $debugChiefUserId > 0 ? $debugChiefUserId : $authorizedUserId;
+if ($currentUserId <= 0) {
     http_response_code(403);
     header('Content-Type: text/plain; charset=UTF-8');
     echo 'Доступ запрещен.';
@@ -55,7 +49,6 @@ $dateTo->setTime(0, 0, 0);
 
 $defaultOfficeFilter = 'Московский пр., 139/1';
 $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
-$ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
 $officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
 
 $undefinedLegalEntity = 'Не определено';
@@ -374,6 +367,30 @@ foreach ($departments as $departmentId => $department) {
     }
 }
 
+$managerRootDepartmentIds = [];
+foreach ($departments as $departmentId => $department) {
+    if ((int)$department['UF_HEAD'] === $currentUserId) {
+        $managerRootDepartmentIds[$departmentId] = true;
+    }
+}
+if (empty($managerRootDepartmentIds)) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo 'Доступ запрещен. Отчет доступен только руководителям подразделений.';
+    exit;
+}
+
+$managerDepartmentScopeIds = [];
+$collectDepartmentSubtree = static function (int $departmentId) use (&$collectDepartmentSubtree, &$managerDepartmentScopeIds, $departmentChildren): void {
+    $managerDepartmentScopeIds[$departmentId] = true;
+    foreach ($departmentChildren[$departmentId] ?? [] as $childDepartmentId) {
+        $collectDepartmentSubtree((int)$childDepartmentId);
+    }
+};
+foreach (array_keys($managerRootDepartmentIds) as $managerRootDepartmentId) {
+    $collectDepartmentSubtree((int)$managerRootDepartmentId);
+}
+
 $departmentResponsibleHead = [];
 $assignResponsibleHead = static function (int $departmentId, int $inheritedHeadDepartmentId = 0) use (&$assignResponsibleHead, &$departmentResponsibleHead, $departments, $departmentChildren): void {
     $currentHeadDepartmentId = $inheritedHeadDepartmentId;
@@ -417,9 +434,9 @@ $portalUserInfoById = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
 $departmentCabinetLegalEntities = [];
+$managerCabinetScopeIds = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
 $userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
-
 $rsUsers = \CUser::GetList($by='id', $order='asc', [], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY', 'UF_OFFICE'], 'FIELDS' => ['ID', 'ACTIVE', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET', 'UF_OFFICE']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
@@ -442,6 +459,13 @@ while ($user = $rsUsers->Fetch()) {
     if ((string)$user['ACTIVE'] !== 'Y') { continue; }
 
     $userDepartments = is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']];
+    $hasManagerScopeDepartment = false;
+    foreach ($userDepartments as $departmentId) {
+        if (isset($managerDepartmentScopeIds[(int)$departmentId])) {
+            $hasManagerScopeDepartment = true;
+            break;
+        }
+    }
     $headDepartments = [];
     foreach ($userDepartments as $departmentId) {
         $departmentId = (int)$departmentId;
@@ -466,6 +490,7 @@ while ($user = $rsUsers->Fetch()) {
 
     $cabNorm = $normalizeCabinet($cabinet);
     if ($cabNorm !== '') {
+        if ($hasManagerScopeDepartment) { $managerCabinetScopeIds[$cabNorm] = true; }
         if (!isset($cabinetAssignedTotal[$cabNorm])) { $cabinetAssignedTotal[$cabNorm] = 0; }
         $cabinetAssignedTotal[$cabNorm]++;
         foreach ($userDepartmentsMap[$userId] as $headDepId) {
@@ -764,6 +789,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             'CABINET' => $unknownCabinetTitle,
             'CABINET_NORM' => $unknownCabinetNorm,
             'DATE' => $dateKey,
+            'IS_SHORT' => $isShortOfficePresence,
             'REASON' => $unknownReason,
             'CABINET_SOURCE' => $unknownCabinetSource !== '' ? $unknownCabinetSource : 'Другой источник',
         ];
@@ -777,6 +803,12 @@ usort($temporaryGuestVisits, static function (array $left, array $right): int {
     return strcmp((string)$left['DATE'], (string)$right['DATE']);
 });
 
+$unknownEmployees = array_values(array_filter($unknownEmployees, static function (array $employee) use ($managerCabinetScopeIds, $cabinetDirectory, $officeFilterRaw): bool {
+    $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm])) { return false; }
+    return $officeFilterRaw === '' || isset($cabinetDirectory[$cabNorm]);
+}));
+
 usort($unknownEmployees, static function (array $left, array $right): int {
     $legalCompare = strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
     if ($legalCompare !== 0) { return $legalCompare; }
@@ -788,10 +820,9 @@ usort($unknownEmployees, static function (array $left, array $right): int {
 });
 
 $allCabinets = [];
-foreach ($cabinetDirectory as $cabKey => $cabData) { $allCabinets[$cabData['TITLE']] = true; }
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
-    if ($officeFilterRaw !== '' && ($cabNorm === '' || !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
     if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) { continue; }
     $allCabinets[(string)$cabName] = true;
 }
@@ -818,7 +849,7 @@ header('Content-Type: text/html; charset=UTF-8');
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Расширенный отчет по рабочим местам Reverse</title>
+    <title>Отчет руководителя по рабочим местам Reverse</title>
     <style>
         body { font-family: Arial,sans-serif; font-size:13px; margin:16px; }
         table { border-collapse: collapse; width:auto; max-width: none; }
@@ -851,16 +882,15 @@ header('Content-Type: text/html; charset=UTF-8');
     </style>
 </head>
 <body>
-<h1>Расширенный отчет по рабочим местам Reverse</h1>
-<?php if ($isAhsAdmin): ?>
-    <a class="management-link" href="/pub/apps/attendance_report/cabinet_edit.php">Управление РМ</a>
-<?php endif; ?>
+<h1>Отчет руководителя по рабочим местам Reverse</h1>
 <form method="get" class="filters">
+    <?php if ($debugChiefUserId > 0): ?>
+        <input type="hidden" name="chief" value="<?= (int)$debugChiefUserId ?>">
+    <?php endif; ?>
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
     <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
-    <label style="margin-left:8px;">CEO-1: <select name="ceo1_filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
     <button type="submit" style="margin-left:8px;">Показать</button>
     <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
 </form>
@@ -868,9 +898,7 @@ header('Content-Type: text/html; charset=UTF-8');
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
     <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
     <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
-    <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
     <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
-    <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
 </div>
 
 <section class="tab-pane is-active" id="tab-employees" role="tabpanel">
@@ -903,13 +931,12 @@ header('Content-Type: text/html; charset=UTF-8');
         $headUserId = (int)$department['UF_HEAD'];
         $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
         $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-        if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
 
         $departmentCabinets = [];
         foreach ($userCabinetMap as $userId => $cabName) {
             if (!isset($userDepartmentsMap[$userId]) || !in_array($departmentId, $userDepartmentsMap[$userId], true)) { continue; }
             $norm = $normalizeCabinet((string)$cabName);
-            if ($norm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
+            if ($norm === '' || !isset($managerCabinetScopeIds[$norm]) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
             $departmentCabinets[$norm] = true;
         }
 
@@ -995,6 +1022,66 @@ header('Content-Type: text/html; charset=UTF-8');
             }
         }
     }
+    $otherVisitorsRows = [];
+    foreach ($unknownEmployees as $employee) {
+        $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+        $dateKey = (string)($employee['DATE'] ?? '');
+        if ($cabNorm === '' || $dateKey === '' || !isset($managerCabinetScopeIds[$cabNorm])) { continue; }
+        if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+        if ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm])) { continue; }
+
+        $legalEntityTitle = trim((string)($employee['LEGAL_ENTITY'] ?? ''));
+        if ($legalEntityTitle === '') { $legalEntityTitle = $undefinedLegalEntity; }
+        $rowKey = $cabNorm . '|' . $dateKey . '|' . $legalEntityTitle;
+        if (!isset($otherVisitorsRows[$rowKey])) {
+            $otherVisitorsRows[$rowKey] = [
+                'CABINET_NORM' => $cabNorm,
+                'DATE' => $dateKey,
+                'LEGAL_ENTITY' => $legalEntityTitle,
+                'SHORT' => 0,
+                'FULL' => 0,
+            ];
+        }
+        if (!empty($employee['IS_SHORT'])) {
+            $otherVisitorsRows[$rowKey]['SHORT']++;
+        } else {
+            $otherVisitorsRows[$rowKey]['FULL']++;
+        }
+    }
+    uasort($otherVisitorsRows, static function (array $left, array $right): int {
+        $cabinetCompare = strnatcasecmp((string)$left['CABINET_NORM'], (string)$right['CABINET_NORM']);
+        if ($cabinetCompare !== 0) { return $cabinetCompare; }
+        $dateCompare = strcmp((string)$left['DATE'], (string)$right['DATE']);
+        if ($dateCompare !== 0) { return $dateCompare; }
+        return strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
+    });
+    foreach ($otherVisitorsRows as $visitorRow) {
+        $cabNorm = (string)$visitorRow['CABINET_NORM'];
+        $dateKey = (string)$visitorRow['DATE'];
+        $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
+        $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
+        $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
+        $cabinetDateTotalKey = $cabNorm . '|' . $dateKey;
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+        $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
+        $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
+        $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+        $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        ?>
+        <tr>
+            <td><?=htmlspecialcharsbx((string)$visitorRow['LEGAL_ENTITY'])?></td>
+            <td></td>
+            <td>Прочие посетители</td>
+            <td>Прочие посетители</td>
+            <td><?=htmlspecialcharsbx($cabTitle)?></td>
+            <td><?= $workplaces ?></td>
+            <td><?= $assignedCount ?></td>
+            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+            <td><?= (int)$visitorRow['SHORT'] ?></td>
+            <td><?= (int)$visitorRow['FULL'] ?></td>
+        </tr>
+        <?php
+    }
     ?>
     <?php
     $mainTotalWorkplaces = array_sum($mainTableTotals['WORKPLACES_BY_CABINET']);
@@ -1058,45 +1145,11 @@ header('Content-Type: text/html; charset=UTF-8');
 </table>
 </section>
 
-<section class="tab-pane" id="tab-temporary" role="tabpanel">
-<h2>Посещения по временным и гостевым пропускам</h2>
-<div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
-<table id="temporary-report-table">
-    <thead>
-    <tr>
-        <th>Название</th>
-        <th>Дата</th>
-    </tr>
-    </thead>
-    <tbody>
-    <?php if (empty($temporaryGuestVisits)): ?>
-        <tr>
-            <td colspan="2">Нет посещений по временным и гостевым пропускам.</td>
-        </tr>
-    <?php else: ?>
-        <?php foreach ($temporaryGuestVisits as $visit): ?>
-            <tr>
-                <td><?=htmlspecialcharsbx((string)$visit['NAME'])?></td>
-                <td><?=htmlspecialcharsbx((new \DateTime((string)$visit['DATE']))->format('d.m.Y'))?></td>
-            </tr>
-        <?php endforeach; ?>
-    <?php endif; ?>
-    </tbody>
-</table>
-</section>
-
 <?php
 $summaryCabinets = [];
-foreach ($cabinetDirectory as $cabNorm => $cabData) {
-    if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
-    $summaryCabinets[$cabNorm] = [
-        'TITLE' => (string)$cabData['TITLE'],
-        'WORKPLACES' => (int)$cabData['WORKPLACES'],
-    ];
-}
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
-    if ($cabNorm === '' || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
     if (!isset($summaryCabinets[$cabNorm])) {
         $summaryCabinets[$cabNorm] = [
             'TITLE' => (string)$cabName,
@@ -1224,75 +1277,6 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
             </tr>
         <?php endforeach; ?>
     <?php endforeach; ?>
-    </tbody>
-</table>
-</section>
-
-<section class="tab-pane" id="tab-legal-summary" role="tabpanel">
-<h2>Сводные данные по ЮЛ</h2>
-<div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
-<table id="legal-summary-report-table">
-    <thead>
-    <tr>
-        <th>Дата</th>
-        <th>ЮЛ</th>
-        <th class="col-narrow">Кол-во рабочих мест в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?></th>
-        <th class="col-narrow">Кол-во привязанных РМ в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> к ЮЛ</th>
-        <th class="col-narrow">Кол-во сотрудников в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> (&gt;4 ч)</th>
-        <th class="col-narrow">Кол-во свободных рм</th>
-        <th>% загрузки офиса</th>
-    </tr>
-    </thead>
-    <tbody>
-    <?php
-    $legalEntitySummaryTotals = [
-        'WORKPLACES_BY_DATE' => [],
-        'ASSIGNED_BY_DATE_LEGAL_ENTITY' => [],
-        'OCCUPIED' => 0,
-        'FREE_BY_DATE_LEGAL_ENTITY' => [],
-    ];
-    ?>
-    <?php foreach ($legalEntitySummary as $dateKey => $legalEntityCounts): ?>
-        <?php if (empty($legalEntityCounts)): ?>
-            <?php $legalEntityCounts = [$undefinedLegalEntity => 0]; ?>
-        <?php endif; ?>
-        <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
-            <?php
-            $occupied = (int)$occupied;
-            $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
-            $assigned += isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) && is_array($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) ? count($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) : 0;
-            $free = max(0, $assigned - $occupied);
-            $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-            $legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $assigned;
-            $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
-            $legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $free;
-            ?>
-            <tr>
-                <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
-                <td><?= $officeWorkplacesTotal ?></td>
-                <td><?= $assigned ?></td>
-                <td><?= $occupied ?></td>
-                <td></td>
-                <td></td>
-            </tr>
-        <?php endforeach; ?>
-    <?php endforeach; ?>
-    <?php
-    $legalEntityTotalWorkplaces = array_sum($legalEntitySummaryTotals['WORKPLACES_BY_DATE']);
-    $legalEntityTotalAssigned = array_sum($legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY']);
-    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY']);
-    $totalUtilization = $legalEntityTotalAssigned > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalAssigned) * 100, 1) : 0;
-    ?>
-    <tr style="font-weight: bold;">
-        <td>Итого</td>
-        <td></td>
-        <td><?= (int)$legalEntityTotalWorkplaces ?></td>
-        <td><?= (int)$legalEntityTotalAssigned ?></td>
-        <td><?= (int)$legalEntitySummaryTotals['OCCUPIED'] ?></td>
-        <td><?= (int)$legalEntityTotalFree ?></td>
-        <td><?= $totalUtilization ?>%</td>
-    </tr>
     </tbody>
 </table>
 </section>
