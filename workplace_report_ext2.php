@@ -16,9 +16,25 @@ require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime as BitrixDateTime;
 
+$reportRoles = [
+    'AHS_ADMIN' => [4945, 3532, 5060],
+    'HR_DIRECTOR' => [3696, 5209],
+];
+
 if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
     header('Content-Type: text/plain; charset=UTF-8');
     echo 'Ошибка: не удалось подключить обязательные модули.';
+    exit;
+}
+
+global $USER;
+$currentUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$isAhsAdmin = in_array($currentUserId, $reportRoles['AHS_ADMIN'], true);
+$isHrDirector = in_array($currentUserId, $reportRoles['HR_DIRECTOR'], true);
+if (!$isAhsAdmin && !$isHrDirector) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo 'Доступ запрещен.';
     exit;
 }
 
@@ -817,6 +833,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .tab-pane.is-active { display: block; }
         .report-toolbar { margin: 0 0 10px; }
         .export-button { border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
+        .management-link { display: inline-block; margin: 0 0 10px; border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 7px 12px; border-radius: 4px; text-decoration: none; }
         .head-modal-trigger { padding: 0; border: 0; background: none; color: #1d5fbf; cursor: pointer; text-decoration: underline; font: inherit; text-align: left; }
         .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); align-items: center; justify-content: center; padding: 24px; }
         .modal-backdrop.is-open { display: flex; }
@@ -834,6 +851,9 @@ header('Content-Type: text/html; charset=UTF-8');
 </head>
 <body>
 <h1>Расширенный отчет по рабочим местам Reverse</h1>
+<?php if ($isAhsAdmin): ?>
+    <a class="management-link" href="/pub/apps/attendance_report/cabinet_edit.php">Управление РМ</a>
+<?php endif; ?>
 <form method="get" class="filters">
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
