@@ -18,6 +18,10 @@ use Bitrix\Main\Loader;
 const CABINET_HL_BLOCK_ID = 74;
 const REPORT_URL = '/pub/apps/attendance_report/workplace_report_ext2.php';
 
+$cabinetEditorRoles = [
+    'AHS_ADMIN' => [4945, 3532, 5060],
+];
+
 header('Content-Type: text/html; charset=UTF-8');
 
 if (!Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
@@ -26,8 +30,11 @@ if (!Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
 }
 
 global $USER, $APPLICATION;
-if (!is_object($USER) || !$USER->IsAuthorized() || !$USER->IsAdmin()) {
-    echo '<!doctype html><meta charset="utf-8"><p>Доступ запрещен. Для управления рабочими местами нужны права администратора.</p>';
+$currentUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$isAhsAdmin = in_array($currentUserId, $cabinetEditorRoles['AHS_ADMIN'], true);
+if (!$isAhsAdmin) {
+    http_response_code(403);
+    echo '<!doctype html><meta charset="utf-8"><p>Доступ запрещен.</p>';
     exit;
 }
 
