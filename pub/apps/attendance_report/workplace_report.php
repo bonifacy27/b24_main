@@ -434,15 +434,9 @@ $portalUserInfoById = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
 $departmentCabinetLegalEntities = [];
+$managerCabinetScopeIds = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
 $userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
-$currentUserLegalEntity = '';
-$rsCurrentUser = \CUser::GetList($by='id', $order='asc', ['ID' => $currentUserId], ['SELECT' => ['UF_COMPANY', 'UF_OFFICE'], 'FIELDS' => ['ID', 'EMAIL', 'UF_COMPANY', 'UF_OFFICE']]);
-if ($currentUser = $rsCurrentUser->Fetch()) {
-    $currentUserLegalEntity = $resolveLegalEntityByUser($currentUser, $companyLegalEntityMap, $companyEnumValueMap, $userOfficeEnumValueMap);
-}
-
-
 $rsUsers = \CUser::GetList($by='id', $order='asc', [], ['SELECT' => ['UF_DEPARTMENT', 'UF_CABINET', 'UF_COMPANY', 'UF_OFFICE'], 'FIELDS' => ['ID', 'ACTIVE', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'UF_DEPARTMENT', 'UF_CABINET', 'UF_OFFICE']]);
 while ($user = $rsUsers->Fetch()) {
     $userId = (int)$user['ID'];
@@ -472,14 +466,12 @@ while ($user = $rsUsers->Fetch()) {
             break;
         }
     }
-    if (!$hasManagerScopeDepartment) { continue; }
-
     $headDepartments = [];
     foreach ($userDepartments as $departmentId) {
         $departmentId = (int)$departmentId;
-        if ($departmentId <= 0 || !isset($managerDepartmentScopeIds[$departmentId]) || !isset($departmentResponsibleHead[$departmentId])) { continue; }
+        if ($departmentId <= 0 || !isset($departmentResponsibleHead[$departmentId])) { continue; }
         $headDepartmentId = (int)$departmentResponsibleHead[$departmentId];
-        if ($headDepartmentId > 0 && isset($managerDepartmentScopeIds[$headDepartmentId]) && isset($departments[$headDepartmentId]) && (int)$departments[$headDepartmentId]['UF_HEAD'] > 0) {
+        if ($headDepartmentId > 0 && isset($departments[$headDepartmentId]) && (int)$departments[$headDepartmentId]['UF_HEAD'] > 0) {
             $headDepartments[$headDepartmentId] = true;
         }
     }
@@ -498,6 +490,7 @@ while ($user = $rsUsers->Fetch()) {
 
     $cabNorm = $normalizeCabinet($cabinet);
     if ($cabNorm !== '') {
+        if ($hasManagerScopeDepartment) { $managerCabinetScopeIds[$cabNorm] = true; }
         if (!isset($cabinetAssignedTotal[$cabNorm])) { $cabinetAssignedTotal[$cabNorm] = 0; }
         $cabinetAssignedTotal[$cabNorm]++;
         foreach ($userDepartmentsMap[$userId] as $headDepId) {
@@ -796,6 +789,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             'CABINET' => $unknownCabinetTitle,
             'CABINET_NORM' => $unknownCabinetNorm,
             'DATE' => $dateKey,
+            'IS_SHORT' => $isShortOfficePresence,
             'REASON' => $unknownReason,
             'CABINET_SOURCE' => $unknownCabinetSource !== '' ? $unknownCabinetSource : 'Другой источник',
         ];
@@ -809,8 +803,10 @@ usort($temporaryGuestVisits, static function (array $left, array $right): int {
     return strcmp((string)$left['DATE'], (string)$right['DATE']);
 });
 
-$unknownEmployees = array_values(array_filter($unknownEmployees, static function (array $employee) use ($currentUserLegalEntity): bool {
-    return trim((string)($employee['LEGAL_ENTITY'] ?? '')) === $currentUserLegalEntity;
+$unknownEmployees = array_values(array_filter($unknownEmployees, static function (array $employee) use ($managerCabinetScopeIds, $cabinetDirectory, $officeFilterRaw): bool {
+    $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm])) { return false; }
+    return $officeFilterRaw === '' || isset($cabinetDirectory[$cabNorm]);
 }));
 
 usort($unknownEmployees, static function (array $left, array $right): int {
@@ -826,7 +822,7 @@ usort($unknownEmployees, static function (array $left, array $right): int {
 $allCabinets = [];
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
-    if ($officeFilterRaw !== '' && ($cabNorm === '' || !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
     if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) { continue; }
     $allCabinets[(string)$cabName] = true;
 }
@@ -930,7 +926,7 @@ header('Content-Type: text/html; charset=UTF-8');
         'OFFICE_BY_CABINET_DATE' => [],
     ];
     foreach ($departments as $departmentId => $department) {
-        if (!isset($managerDepartmentScopeIds[$departmentId]) || (int)$department['UF_HEAD'] <= 0) { continue; }
+        if ((int)$department['UF_HEAD'] <= 0) { continue; }
         $headUserId = (int)$department['UF_HEAD'];
         $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
         $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
@@ -939,7 +935,7 @@ header('Content-Type: text/html; charset=UTF-8');
         foreach ($userCabinetMap as $userId => $cabName) {
             if (!isset($userDepartmentsMap[$userId]) || !in_array($departmentId, $userDepartmentsMap[$userId], true)) { continue; }
             $norm = $normalizeCabinet((string)$cabName);
-            if ($norm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
+            if ($norm === '' || !isset($managerCabinetScopeIds[$norm]) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
             $departmentCabinets[$norm] = true;
         }
 
@@ -1025,6 +1021,66 @@ header('Content-Type: text/html; charset=UTF-8');
             }
         }
     }
+    $otherVisitorsRows = [];
+    foreach ($unknownEmployees as $employee) {
+        $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+        $dateKey = (string)($employee['DATE'] ?? '');
+        if ($cabNorm === '' || $dateKey === '' || !isset($managerCabinetScopeIds[$cabNorm])) { continue; }
+        if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+        if ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm])) { continue; }
+
+        $legalEntityTitle = trim((string)($employee['LEGAL_ENTITY'] ?? ''));
+        if ($legalEntityTitle === '') { $legalEntityTitle = $undefinedLegalEntity; }
+        $rowKey = $cabNorm . '|' . $dateKey . '|' . $legalEntityTitle;
+        if (!isset($otherVisitorsRows[$rowKey])) {
+            $otherVisitorsRows[$rowKey] = [
+                'CABINET_NORM' => $cabNorm,
+                'DATE' => $dateKey,
+                'LEGAL_ENTITY' => $legalEntityTitle,
+                'SHORT' => 0,
+                'FULL' => 0,
+            ];
+        }
+        if (!empty($employee['IS_SHORT'])) {
+            $otherVisitorsRows[$rowKey]['SHORT']++;
+        } else {
+            $otherVisitorsRows[$rowKey]['FULL']++;
+        }
+    }
+    uasort($otherVisitorsRows, static function (array $left, array $right): int {
+        $cabinetCompare = strnatcasecmp((string)$left['CABINET_NORM'], (string)$right['CABINET_NORM']);
+        if ($cabinetCompare !== 0) { return $cabinetCompare; }
+        $dateCompare = strcmp((string)$left['DATE'], (string)$right['DATE']);
+        if ($dateCompare !== 0) { return $dateCompare; }
+        return strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
+    });
+    foreach ($otherVisitorsRows as $visitorRow) {
+        $cabNorm = (string)$visitorRow['CABINET_NORM'];
+        $dateKey = (string)$visitorRow['DATE'];
+        $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
+        $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
+        $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
+        $cabinetDateTotalKey = $cabNorm . '|' . $dateKey;
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+        $mainTableTotals['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
+        $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
+        $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+        $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        ?>
+        <tr>
+            <td><?=htmlspecialcharsbx((string)$visitorRow['LEGAL_ENTITY'])?></td>
+            <td></td>
+            <td>Прочие посетители</td>
+            <td>Прочие посетители</td>
+            <td><?=htmlspecialcharsbx($cabTitle)?></td>
+            <td><?= $workplaces ?></td>
+            <td><?= $assignedCount ?></td>
+            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+            <td><?= (int)$visitorRow['SHORT'] ?></td>
+            <td><?= (int)$visitorRow['FULL'] ?></td>
+        </tr>
+        <?php
+    }
     ?>
     <?php
     $mainTotalWorkplaces = array_sum($mainTableTotals['WORKPLACES_BY_CABINET']);
@@ -1083,7 +1139,7 @@ header('Content-Type: text/html; charset=UTF-8');
 $summaryCabinets = [];
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
-    if ($cabNorm === '' || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
     if (!isset($summaryCabinets[$cabNorm])) {
         $summaryCabinets[$cabNorm] = [
             'TITLE' => (string)$cabName,
