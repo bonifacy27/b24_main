@@ -998,21 +998,30 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php
     $mainTotalWorkplaces = array_sum($mainTableTotals['WORKPLACES_BY_CABINET']);
     $mainTotalAssigned = array_sum($mainTableTotals['ASSIGNED_BY_CABINET']);
-    $mainTotalShortOffice = array_sum($mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE']);
-    $mainTotalOffice = array_sum($mainTableTotals['OFFICE_BY_CABINET_DATE']);
     ?>
-    <tr style="font-weight: bold;">
-        <td>Итого</td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td><?= (int)$mainTotalWorkplaces ?></td>
-        <td><?= (int)$mainTotalAssigned ?></td>
-        <td><?=htmlspecialcharsbx($dateFrom->format('d.m.Y') . ($dateFrom->format('Y-m-d') !== $dateTo->format('Y-m-d') ? ' - ' . $dateTo->format('d.m.Y') : ''))?></td>
-        <td><?= (int)$mainTotalShortOffice ?></td>
-        <td><?= (int)$mainTotalOffice ?></td>
-    </tr>
+    <?php foreach ($periodDays as $dateKey): ?>
+        <?php
+        $mainTotalShortOffice = 0;
+        $mainTotalOffice = 0;
+        foreach (array_keys($mainTableTotals['WORKPLACES_BY_CABINET']) as $totalCabNorm) {
+            $cabinetDateTotalKey = $totalCabNorm . '|' . $dateKey;
+            $mainTotalShortOffice += isset($mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey]) ? (int)$mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] : 0;
+            $mainTotalOffice += isset($mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey]) ? (int)$mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] : 0;
+        }
+        ?>
+        <tr style="font-weight: bold;">
+            <td>Итого</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><?= (int)$mainTotalWorkplaces ?></td>
+            <td><?= (int)$mainTotalAssigned ?></td>
+            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+            <td><?= (int)$mainTotalShortOffice ?></td>
+            <td><?= (int)$mainTotalOffice ?></td>
+        </tr>
+    <?php endforeach; ?>
     </tbody>
 </table>
 </section>
