@@ -848,6 +848,24 @@ header('Content-Type: text/html; charset=UTF-8');
         .modal-table th, .modal-table td { border: 1px solid #d8e0ea; padding: 6px 8px; }
         .modal-status-in { color: #166534; font-weight: 600; }
         .modal-status-out { color: #991b1b; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 14px 0 18px; }
+        .dashboard-card { border: 1px solid #d8e0ea; border-radius: 14px; padding: 16px; background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%); box-shadow: 0 8px 24px rgba(15, 79, 147, .08); }
+        .dashboard-card-title { margin: 0 0 8px; color: #52616f; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+        .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
+        .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
+        .dashboard-section { margin: 18px 0 24px; }
+        .dashboard-section h3 { margin: 0 0 12px; font-size: 18px; }
+        .office-load-chart { display: grid; gap: 10px; max-width: 980px; }
+        .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
+        .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
+        .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
+        .cabinet-heatmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+        .cabinet-tile { border: 1px solid #d8e0ea; border-radius: 12px; padding: 12px; background: #fff; }
+        .cabinet-tile-title { font-weight: 700; margin-bottom: 6px; }
+        .cabinet-tile-meta { display: flex; justify-content: space-between; gap: 10px; color: #52616f; margin-bottom: 8px; }
+        .cabinet-progress { height: 10px; background: #edf4fb; border-radius: 999px; overflow: hidden; }
+        .cabinet-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); }
+        .dashboard-muted { color: #7a8794; }
     </style>
 </head>
 <body>
@@ -869,6 +887,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
     <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
     <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
+    <button type="button" class="tab-button" data-tab-target="dashboard" role="tab" aria-selected="false">Дашборд загрузки</button>
     <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
 </div>
@@ -1178,8 +1197,118 @@ foreach ($periodDays as $dateKey) {
     }
     ksort($legalEntitySummary[$dateKey], SORT_NATURAL | SORT_FLAG_CASE);
 }
+
+$dashboardOfficeByDate = [];
+$dashboardCabinetTotals = [];
+$dashboardTotalWorkplaces = $officeWorkplacesTotal * max(1, count($periodDays));
+$dashboardTotalOccupied = 0;
+$dashboardPeakOfficeLoad = 0;
+$dashboardPeakOfficeDate = '';
+foreach ($periodDays as $dateKey) {
+    $dayOccupied = 0;
+    $dayShortOccupied = 0;
+    foreach ($summaryCabinets as $cabNorm => $cabData) {
+        $workplaces = (int)$cabData['WORKPLACES'];
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+        $occupied = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $shortOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+        $dayOccupied += $occupied;
+        $dayShortOccupied += $shortOccupied;
+        if (!isset($dashboardCabinetTotals[$cabNorm])) {
+            $dashboardCabinetTotals[$cabNorm] = [
+                'TITLE' => (string)$cabData['TITLE'],
+                'WORKPLACES_DAYS' => 0,
+                'OCCUPIED' => 0,
+                'SHORT_OCCUPIED' => 0,
+                'PEAK' => 0,
+            ];
+        }
+        $dashboardCabinetTotals[$cabNorm]['WORKPLACES_DAYS'] += $workplaces;
+        $dashboardCabinetTotals[$cabNorm]['OCCUPIED'] += $occupied;
+        $dashboardCabinetTotals[$cabNorm]['SHORT_OCCUPIED'] += $shortOccupied;
+        $dashboardCabinetTotals[$cabNorm]['PEAK'] = max((int)$dashboardCabinetTotals[$cabNorm]['PEAK'], $occupied);
+    }
+    $dayUtilization = $officeWorkplacesTotal > 0 ? round(($dayOccupied / $officeWorkplacesTotal) * 100, 1) : 0;
+    $dashboardOfficeByDate[$dateKey] = [
+        'OCCUPIED' => $dayOccupied,
+        'SHORT_OCCUPIED' => $dayShortOccupied,
+        'WORKPLACES' => $officeWorkplacesTotal,
+        'UTILIZATION' => $dayUtilization,
+    ];
+    $dashboardTotalOccupied += $dayOccupied;
+    if ($dayUtilization > $dashboardPeakOfficeLoad) {
+        $dashboardPeakOfficeLoad = $dayUtilization;
+        $dashboardPeakOfficeDate = $dateKey;
+    }
+}
+$dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
+foreach ($dashboardCabinetTotals as $cabNorm => $cabData) {
+    $dashboardCabinetTotals[$cabNorm]['UTILIZATION'] = (int)$cabData['WORKPLACES_DAYS'] > 0 ? round(((int)$cabData['OCCUPIED'] / (int)$cabData['WORKPLACES_DAYS']) * 100, 1) : 0;
+}
+uasort($dashboardCabinetTotals, static function (array $left, array $right): int {
+    if ((float)$left['UTILIZATION'] === (float)$right['UTILIZATION']) {
+        return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
+    }
+    return (float)$left['UTILIZATION'] < (float)$right['UTILIZATION'] ? 1 : -1;
+});
+$dashboardTopCabinets = array_slice($dashboardCabinetTotals, 0, 12, true);
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
+
+
+<section class="tab-pane" id="tab-dashboard" role="tabpanel">
+<h2>Дашборд загрузки кабинетов</h2>
+<div class="dashboard-grid">
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Средняя загрузка офиса</p>
+        <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
+        <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Пик загрузки офиса</p>
+        <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
+        <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Кабинетов в выборке</p>
+        <div class="dashboard-card-value"><?= count($summaryCabinets) ?></div>
+        <div class="dashboard-card-note">Рабочих мест: <?= (int)$officeWorkplacesTotal ?></div>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h3>Загрузка всего офиса по дням</h3>
+    <div class="office-load-chart">
+        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+            <div class="office-load-row">
+                <div><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></div>
+                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
+                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
+                </div>
+                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h3>Топ кабинетов по средней загрузке</h3>
+    <?php if (empty($dashboardTopCabinets)): ?>
+        <p class="dashboard-muted">Нет данных для построения дашборда.</p>
+    <?php else: ?>
+        <div class="cabinet-heatmap">
+            <?php foreach ($dashboardTopCabinets as $cabData): ?>
+                <div class="cabinet-tile">
+                    <div class="cabinet-tile-title"><?=htmlspecialcharsbx((string)$cabData['TITLE'])?></div>
+                    <div class="cabinet-tile-meta"><span>Средняя загрузка</span><strong><?= $cabData['UTILIZATION'] ?>%</strong></div>
+                    <div class="cabinet-progress"><div class="cabinet-progress-fill" style="width: <?= min(100, (float)$cabData['UTILIZATION']) ?>%;"></div></div>
+                    <div class="dashboard-card-note">Пик: <?= (int)$cabData['PEAK'] ?> чел.; &lt;4ч: <?= (int)$cabData['SHORT_OCCUPIED'] ?></div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+</div>
+</section>
 
 <section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
