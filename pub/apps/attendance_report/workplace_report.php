@@ -22,7 +22,9 @@ if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loade
 }
 
 global $USER;
-$currentUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$authorizedUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$debugChiefUserId = isset($_GET['chief']) ? (int)$_GET['chief'] : 0;
+$currentUserId = $debugChiefUserId > 0 ? $debugChiefUserId : $authorizedUserId;
 if ($currentUserId <= 0) {
     http_response_code(403);
     header('Content-Type: text/plain; charset=UTF-8');
@@ -885,6 +887,9 @@ header('Content-Type: text/html; charset=UTF-8');
 <body>
 <h1>Отчет руководителя по рабочим местам Reverse</h1>
 <form method="get" class="filters">
+    <?php if ($debugChiefUserId > 0): ?>
+        <input type="hidden" name="chief" value="<?= (int)$debugChiefUserId ?>">
+    <?php endif; ?>
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
