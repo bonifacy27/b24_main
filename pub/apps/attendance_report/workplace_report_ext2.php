@@ -1262,7 +1262,6 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
             $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
             $assigned += isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) && is_array($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) ? count($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) : 0;
             $free = max(0, $assigned - $occupied);
-            $utilization = $assigned > 0 ? round(($occupied / $assigned) * 100, 1) : 0;
             $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
             $legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $assigned;
             $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
@@ -1274,8 +1273,8 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
                 <td><?= $officeWorkplacesTotal ?></td>
                 <td><?= $assigned ?></td>
                 <td><?= $occupied ?></td>
-                <td><?= $free ?></td>
-                <td><?= $utilization ?>%</td>
+                <td></td>
+                <td></td>
             </tr>
         <?php endforeach; ?>
     <?php endforeach; ?>
