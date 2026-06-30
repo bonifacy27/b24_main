@@ -855,6 +855,7 @@ header('Content-Type: text/html; charset=UTF-8');
         table { border-collapse: collapse; width:auto; max-width: none; }
         th, td { border:1px solid #d8e0ea; padding:6px 8px; vertical-align: top; }
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
+        #employees-report-table thead th { position: sticky; top: 0; z-index: 2; }
         .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
         .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
