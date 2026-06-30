@@ -498,6 +498,7 @@ $resolveReverseCabinet = static function ($cabinetValue) use (&$cabinetDirectory
         return [
             'TITLE' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['TITLE'],
             'NORM' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['NORM'],
+            'SOURCE' => 'Из привязки к кабинету',
         ];
     }
 
@@ -507,6 +508,7 @@ $resolveReverseCabinet = static function ($cabinetValue) use (&$cabinetDirectory
     return [
         'TITLE' => $cabinetNorm !== '' ? $cabinetRaw : '',
         'NORM' => $cabinetNorm,
+        'SOURCE' => $cabinetNorm !== '' ? 'Другой источник' : '',
     ];
 };
 
@@ -538,6 +540,7 @@ if ($reverseUsersHl) {
             'LEGAL_ENTITY' => '',
             'CABINET' => (string)$reverseCabinet['TITLE'],
             'CABINET_NORM' => (string)$reverseCabinet['NORM'],
+            'CABINET_SOURCE' => (string)($reverseCabinet['SOURCE'] ?? ''),
         ];
     }
 }
@@ -610,7 +613,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         if ($workedSeconds <= 0 || (!$hasSingleInputWithoutOutput && $workedSeconds === $fourHoursSeconds)) { continue; }
         $isShortOfficePresence = $hasSingleInputWithoutOutput || $workedSeconds < $fourHoursSeconds;
 
-        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => '', 'CABINET' => '', 'CABINET_NORM' => ''];
+        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => '', 'CABINET' => '', 'CABINET_NORM' => '', 'CABINET_SOURCE' => ''];
         $reverseUserName = trim((string)$reverseUser['FIO']);
         if ($portalUserId > 0 && isset($userLegalEntityMap[$portalUserId]) && $userLegalEntityMap[$portalUserId] !== '') {
             $legalEntity = $userLegalEntityMap[$portalUserId];
@@ -634,6 +637,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         }
         $userCabinetNorm = $userCabinetRaw !== '' ? $normalizeCabinet($userCabinetRaw) : '';
         $userCabinetTitle = $userCabinetRaw !== '' ? $userCabinetRaw : '';
+        $userCabinetSource = $userCabinetRaw !== '' ? 'Из поля UF_OFFICE (на основании данных AD)' : '';
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
         $countedInCabinetDailyOffice = false;
 
@@ -693,6 +697,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
 
         $unknownCabinetNorm = $reverseCabinetNorm !== '' ? $reverseCabinetNorm : $userCabinetNorm;
         $unknownCabinetTitle = $reverseCabinetTitle !== '' ? $reverseCabinetTitle : $userCabinetTitle;
+        $unknownCabinetSource = $reverseCabinetTitle !== '' ? (string)($reverseUser['CABINET_SOURCE'] ?? 'Другой источник') : $userCabinetSource;
         if ($unknownCabinetNorm !== '' && !$countedInCabinetDailyOffice && ($officeFilterRaw === '' || isset($cabinetDirectory[$unknownCabinetNorm]))) {
             if (!isset($cabinetDailyOffice[$dateKey][$unknownCabinetNorm])) {
                 $cabinetDailyOffice[$dateKey][$unknownCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
@@ -743,6 +748,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             'CABINET' => $unknownCabinetTitle,
             'DATE' => $dateKey,
             'REASON' => $unknownReason,
+            'CABINET_SOURCE' => $unknownCabinetSource !== '' ? $unknownCabinetSource : 'Другой источник',
         ];
     }
 }
@@ -798,11 +804,18 @@ header('Content-Type: text/html; charset=UTF-8');
     <title>Расширенный отчет по рабочим местам Reverse</title>
     <style>
         body { font-family: Arial,sans-serif; font-size:13px; margin:16px; }
-        table { border-collapse: collapse; width:100%; }
+        table { border-collapse: collapse; width:auto; max-width: none; }
         th, td { border:1px solid #d8e0ea; padding:6px 8px; vertical-align: top; }
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
         .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
+        .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
+        .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
+        .tab-button.is-active { background: #fff; font-weight: 700; position: relative; top: 1px; }
+        .tab-pane { display: none; }
+        .tab-pane.is-active { display: block; }
+        .report-toolbar { margin: 0 0 10px; }
+        .export-button { border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
         .head-modal-trigger { padding: 0; border: 0; background: none; color: #1d5fbf; cursor: pointer; text-decoration: underline; font: inherit; text-align: left; }
         .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); align-items: center; justify-content: center; padding: 24px; }
         .modal-backdrop.is-open { display: flex; }
@@ -830,7 +843,17 @@ header('Content-Type: text/html; charset=UTF-8');
     <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
 </form>
 
-<table>
+<div class="tabs" role="tablist" aria-label="Разделы отчета">
+    <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
+    <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
+    <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
+    <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
+    <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
+</div>
+
+<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
+<table id="employees-report-table">
     <thead>
     <tr>
         <th>ЮЛ</th>
@@ -971,9 +994,12 @@ header('Content-Type: text/html; charset=UTF-8');
     </tr>
     </tbody>
 </table>
+</section>
 
+<section class="tab-pane" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
+<table id="unknown-report-table">
     <thead>
     <tr>
         <th>ЮЛ</th>
@@ -992,17 +1018,19 @@ header('Content-Type: text/html; charset=UTF-8');
             <tr>
                 <td><?=htmlspecialcharsbx((string)($employee['LEGAL_ENTITY'] !== '' ? $employee['LEGAL_ENTITY'] : $undefinedLegalEntity))?></td>
                 <td title="<?=htmlspecialcharsbx((string)($employee['REASON'] ?? ''))?>"><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
-                <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
+                <td title="<?=htmlspecialcharsbx((string)($employee['CABINET_SOURCE'] ?? 'Другой источник'))?>"><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
             </tr>
         <?php endforeach; ?>
     <?php endif; ?>
     </tbody>
 </table>
+</section>
 
-
+<section class="tab-pane" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
+<table id="temporary-report-table">
     <thead>
     <tr>
         <th>Название</th>
@@ -1024,6 +1052,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php endif; ?>
     </tbody>
 </table>
+</section>
 
 <?php
 $summaryCabinets = [];
@@ -1074,8 +1103,10 @@ foreach ($periodDays as $dateKey) {
 }
 ?>
 
+<section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="cabinet-summary-report-table" data-export-name="cabinet_summary">Экспорт в Excel</button></div>
+<table id="cabinet-summary-report-table">
     <thead>
     <tr>
         <th>Кабинет</th>
@@ -1117,9 +1148,12 @@ foreach ($periodDays as $dateKey) {
     <?php endforeach; ?>
     </tbody>
 </table>
+</section>
 
+<section class="tab-pane" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
+<table id="legal-summary-report-table">
     <thead>
     <tr>
         <th>Дата</th>
@@ -1192,6 +1226,7 @@ foreach ($periodDays as $dateKey) {
     </tr>
     </tbody>
 </table>
+</section>
 
 <div class="modal-backdrop" id="departmentCabinetModal" aria-hidden="true">
     <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="departmentCabinetModalTitle">
@@ -1205,6 +1240,40 @@ foreach ($periodDays as $dateKey) {
 </div>
 <script>
 (function () {
+    document.querySelectorAll('.tab-button').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var target = button.getAttribute('data-tab-target');
+            if (!target) { return; }
+
+            document.querySelectorAll('.tab-button').forEach(function (tabButton) {
+                var isActive = tabButton === button;
+                tabButton.classList.toggle('is-active', isActive);
+                tabButton.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            document.querySelectorAll('.tab-pane').forEach(function (pane) {
+                pane.classList.toggle('is-active', pane.id === 'tab-' + target);
+            });
+        });
+    });
+
+    document.querySelectorAll('.export-button').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var table = document.getElementById(button.getAttribute('data-export-table') || '');
+            if (!table) { return; }
+
+            var html = '<html><head><meta charset="UTF-8"></head><body>' + table.outerHTML + '</body></html>';
+            var blob = new Blob(['\ufeff', html], {type: 'application/vnd.ms-excel;charset=utf-8;'});
+            var link = document.createElement('a');
+            var fileName = (button.getAttribute('data-export-name') || 'report') + '_' + (new Date()).toISOString().slice(0, 10) + '.xls';
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+        });
+    });
+
     var modal = document.getElementById('departmentCabinetModal');
     var closeButton = document.getElementById('departmentCabinetModalClose');
     var subtitle = document.getElementById('departmentCabinetModalSubtitle');
