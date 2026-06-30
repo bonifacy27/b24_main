@@ -16,9 +16,25 @@ require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime as BitrixDateTime;
 
+$reportRoles = [
+    'AHS_ADMIN' => [4945, 3532, 5060],
+    'HR_DIRECTOR' => [3696, 5209],
+];
+
 if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loader::includeModule('highloadblock')) {
     header('Content-Type: text/plain; charset=UTF-8');
     echo 'Ошибка: не удалось подключить обязательные модули.';
+    exit;
+}
+
+global $USER;
+$currentUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$isAhsAdmin = in_array($currentUserId, $reportRoles['AHS_ADMIN'], true);
+$isHrDirector = in_array($currentUserId, $reportRoles['HR_DIRECTOR'], true);
+if (!$isAhsAdmin && !$isHrDirector) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo 'Доступ запрещен.';
     exit;
 }
 
@@ -498,6 +514,7 @@ $resolveReverseCabinet = static function ($cabinetValue) use (&$cabinetDirectory
         return [
             'TITLE' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['TITLE'],
             'NORM' => (string)$cabinetDirectoryById[(int)$cabinetRaw]['NORM'],
+            'SOURCE' => 'Из привязки к кабинету',
         ];
     }
 
@@ -507,6 +524,7 @@ $resolveReverseCabinet = static function ($cabinetValue) use (&$cabinetDirectory
     return [
         'TITLE' => $cabinetNorm !== '' ? $cabinetRaw : '',
         'NORM' => $cabinetNorm,
+        'SOURCE' => $cabinetNorm !== '' ? 'Другой источник' : '',
     ];
 };
 
@@ -538,6 +556,7 @@ if ($reverseUsersHl) {
             'LEGAL_ENTITY' => '',
             'CABINET' => (string)$reverseCabinet['TITLE'],
             'CABINET_NORM' => (string)$reverseCabinet['NORM'],
+            'CABINET_SOURCE' => (string)($reverseCabinet['SOURCE'] ?? ''),
         ];
     }
 }
@@ -610,7 +629,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         if ($workedSeconds <= 0 || (!$hasSingleInputWithoutOutput && $workedSeconds === $fourHoursSeconds)) { continue; }
         $isShortOfficePresence = $hasSingleInputWithoutOutput || $workedSeconds < $fourHoursSeconds;
 
-        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => '', 'CABINET' => '', 'CABINET_NORM' => ''];
+        $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => '', 'CABINET' => '', 'CABINET_NORM' => '', 'CABINET_SOURCE' => ''];
         $reverseUserName = trim((string)$reverseUser['FIO']);
         if ($portalUserId > 0 && isset($userLegalEntityMap[$portalUserId]) && $userLegalEntityMap[$portalUserId] !== '') {
             $legalEntity = $userLegalEntityMap[$portalUserId];
@@ -634,6 +653,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         }
         $userCabinetNorm = $userCabinetRaw !== '' ? $normalizeCabinet($userCabinetRaw) : '';
         $userCabinetTitle = $userCabinetRaw !== '' ? $userCabinetRaw : '';
+        $userCabinetSource = $userCabinetRaw !== '' ? 'Из поля UF_OFFICE (на основании данных AD)' : '';
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
         $countedInCabinetDailyOffice = false;
 
@@ -693,6 +713,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
 
         $unknownCabinetNorm = $reverseCabinetNorm !== '' ? $reverseCabinetNorm : $userCabinetNorm;
         $unknownCabinetTitle = $reverseCabinetTitle !== '' ? $reverseCabinetTitle : $userCabinetTitle;
+        $unknownCabinetSource = $reverseCabinetTitle !== '' ? (string)($reverseUser['CABINET_SOURCE'] ?? 'Другой источник') : $userCabinetSource;
         if ($unknownCabinetNorm !== '' && !$countedInCabinetDailyOffice && ($officeFilterRaw === '' || isset($cabinetDirectory[$unknownCabinetNorm]))) {
             if (!isset($cabinetDailyOffice[$dateKey][$unknownCabinetNorm])) {
                 $cabinetDailyOffice[$dateKey][$unknownCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
@@ -741,8 +762,10 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             'LEGAL_ENTITY' => $legalEntity,
             'EMPLOYEE' => $employeeName,
             'CABINET' => $unknownCabinetTitle,
+            'CABINET_NORM' => $unknownCabinetNorm,
             'DATE' => $dateKey,
             'REASON' => $unknownReason,
+            'CABINET_SOURCE' => $unknownCabinetSource !== '' ? $unknownCabinetSource : 'Другой источник',
         ];
     }
 }
@@ -798,11 +821,19 @@ header('Content-Type: text/html; charset=UTF-8');
     <title>Расширенный отчет по рабочим местам Reverse</title>
     <style>
         body { font-family: Arial,sans-serif; font-size:13px; margin:16px; }
-        table { border-collapse: collapse; width:100%; }
+        table { border-collapse: collapse; width:auto; max-width: none; }
         th, td { border:1px solid #d8e0ea; padding:6px 8px; vertical-align: top; }
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
         .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
+        .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
+        .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
+        .tab-button.is-active { background: #fff; font-weight: 700; position: relative; top: 1px; }
+        .tab-pane { display: none; }
+        .tab-pane.is-active { display: block; }
+        .report-toolbar { margin: 0 0 10px; }
+        .export-button { border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
+        .management-link { display: inline-block; margin: 0 0 10px; border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 7px 12px; border-radius: 4px; text-decoration: none; }
         .head-modal-trigger { padding: 0; border: 0; background: none; color: #1d5fbf; cursor: pointer; text-decoration: underline; font: inherit; text-align: left; }
         .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); align-items: center; justify-content: center; padding: 24px; }
         .modal-backdrop.is-open { display: flex; }
@@ -820,6 +851,9 @@ header('Content-Type: text/html; charset=UTF-8');
 </head>
 <body>
 <h1>Расширенный отчет по рабочим местам Reverse</h1>
+<?php if ($isAhsAdmin): ?>
+    <a class="management-link" href="/pub/apps/attendance_report/cabinet_edit.php">Управление РМ</a>
+<?php endif; ?>
 <form method="get" class="filters">
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
@@ -830,7 +864,17 @@ header('Content-Type: text/html; charset=UTF-8');
     <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
 </form>
 
-<table>
+<div class="tabs" role="tablist" aria-label="Разделы отчета">
+    <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
+    <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
+    <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
+    <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
+    <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
+</div>
+
+<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
+<table id="employees-report-table">
     <thead>
     <tr>
         <th>ЮЛ</th>
@@ -971,9 +1015,12 @@ header('Content-Type: text/html; charset=UTF-8');
     </tr>
     </tbody>
 </table>
+</section>
 
+<section class="tab-pane" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
+<table id="unknown-report-table">
     <thead>
     <tr>
         <th>ЮЛ</th>
@@ -992,17 +1039,19 @@ header('Content-Type: text/html; charset=UTF-8');
             <tr>
                 <td><?=htmlspecialcharsbx((string)($employee['LEGAL_ENTITY'] !== '' ? $employee['LEGAL_ENTITY'] : $undefinedLegalEntity))?></td>
                 <td title="<?=htmlspecialcharsbx((string)($employee['REASON'] ?? ''))?>"><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
-                <td><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
+                <td title="<?=htmlspecialcharsbx((string)($employee['CABINET_SOURCE'] ?? 'Другой источник'))?>"><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
                 <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
             </tr>
         <?php endforeach; ?>
     <?php endif; ?>
     </tbody>
 </table>
+</section>
 
-
+<section class="tab-pane" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
+<table id="temporary-report-table">
     <thead>
     <tr>
         <th>Название</th>
@@ -1024,6 +1073,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php endif; ?>
     </tbody>
 </table>
+</section>
 
 <?php
 $summaryCabinets = [];
@@ -1053,29 +1103,78 @@ foreach ($summaryCabinets as $cabData) {
     $officeWorkplacesTotal += (int)$cabData['WORKPLACES'];
 }
 
+$legalEntityAssignedWorkplaces = [];
+foreach ($userCabinetMap as $userId => $cabName) {
+    $cabNorm = $normalizeCabinet((string)$cabName);
+    if ($cabNorm === '' || !isset($summaryCabinets[$cabNorm])) { continue; }
+
+    $legalEntityTitle = isset($userLegalEntityMap[(int)$userId]) && $userLegalEntityMap[(int)$userId] !== '' ? $userLegalEntityMap[(int)$userId] : $undefinedLegalEntity;
+    if (!isset($legalEntityAssignedWorkplaces[$legalEntityTitle])) {
+        $legalEntityAssignedWorkplaces[$legalEntityTitle] = 0;
+    }
+    $legalEntityAssignedWorkplaces[$legalEntityTitle]++;
+}
+ksort($legalEntityAssignedWorkplaces, SORT_NATURAL | SORT_FLAG_CASE);
+
+$otherVisitorsLegalSummary = [];
+$otherVisitorsAssignedWorkplaces = [];
+foreach ($unknownEmployees as $employee) {
+    $legalEntityTitle = trim((string)($employee['LEGAL_ENTITY'] ?? ''));
+    $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+    $dateKey = (string)($employee['DATE'] ?? '');
+    if ($legalEntityTitle === '' || $legalEntityTitle === $undefinedLegalEntity || $cabNorm === '' || $dateKey === '' || !isset($summaryCabinets[$cabNorm])) { continue; }
+
+    if (!isset($otherVisitorsLegalSummary[$dateKey])) { $otherVisitorsLegalSummary[$dateKey] = []; }
+    if (!isset($otherVisitorsLegalSummary[$dateKey][$cabNorm])) { $otherVisitorsLegalSummary[$dateKey][$cabNorm] = []; }
+    if (!isset($otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle])) {
+        $otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle] = 0;
+    }
+    $otherVisitorsLegalSummary[$dateKey][$cabNorm][$legalEntityTitle]++;
+
+    if (!isset($otherVisitorsAssignedWorkplaces[$dateKey])) { $otherVisitorsAssignedWorkplaces[$dateKey] = []; }
+    if (!isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntityTitle])) { $otherVisitorsAssignedWorkplaces[$dateKey][$legalEntityTitle] = []; }
+    $otherVisitorAssignedKey = mb_strtolower(trim((string)($employee['EMPLOYEE'] ?? ''))) . '|' . $cabNorm;
+    if ($otherVisitorAssignedKey !== '|') {
+        $otherVisitorsAssignedWorkplaces[$dateKey][$legalEntityTitle][$otherVisitorAssignedKey] = true;
+    }
+}
+
 $legalEntitySummary = [];
 foreach ($periodDays as $dateKey) {
     if (!isset($legalEntitySummary[$dateKey])) { $legalEntitySummary[$dateKey] = []; }
     foreach ($summaryCabinets as $cabNorm => $cabData) {
         $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : [];
         $legalCounts = isset($dayData['BY_LEGAL_ENTITY']) && is_array($dayData['BY_LEGAL_ENTITY']) ? $dayData['BY_LEGAL_ENTITY'] : [];
-        $shortLegalCounts = isset($dayData['SHORT_BY_LEGAL_ENTITY']) && is_array($dayData['SHORT_BY_LEGAL_ENTITY']) ? $dayData['SHORT_BY_LEGAL_ENTITY'] : [];
-        foreach ([$legalCounts, $shortLegalCounts] as $countsByLegalEntity) {
-            foreach ($countsByLegalEntity as $legalEntity => $count) {
-                $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
-                if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
-                    $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
-                }
-                $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
+        foreach ($legalCounts as $legalEntity => $count) {
+            $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
+            if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+                $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
             }
+            $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
+        }
+        $otherVisitorsLegalCounts = isset($otherVisitorsLegalSummary[$dateKey][$cabNorm]) && is_array($otherVisitorsLegalSummary[$dateKey][$cabNorm]) ? $otherVisitorsLegalSummary[$dateKey][$cabNorm] : [];
+        foreach ($otherVisitorsLegalCounts as $legalEntityTitle => $count) {
+            if (isset($legalCounts[$legalEntityTitle])) { continue; }
+            if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+                $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
+            }
+            $legalEntitySummary[$dateKey][$legalEntityTitle] += (int)$count;
+        }
+    }
+    foreach ($legalEntityAssignedWorkplaces as $legalEntityTitle => $assignedCount) {
+        if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
+            $legalEntitySummary[$dateKey][$legalEntityTitle] = 0;
         }
     }
     ksort($legalEntitySummary[$dateKey], SORT_NATURAL | SORT_FLAG_CASE);
 }
+$legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
+<section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="cabinet-summary-report-table" data-export-name="cabinet_summary">Экспорт в Excel</button></div>
+<table id="cabinet-summary-report-table">
     <thead>
     <tr>
         <th>Кабинет</th>
@@ -1117,15 +1216,19 @@ foreach ($periodDays as $dateKey) {
     <?php endforeach; ?>
     </tbody>
 </table>
+</section>
 
+<section class="tab-pane" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
-<table>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
+<table id="legal-summary-report-table">
     <thead>
     <tr>
         <th>Дата</th>
         <th>ЮЛ</th>
-        <th class="col-narrow">Кол-во рабочих мест в офисе</th>
-        <th class="col-narrow">Кол-во сотрудников в офисе (&gt;4 ч)</th>
+        <th class="col-narrow">Кол-во рабочих мест в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?></th>
+        <th class="col-narrow">Кол-во привязанных РМ в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> к ЮЛ</th>
+        <th class="col-narrow">Кол-во сотрудников в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> (&gt;4 ч)</th>
         <th class="col-narrow">Кол-во свободных рм</th>
         <th>% загрузки офиса</th>
     </tr>
@@ -1134,64 +1237,56 @@ foreach ($periodDays as $dateKey) {
     <?php
     $legalEntitySummaryTotals = [
         'WORKPLACES_BY_DATE' => [],
+        'ASSIGNED_BY_DATE_LEGAL_ENTITY' => [],
         'OCCUPIED' => 0,
-        'FREE_BY_DATE' => [],
+        'FREE_BY_DATE_LEGAL_ENTITY' => [],
     ];
     ?>
     <?php foreach ($legalEntitySummary as $dateKey => $legalEntityCounts): ?>
         <?php if (empty($legalEntityCounts)): ?>
+            <?php $legalEntityCounts = [$undefinedLegalEntity => 0]; ?>
+        <?php endif; ?>
+        <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
             <?php
-            $free = max(0, $officeWorkplacesTotal);
+            $occupied = (int)$occupied;
+            $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
+            $assigned += isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) && is_array($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) ? count($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) : 0;
+            $free = max(0, $assigned - $occupied);
+            $utilization = $assigned > 0 ? round(($occupied / $assigned) * 100, 1) : 0;
             $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-            $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = $free;
+            $legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $assigned;
+            $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
+            $legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $free;
             ?>
             <tr>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                <td><?=htmlspecialcharsbx($undefinedLegalEntity)?></td>
+                <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
                 <td><?= $officeWorkplacesTotal ?></td>
-                <td>0</td>
+                <td><?= $assigned ?></td>
+                <td><?= $occupied ?></td>
                 <td><?= $free ?></td>
-                <td>0%</td>
+                <td><?= $utilization ?>%</td>
             </tr>
-        <?php else: ?>
-            <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
-                <?php
-                $occupied = (int)$occupied;
-                $free = max(0, $officeWorkplacesTotal - $occupied);
-                $utilization = $officeWorkplacesTotal > 0 ? round(($occupied / $officeWorkplacesTotal) * 100, 1) : 0;
-                $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-                $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
-                if (!isset($legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey])) {
-                    $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-                }
-                $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] = max(0, $legalEntitySummaryTotals['FREE_BY_DATE'][$dateKey] - $occupied);
-                ?>
-                <tr>
-                    <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                    <td><?=htmlspecialcharsbx((string)$legalEntity)?></td>
-                    <td><?= $officeWorkplacesTotal ?></td>
-                    <td><?= $occupied ?></td>
-                    <td><?= $free ?></td>
-                    <td><?= $utilization ?>%</td>
-                </tr>
-            <?php endforeach; ?>
-        <?php endif; ?>
+        <?php endforeach; ?>
     <?php endforeach; ?>
     <?php
     $legalEntityTotalWorkplaces = array_sum($legalEntitySummaryTotals['WORKPLACES_BY_DATE']);
-    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE']);
-    $totalUtilization = $legalEntityTotalWorkplaces > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalWorkplaces) * 100, 1) : 0;
+    $legalEntityTotalAssigned = array_sum($legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY']);
+    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY']);
+    $totalUtilization = $legalEntityTotalAssigned > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalAssigned) * 100, 1) : 0;
     ?>
     <tr style="font-weight: bold;">
         <td>Итого</td>
         <td></td>
         <td><?= (int)$legalEntityTotalWorkplaces ?></td>
+        <td><?= (int)$legalEntityTotalAssigned ?></td>
         <td><?= (int)$legalEntitySummaryTotals['OCCUPIED'] ?></td>
         <td><?= (int)$legalEntityTotalFree ?></td>
         <td><?= $totalUtilization ?>%</td>
     </tr>
     </tbody>
 </table>
+</section>
 
 <div class="modal-backdrop" id="departmentCabinetModal" aria-hidden="true">
     <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="departmentCabinetModalTitle">
@@ -1205,6 +1300,40 @@ foreach ($periodDays as $dateKey) {
 </div>
 <script>
 (function () {
+    document.querySelectorAll('.tab-button').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var target = button.getAttribute('data-tab-target');
+            if (!target) { return; }
+
+            document.querySelectorAll('.tab-button').forEach(function (tabButton) {
+                var isActive = tabButton === button;
+                tabButton.classList.toggle('is-active', isActive);
+                tabButton.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+            document.querySelectorAll('.tab-pane').forEach(function (pane) {
+                pane.classList.toggle('is-active', pane.id === 'tab-' + target);
+            });
+        });
+    });
+
+    document.querySelectorAll('.export-button').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var table = document.getElementById(button.getAttribute('data-export-table') || '');
+            if (!table) { return; }
+
+            var html = '<html><head><meta charset="UTF-8"></head><body>' + table.outerHTML + '</body></html>';
+            var blob = new Blob(['\ufeff', html], {type: 'application/vnd.ms-excel;charset=utf-8;'});
+            var link = document.createElement('a');
+            var fileName = (button.getAttribute('data-export-name') || 'report') + '_' + (new Date()).toISOString().slice(0, 10) + '.xls';
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+        });
+    });
+
     var modal = document.getElementById('departmentCabinetModal');
     var closeButton = document.getElementById('departmentCabinetModalClose');
     var subtitle = document.getElementById('departmentCabinetModalSubtitle');
