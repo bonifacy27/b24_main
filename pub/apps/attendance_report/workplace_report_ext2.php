@@ -859,12 +859,6 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
-        .cabinet-heatmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-        .cabinet-tile { border: 1px solid #d8e0ea; border-radius: 12px; padding: 12px; background: #fff; }
-        .cabinet-tile-title { font-weight: 700; margin-bottom: 6px; }
-        .cabinet-tile-meta { display: flex; justify-content: space-between; gap: 10px; color: #52616f; margin-bottom: 8px; }
-        .cabinet-progress { height: 10px; background: #edf4fb; border-radius: 999px; overflow: hidden; }
-        .cabinet-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -892,9 +886,9 @@ header('Content-Type: text/html; charset=UTF-8');
     <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
     <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
     <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
-    <button type="button" class="tab-button" data-tab-target="dashboard" role="tab" aria-selected="false">Дашборд загрузки</button>
     <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
+    <button type="button" class="tab-button" data-tab-target="dashboard" role="tab" aria-selected="false">Дашборд загрузки</button>
 </div>
 
 <section class="tab-pane is-active" id="tab-employees" role="tabpanel">
@@ -1213,7 +1207,6 @@ foreach ($periodDays as $dateKey) {
 }
 
 $dashboardOfficeByDate = [];
-$dashboardCabinetTotals = [];
 $dashboardTotalWorkplaces = $officeWorkplacesTotal * max(1, count($periodDays));
 $dashboardTotalOccupied = 0;
 $dashboardPeakOfficeLoad = 0;
@@ -1228,19 +1221,6 @@ foreach ($periodDays as $dateKey) {
         $shortOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
         $dayOccupied += $occupied;
         $dayShortOccupied += $shortOccupied;
-        if (!isset($dashboardCabinetTotals[$cabNorm])) {
-            $dashboardCabinetTotals[$cabNorm] = [
-                'TITLE' => (string)$cabData['TITLE'],
-                'WORKPLACES_DAYS' => 0,
-                'OCCUPIED' => 0,
-                'SHORT_OCCUPIED' => 0,
-                'PEAK' => 0,
-            ];
-        }
-        $dashboardCabinetTotals[$cabNorm]['WORKPLACES_DAYS'] += $workplaces;
-        $dashboardCabinetTotals[$cabNorm]['OCCUPIED'] += $occupied;
-        $dashboardCabinetTotals[$cabNorm]['SHORT_OCCUPIED'] += $shortOccupied;
-        $dashboardCabinetTotals[$cabNorm]['PEAK'] = max((int)$dashboardCabinetTotals[$cabNorm]['PEAK'], $occupied);
     }
     $dayUtilization = $officeWorkplacesTotal > 0 ? round(($dayOccupied / $officeWorkplacesTotal) * 100, 1) : 0;
     $dashboardOfficeByDate[$dateKey] = [
@@ -1256,73 +1236,9 @@ foreach ($periodDays as $dateKey) {
     }
 }
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
-foreach ($dashboardCabinetTotals as $cabNorm => $cabData) {
-    $dashboardCabinetTotals[$cabNorm]['UTILIZATION'] = (int)$cabData['WORKPLACES_DAYS'] > 0 ? round(((int)$cabData['OCCUPIED'] / (int)$cabData['WORKPLACES_DAYS']) * 100, 1) : 0;
-}
-uasort($dashboardCabinetTotals, static function (array $left, array $right): int {
-    if ((float)$left['UTILIZATION'] === (float)$right['UTILIZATION']) {
-        return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
-    }
-    return (float)$left['UTILIZATION'] < (float)$right['UTILIZATION'] ? 1 : -1;
-});
-$dashboardTopCabinets = array_slice($dashboardCabinetTotals, 0, 12, true);
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
-
-<section class="tab-pane" id="tab-dashboard" role="tabpanel">
-<h2>Дашборд загрузки кабинетов</h2>
-<div class="dashboard-grid">
-    <div class="dashboard-card">
-        <p class="dashboard-card-title">Средняя загрузка офиса</p>
-        <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
-        <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
-    </div>
-    <div class="dashboard-card">
-        <p class="dashboard-card-title">Пик загрузки офиса</p>
-        <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
-        <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
-    </div>
-    <div class="dashboard-card">
-        <p class="dashboard-card-title">Кабинетов в выборке</p>
-        <div class="dashboard-card-value"><?= count($summaryCabinets) ?></div>
-        <div class="dashboard-card-note">Рабочих мест: <?= (int)$officeWorkplacesTotal ?></div>
-    </div>
-</div>
-
-<div class="dashboard-section">
-    <h3>Загрузка всего офиса по дням</h3>
-    <div class="office-load-chart">
-        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-            <div class="office-load-row">
-                <div><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></div>
-                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
-                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
-                </div>
-                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
-            </div>
-        <?php endforeach; ?>
-    </div>
-</div>
-
-<div class="dashboard-section">
-    <h3>Топ кабинетов по средней загрузке</h3>
-    <?php if (empty($dashboardTopCabinets)): ?>
-        <p class="dashboard-muted">Нет данных для построения дашборда.</p>
-    <?php else: ?>
-        <div class="cabinet-heatmap">
-            <?php foreach ($dashboardTopCabinets as $cabData): ?>
-                <div class="cabinet-tile">
-                    <div class="cabinet-tile-title"><?=htmlspecialcharsbx((string)$cabData['TITLE'])?></div>
-                    <div class="cabinet-tile-meta"><span>Средняя загрузка</span><strong><?= $cabData['UTILIZATION'] ?>%</strong></div>
-                    <div class="cabinet-progress"><div class="cabinet-progress-fill" style="width: <?= min(100, (float)$cabData['UTILIZATION']) ?>%;"></div></div>
-                    <div class="dashboard-card-note">Пик: <?= (int)$cabData['PEAK'] ?> чел.; &lt;4ч: <?= (int)$cabData['SHORT_OCCUPIED'] ?></div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-</div>
-</section>
 
 <section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
@@ -1438,6 +1354,43 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
     </tr>
     </tbody>
 </table>
+</section>
+
+<section class="tab-pane" id="tab-dashboard" role="tabpanel">
+<h2>Дашборд загрузки кабинетов</h2>
+<div class="dashboard-grid">
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Средняя загрузка офиса</p>
+        <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
+        <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Пик загрузки офиса</p>
+        <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
+        <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Кабинетов в выборке</p>
+        <div class="dashboard-card-value"><?= count($summaryCabinets) ?></div>
+        <div class="dashboard-card-note">Рабочих мест: <?= (int)$officeWorkplacesTotal ?></div>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h3>Загрузка всего офиса по дням</h3>
+    <div class="office-load-chart">
+        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+            <div class="office-load-row">
+                <div><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></div>
+                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
+                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
+                </div>
+                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
 </section>
 
 <div class="modal-backdrop" id="departmentCabinetModal" aria-hidden="true">
