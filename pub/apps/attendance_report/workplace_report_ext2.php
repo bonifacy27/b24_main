@@ -1314,27 +1314,31 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
     </thead>
     <tbody>
     <?php
-    $legalEntitySummaryTotals = [
-        'WORKPLACES_BY_DATE' => [],
-        'ASSIGNED_BY_DATE_LEGAL_ENTITY' => [],
-        'OCCUPIED' => 0,
-        'FREE_BY_DATE_LEGAL_ENTITY' => [],
-    ];
+    $legalEntitySummaryTotalsByDate = [];
     ?>
     <?php foreach ($legalEntitySummary as $dateKey => $legalEntityCounts): ?>
         <?php if (empty($legalEntityCounts)): ?>
             <?php $legalEntityCounts = [$undefinedLegalEntity => 0]; ?>
         <?php endif; ?>
+        <?php
+        if (!isset($legalEntitySummaryTotalsByDate[$dateKey])) {
+            $legalEntitySummaryTotalsByDate[$dateKey] = [
+                'WORKPLACES' => $officeWorkplacesTotal,
+                'ASSIGNED' => 0,
+                'OCCUPIED' => 0,
+                'FREE' => 0,
+            ];
+        }
+        ?>
         <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
             <?php
             $occupied = (int)$occupied;
             $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
             $assigned += isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) && is_array($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) ? count($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) : 0;
             $free = max(0, $assigned - $occupied);
-            $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-            $legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $assigned;
-            $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
-            $legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $free;
+            $legalEntitySummaryTotalsByDate[$dateKey]['ASSIGNED'] += $assigned;
+            $legalEntitySummaryTotalsByDate[$dateKey]['OCCUPIED'] += $occupied;
+            $legalEntitySummaryTotalsByDate[$dateKey]['FREE'] += $free;
             ?>
             <tr>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
@@ -1347,21 +1351,21 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
             </tr>
         <?php endforeach; ?>
     <?php endforeach; ?>
-    <?php
-    $legalEntityTotalWorkplaces = array_sum($legalEntitySummaryTotals['WORKPLACES_BY_DATE']);
-    $legalEntityTotalAssigned = array_sum($legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY']);
-    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY']);
-    $totalUtilization = $legalEntityTotalAssigned > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalAssigned) * 100, 1) : 0;
-    ?>
-    <tr style="font-weight: bold;">
-        <td>Итого</td>
-        <td></td>
-        <td><?= (int)$legalEntityTotalWorkplaces ?></td>
-        <td><?= (int)$legalEntityTotalAssigned ?></td>
-        <td><?= (int)$legalEntitySummaryTotals['OCCUPIED'] ?></td>
-        <td><?= (int)$legalEntityTotalFree ?></td>
-        <td><?= $totalUtilization ?>%</td>
-    </tr>
+    <?php foreach ($legalEntitySummaryTotalsByDate as $dateKey => $dateTotals): ?>
+        <?php
+        $dateTotalAssigned = (int)$dateTotals['ASSIGNED'];
+        $dateTotalUtilization = $dateTotalAssigned > 0 ? round(((int)$dateTotals['OCCUPIED'] / $dateTotalAssigned) * 100, 1) : 0;
+        ?>
+        <tr style="font-weight: bold;">
+            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+            <td>Итого</td>
+            <td><?= (int)$dateTotals['WORKPLACES'] ?></td>
+            <td><?= $dateTotalAssigned ?></td>
+            <td><?= (int)$dateTotals['OCCUPIED'] ?></td>
+            <td><?= (int)$dateTotals['FREE'] ?></td>
+            <td><?= $dateTotalUtilization ?>%</td>
+        </tr>
+    <?php endforeach; ?>
     </tbody>
 </table>
 </section>
