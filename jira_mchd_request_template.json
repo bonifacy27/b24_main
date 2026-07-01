@@ -1,0 +1,10 @@
+{
+  "serviceDeskId": "28",
+  "requestTypeId": "741",
+  "requestFieldValues": {
+    "customfield_14651": { "value": "Запрос на обслуживание" },
+    "summary": "Загрузка МЧД",
+    "description": "${description}"
+  },
+  "raiseOnBehalfOf": "${responsible_login}"
+}
