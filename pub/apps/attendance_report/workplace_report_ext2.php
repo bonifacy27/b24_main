@@ -57,6 +57,8 @@ $defaultOfficeFilter = 'Московский пр., 139/1';
 $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
 $ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
 $officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
+$availableTabs = ['employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true, 'dashboard' => true];
+$activeTab = isset($_GET['active_tab']) && isset($availableTabs[(string)$_GET['active_tab']]) ? (string)$_GET['active_tab'] : 'employees';
 
 $undefinedLegalEntity = 'Не определено';
 $normalizeLegalEntity = static function ($value): string {
@@ -873,6 +875,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <a class="management-link" href="/pub/apps/attendance_report/cabinet_edit.php">Управление РМ</a>
 <?php endif; ?>
 <form method="get" class="filters">
+    <input type="hidden" name="active_tab" id="active-tab-input" value="<?=htmlspecialcharsbx($activeTab)?>">
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
@@ -883,15 +886,15 @@ header('Content-Type: text/html; charset=UTF-8');
 </form>
 
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
-    <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
-    <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
-    <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
-    <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
-    <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
-    <button type="button" class="tab-button" data-tab-target="dashboard" role="tab" aria-selected="false">Дашборд загрузки</button>
+    <button type="button" class="tab-button<?= $activeTab === 'employees' ? ' is-active' : '' ?>" data-tab-target="employees" role="tab" aria-selected="<?= $activeTab === 'employees' ? 'true' : 'false' ?>">Сотрудники</button>
+    <button type="button" class="tab-button<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" data-tab-target="unknown" role="tab" aria-selected="<?= $activeTab === 'unknown' ? 'true' : 'false' ?>">Прочие посетители</button>
+    <button type="button" class="tab-button<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" data-tab-target="temporary" role="tab" aria-selected="<?= $activeTab === 'temporary' ? 'true' : 'false' ?>">Посещения по временным и гостевым пропускам</button>
+    <button type="button" class="tab-button<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" data-tab-target="cabinet-summary" role="tab" aria-selected="<?= $activeTab === 'cabinet-summary' ? 'true' : 'false' ?>">Сводная таблица по кабинетам</button>
+    <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
+    <button type="button" class="tab-button<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" data-tab-target="dashboard" role="tab" aria-selected="<?= $activeTab === 'dashboard' ? 'true' : 'false' ?>">Дашборд загрузки</button>
 </div>
 
-<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'employees' ? ' is-active' : '' ?>" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
 <p class="dashboard-muted">Если выбран период, строки сгруппированы по датам. Нажмите на строку даты, чтобы раскрыть или свернуть детализацию за день.</p>
 <table id="employees-report-table">
@@ -1054,7 +1057,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </table>
 </section>
 
-<section class="tab-pane" id="tab-unknown" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
 <table id="unknown-report-table">
@@ -1085,7 +1088,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </table>
 </section>
 
-<section class="tab-pane" id="tab-temporary" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
 <table id="temporary-report-table">
@@ -1247,7 +1250,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 ?>
 
 
-<section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="cabinet-summary-report-table" data-export-name="cabinet_summary">Экспорт в Excel</button></div>
 <table id="cabinet-summary-report-table">
@@ -1294,7 +1297,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </table>
 </section>
 
-<section class="tab-pane" id="tab-legal-summary" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
 <table id="legal-summary-report-table">
@@ -1363,7 +1366,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </table>
 </section>
 
-<section class="tab-pane" id="tab-dashboard" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" id="tab-dashboard" role="tabpanel">
 <h2>Дашборд загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></h2>
 <div class="dashboard-grid">
     <div class="dashboard-card">
@@ -1412,10 +1415,13 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </div>
 <script>
 (function () {
+    var activeTabInput = document.getElementById('active-tab-input');
+
     document.querySelectorAll('.tab-button').forEach(function (button) {
         button.addEventListener('click', function () {
             var target = button.getAttribute('data-tab-target');
             if (!target) { return; }
+            if (activeTabInput) { activeTabInput.value = target; }
 
             document.querySelectorAll('.tab-button').forEach(function (tabButton) {
                 var isActive = tabButton === button;
