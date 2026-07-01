@@ -1236,6 +1236,13 @@ foreach ($periodDays as $dateKey) {
     }
 }
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
+$dashboardIsCabinetScope = $cabinetFilterNorm !== '';
+$dashboardScopeGenitive = $dashboardIsCabinetScope ? 'кабинета' : 'офиса';
+$dashboardScopePrepositional = $dashboardIsCabinetScope ? 'кабинету' : 'всему офису';
+$dashboardScopeTitle = $dashboardIsCabinetScope ? (isset($summaryCabinets[$cabinetFilterNorm]) ? (string)$summaryCabinets[$cabinetFilterNorm]['TITLE'] : $cabinetFilterRaw) : 'весь офис';
+$dashboardSelectionCardTitle = $dashboardIsCabinetScope ? 'Кабинет в выборке' : 'Кабинетов в выборке';
+$dashboardSelectionCardValue = $dashboardIsCabinetScope ? 1 : count($summaryCabinets);
+$dashboardSelectionCardNote = $dashboardIsCabinetScope ? ('Кабинет: ' . $dashboardScopeTitle) : ('Рабочих мест: ' . (int)$officeWorkplacesTotal);
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
@@ -1357,27 +1364,27 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </section>
 
 <section class="tab-pane" id="tab-dashboard" role="tabpanel">
-<h2>Дашборд загрузки кабинетов</h2>
+<h2>Дашборд загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></h2>
 <div class="dashboard-grid">
     <div class="dashboard-card">
-        <p class="dashboard-card-title">Средняя загрузка офиса</p>
+        <p class="dashboard-card-title">Средняя загрузка <?=htmlspecialcharsbx($dashboardScopeGenitive)?></p>
         <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
         <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
     </div>
     <div class="dashboard-card">
-        <p class="dashboard-card-title">Пик загрузки офиса</p>
+        <p class="dashboard-card-title">Пик загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></p>
         <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
         <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
     </div>
     <div class="dashboard-card">
-        <p class="dashboard-card-title">Кабинетов в выборке</p>
-        <div class="dashboard-card-value"><?= count($summaryCabinets) ?></div>
-        <div class="dashboard-card-note">Рабочих мест: <?= (int)$officeWorkplacesTotal ?></div>
+        <p class="dashboard-card-title"><?=htmlspecialcharsbx($dashboardSelectionCardTitle)?></p>
+        <div class="dashboard-card-value"><?= $dashboardSelectionCardValue ?></div>
+        <div class="dashboard-card-note"><?=htmlspecialcharsbx($dashboardSelectionCardNote)?></div>
     </div>
 </div>
 
 <div class="dashboard-section">
-    <h3>Загрузка всего офиса по дням</h3>
+    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
     <div class="office-load-chart">
         <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
             <div class="office-load-row">
