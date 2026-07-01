@@ -57,6 +57,8 @@ $defaultOfficeFilter = 'Московский пр., 139/1';
 $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
 $ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
 $officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
+$availableTabs = ['employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true, 'dashboard' => true];
+$activeTab = isset($_GET['active_tab']) && isset($availableTabs[(string)$_GET['active_tab']]) ? (string)$_GET['active_tab'] : 'employees';
 
 $undefinedLegalEntity = 'Не определено';
 $normalizeLegalEntity = static function ($value): string {
@@ -859,12 +861,6 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
-        .cabinet-heatmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
-        .cabinet-tile { border: 1px solid #d8e0ea; border-radius: 12px; padding: 12px; background: #fff; }
-        .cabinet-tile-title { font-weight: 700; margin-bottom: 6px; }
-        .cabinet-tile-meta { display: flex; justify-content: space-between; gap: 10px; color: #52616f; margin-bottom: 8px; }
-        .cabinet-progress { height: 10px; background: #edf4fb; border-radius: 999px; overflow: hidden; }
-        .cabinet-progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22c55e, #eab308, #ef4444); }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -879,6 +875,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <a class="management-link" href="/pub/apps/attendance_report/cabinet_edit.php">Управление РМ</a>
 <?php endif; ?>
 <form method="get" class="filters">
+    <input type="hidden" name="active_tab" id="active-tab-input" value="<?=htmlspecialcharsbx($activeTab)?>">
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
     <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
@@ -889,15 +886,15 @@ header('Content-Type: text/html; charset=UTF-8');
 </form>
 
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
-    <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
-    <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
-    <button type="button" class="tab-button" data-tab-target="temporary" role="tab" aria-selected="false">Посещения по временным и гостевым пропускам</button>
-    <button type="button" class="tab-button" data-tab-target="dashboard" role="tab" aria-selected="false">Дашборд загрузки</button>
-    <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
-    <button type="button" class="tab-button" data-tab-target="legal-summary" role="tab" aria-selected="false">Сводные данные по ЮЛ</button>
+    <button type="button" class="tab-button<?= $activeTab === 'employees' ? ' is-active' : '' ?>" data-tab-target="employees" role="tab" aria-selected="<?= $activeTab === 'employees' ? 'true' : 'false' ?>">Сотрудники</button>
+    <button type="button" class="tab-button<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" data-tab-target="unknown" role="tab" aria-selected="<?= $activeTab === 'unknown' ? 'true' : 'false' ?>">Прочие посетители</button>
+    <button type="button" class="tab-button<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" data-tab-target="temporary" role="tab" aria-selected="<?= $activeTab === 'temporary' ? 'true' : 'false' ?>">Посещения по временным и гостевым пропускам</button>
+    <button type="button" class="tab-button<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" data-tab-target="cabinet-summary" role="tab" aria-selected="<?= $activeTab === 'cabinet-summary' ? 'true' : 'false' ?>">Сводная таблица по кабинетам</button>
+    <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
+    <button type="button" class="tab-button<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" data-tab-target="dashboard" role="tab" aria-selected="<?= $activeTab === 'dashboard' ? 'true' : 'false' ?>">Дашборд загрузки</button>
 </div>
 
-<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'employees' ? ' is-active' : '' ?>" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
 <p class="dashboard-muted">Если выбран период, строки сгруппированы по датам. Нажмите на строку даты, чтобы раскрыть или свернуть детализацию за день.</p>
 <table id="employees-report-table">
@@ -1060,7 +1057,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </table>
 </section>
 
-<section class="tab-pane" id="tab-unknown" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
 <table id="unknown-report-table">
@@ -1091,7 +1088,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </table>
 </section>
 
-<section class="tab-pane" id="tab-temporary" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
 <table id="temporary-report-table">
@@ -1213,7 +1210,6 @@ foreach ($periodDays as $dateKey) {
 }
 
 $dashboardOfficeByDate = [];
-$dashboardCabinetTotals = [];
 $dashboardTotalWorkplaces = $officeWorkplacesTotal * max(1, count($periodDays));
 $dashboardTotalOccupied = 0;
 $dashboardPeakOfficeLoad = 0;
@@ -1228,19 +1224,6 @@ foreach ($periodDays as $dateKey) {
         $shortOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
         $dayOccupied += $occupied;
         $dayShortOccupied += $shortOccupied;
-        if (!isset($dashboardCabinetTotals[$cabNorm])) {
-            $dashboardCabinetTotals[$cabNorm] = [
-                'TITLE' => (string)$cabData['TITLE'],
-                'WORKPLACES_DAYS' => 0,
-                'OCCUPIED' => 0,
-                'SHORT_OCCUPIED' => 0,
-                'PEAK' => 0,
-            ];
-        }
-        $dashboardCabinetTotals[$cabNorm]['WORKPLACES_DAYS'] += $workplaces;
-        $dashboardCabinetTotals[$cabNorm]['OCCUPIED'] += $occupied;
-        $dashboardCabinetTotals[$cabNorm]['SHORT_OCCUPIED'] += $shortOccupied;
-        $dashboardCabinetTotals[$cabNorm]['PEAK'] = max((int)$dashboardCabinetTotals[$cabNorm]['PEAK'], $occupied);
     }
     $dayUtilization = $officeWorkplacesTotal > 0 ? round(($dayOccupied / $officeWorkplacesTotal) * 100, 1) : 0;
     $dashboardOfficeByDate[$dateKey] = [
@@ -1256,75 +1239,18 @@ foreach ($periodDays as $dateKey) {
     }
 }
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
-foreach ($dashboardCabinetTotals as $cabNorm => $cabData) {
-    $dashboardCabinetTotals[$cabNorm]['UTILIZATION'] = (int)$cabData['WORKPLACES_DAYS'] > 0 ? round(((int)$cabData['OCCUPIED'] / (int)$cabData['WORKPLACES_DAYS']) * 100, 1) : 0;
-}
-uasort($dashboardCabinetTotals, static function (array $left, array $right): int {
-    if ((float)$left['UTILIZATION'] === (float)$right['UTILIZATION']) {
-        return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
-    }
-    return (float)$left['UTILIZATION'] < (float)$right['UTILIZATION'] ? 1 : -1;
-});
-$dashboardTopCabinets = array_slice($dashboardCabinetTotals, 0, 12, true);
+$dashboardIsCabinetScope = $cabinetFilterNorm !== '';
+$dashboardScopeGenitive = $dashboardIsCabinetScope ? 'кабинета' : 'офиса';
+$dashboardScopePrepositional = $dashboardIsCabinetScope ? 'кабинету' : 'всему офису';
+$dashboardScopeTitle = $dashboardIsCabinetScope ? (isset($summaryCabinets[$cabinetFilterNorm]) ? (string)$summaryCabinets[$cabinetFilterNorm]['TITLE'] : $cabinetFilterRaw) : 'весь офис';
+$dashboardSelectionCardTitle = $dashboardIsCabinetScope ? 'Кабинет в выборке' : 'Кабинетов в выборке';
+$dashboardSelectionCardValue = $dashboardIsCabinetScope ? 1 : count($summaryCabinets);
+$dashboardSelectionCardNote = $dashboardIsCabinetScope ? ('Кабинет: ' . $dashboardScopeTitle) : ('Рабочих мест: ' . (int)$officeWorkplacesTotal);
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
 
-<section class="tab-pane" id="tab-dashboard" role="tabpanel">
-<h2>Дашборд загрузки кабинетов</h2>
-<div class="dashboard-grid">
-    <div class="dashboard-card">
-        <p class="dashboard-card-title">Средняя загрузка офиса</p>
-        <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
-        <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
-    </div>
-    <div class="dashboard-card">
-        <p class="dashboard-card-title">Пик загрузки офиса</p>
-        <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
-        <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
-    </div>
-    <div class="dashboard-card">
-        <p class="dashboard-card-title">Кабинетов в выборке</p>
-        <div class="dashboard-card-value"><?= count($summaryCabinets) ?></div>
-        <div class="dashboard-card-note">Рабочих мест: <?= (int)$officeWorkplacesTotal ?></div>
-    </div>
-</div>
-
-<div class="dashboard-section">
-    <h3>Загрузка всего офиса по дням</h3>
-    <div class="office-load-chart">
-        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-            <div class="office-load-row">
-                <div><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></div>
-                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
-                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
-                </div>
-                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
-            </div>
-        <?php endforeach; ?>
-    </div>
-</div>
-
-<div class="dashboard-section">
-    <h3>Топ кабинетов по средней загрузке</h3>
-    <?php if (empty($dashboardTopCabinets)): ?>
-        <p class="dashboard-muted">Нет данных для построения дашборда.</p>
-    <?php else: ?>
-        <div class="cabinet-heatmap">
-            <?php foreach ($dashboardTopCabinets as $cabData): ?>
-                <div class="cabinet-tile">
-                    <div class="cabinet-tile-title"><?=htmlspecialcharsbx((string)$cabData['TITLE'])?></div>
-                    <div class="cabinet-tile-meta"><span>Средняя загрузка</span><strong><?= $cabData['UTILIZATION'] ?>%</strong></div>
-                    <div class="cabinet-progress"><div class="cabinet-progress-fill" style="width: <?= min(100, (float)$cabData['UTILIZATION']) ?>%;"></div></div>
-                    <div class="dashboard-card-note">Пик: <?= (int)$cabData['PEAK'] ?> чел.; &lt;4ч: <?= (int)$cabData['SHORT_OCCUPIED'] ?></div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-</div>
-</section>
-
-<section class="tab-pane" id="tab-cabinet-summary" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="cabinet-summary-report-table" data-export-name="cabinet_summary">Экспорт в Excel</button></div>
 <table id="cabinet-summary-report-table">
@@ -1371,7 +1297,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </table>
 </section>
 
-<section class="tab-pane" id="tab-legal-summary" role="tabpanel">
+<section class="tab-pane<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
 <table id="legal-summary-report-table">
@@ -1388,27 +1314,31 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
     </thead>
     <tbody>
     <?php
-    $legalEntitySummaryTotals = [
-        'WORKPLACES_BY_DATE' => [],
-        'ASSIGNED_BY_DATE_LEGAL_ENTITY' => [],
-        'OCCUPIED' => 0,
-        'FREE_BY_DATE_LEGAL_ENTITY' => [],
-    ];
+    $legalEntitySummaryTotalsByDate = [];
     ?>
     <?php foreach ($legalEntitySummary as $dateKey => $legalEntityCounts): ?>
         <?php if (empty($legalEntityCounts)): ?>
             <?php $legalEntityCounts = [$undefinedLegalEntity => 0]; ?>
         <?php endif; ?>
+        <?php
+        if (!isset($legalEntitySummaryTotalsByDate[$dateKey])) {
+            $legalEntitySummaryTotalsByDate[$dateKey] = [
+                'WORKPLACES' => $officeWorkplacesTotal,
+                'ASSIGNED' => 0,
+                'OCCUPIED' => 0,
+                'FREE' => 0,
+            ];
+        }
+        ?>
         <?php foreach ($legalEntityCounts as $legalEntity => $occupied): ?>
             <?php
             $occupied = (int)$occupied;
             $assigned = isset($legalEntityAssignedWorkplaces[$legalEntity]) ? (int)$legalEntityAssignedWorkplaces[$legalEntity] : 0;
             $assigned += isset($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) && is_array($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) ? count($otherVisitorsAssignedWorkplaces[$dateKey][$legalEntity]) : 0;
             $free = max(0, $assigned - $occupied);
-            $legalEntitySummaryTotals['WORKPLACES_BY_DATE'][$dateKey] = $officeWorkplacesTotal;
-            $legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $assigned;
-            $legalEntitySummaryTotals['OCCUPIED'] += $occupied;
-            $legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY'][$dateKey . '|' . (string)$legalEntity] = $free;
+            $legalEntitySummaryTotalsByDate[$dateKey]['ASSIGNED'] += $assigned;
+            $legalEntitySummaryTotalsByDate[$dateKey]['OCCUPIED'] += $occupied;
+            $legalEntitySummaryTotalsByDate[$dateKey]['FREE'] += $free;
             ?>
             <tr>
                 <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
@@ -1421,23 +1351,60 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
             </tr>
         <?php endforeach; ?>
     <?php endforeach; ?>
-    <?php
-    $legalEntityTotalWorkplaces = array_sum($legalEntitySummaryTotals['WORKPLACES_BY_DATE']);
-    $legalEntityTotalAssigned = array_sum($legalEntitySummaryTotals['ASSIGNED_BY_DATE_LEGAL_ENTITY']);
-    $legalEntityTotalFree = array_sum($legalEntitySummaryTotals['FREE_BY_DATE_LEGAL_ENTITY']);
-    $totalUtilization = $legalEntityTotalAssigned > 0 ? round(($legalEntitySummaryTotals['OCCUPIED'] / $legalEntityTotalAssigned) * 100, 1) : 0;
-    ?>
-    <tr style="font-weight: bold;">
-        <td>Итого</td>
-        <td></td>
-        <td><?= (int)$legalEntityTotalWorkplaces ?></td>
-        <td><?= (int)$legalEntityTotalAssigned ?></td>
-        <td><?= (int)$legalEntitySummaryTotals['OCCUPIED'] ?></td>
-        <td><?= (int)$legalEntityTotalFree ?></td>
-        <td><?= $totalUtilization ?>%</td>
-    </tr>
+    <?php foreach ($legalEntitySummaryTotalsByDate as $dateKey => $dateTotals): ?>
+        <?php
+        $dateTotalAssigned = (int)$dateTotals['ASSIGNED'];
+        $dateTotalUtilization = $dateTotalAssigned > 0 ? round(((int)$dateTotals['OCCUPIED'] / $dateTotalAssigned) * 100, 1) : 0;
+        ?>
+        <tr style="font-weight: bold;">
+            <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
+            <td>Итого</td>
+            <td><?= (int)$dateTotals['WORKPLACES'] ?></td>
+            <td><?= $dateTotalAssigned ?></td>
+            <td><?= (int)$dateTotals['OCCUPIED'] ?></td>
+            <td><?= (int)$dateTotals['FREE'] ?></td>
+            <td><?= $dateTotalUtilization ?>%</td>
+        </tr>
+    <?php endforeach; ?>
     </tbody>
 </table>
+</section>
+
+<section class="tab-pane<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" id="tab-dashboard" role="tabpanel">
+<h2>Дашборд загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></h2>
+<div class="dashboard-grid">
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Средняя загрузка <?=htmlspecialcharsbx($dashboardScopeGenitive)?></p>
+        <div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div>
+        <div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title">Пик загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></p>
+        <div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div>
+        <div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div>
+    </div>
+    <div class="dashboard-card">
+        <p class="dashboard-card-title"><?=htmlspecialcharsbx($dashboardSelectionCardTitle)?></p>
+        <div class="dashboard-card-value"><?= $dashboardSelectionCardValue ?></div>
+        <div class="dashboard-card-note"><?=htmlspecialcharsbx($dashboardSelectionCardNote)?></div>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
+    <div class="office-load-chart">
+        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+            <div class="office-load-row">
+                <div><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></div>
+                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
+                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
+                </div>
+                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
 </section>
 
 <div class="modal-backdrop" id="departmentCabinetModal" aria-hidden="true">
@@ -1452,10 +1419,13 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </div>
 <script>
 (function () {
+    var activeTabInput = document.getElementById('active-tab-input');
+
     document.querySelectorAll('.tab-button').forEach(function (button) {
         button.addEventListener('click', function () {
             var target = button.getAttribute('data-tab-target');
             if (!target) { return; }
+            if (activeTabInput) { activeTabInput.value = target; }
 
             document.querySelectorAll('.tab-button').forEach(function (tabButton) {
                 var isActive = tabButton === button;
