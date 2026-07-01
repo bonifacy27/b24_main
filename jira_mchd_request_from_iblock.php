@@ -4,9 +4,9 @@
  *
  * Источник данных:
  * - инфоблок/список: 310
- * - элемент: 3616774
- * - ФИО: PROPERTY_1857
- * - файлы: PROPERTY_1874 (множественное поле типа «Файл»)
+ * - элемент: текущий элемент бизнес-процесса; если ID не удалось определить, используется 3616774
+ * - ФИО: PROPERTY_1857, свойство ID 1857
+ * - файлы: PROPERTY_1874, свойство ID 1874 (множественное поле типа «Файл»)
  *
  * Скрипт рассчитан на выполнение в PHP-коде бизнес-процесса Bitrix24.
  */
@@ -17,7 +17,7 @@ $responsible_login = (string)$rootActivity->GetVariable('var_Initiator_Login');
 $jira_pass = (string)$rootActivity->GetVariable('var_JiraPass');
 
 $iblockId = 310;
-$elementId = 3616774;
+$fallbackElementId = 3616774;
 $templateIblockId = 385;
 $templateElementId = 3498876; // Замените на ID нового элемента справочника с шаблоном "Загрузка МЧД".
 
@@ -33,7 +33,32 @@ $fail = function ($message) use ($logMessage) {
     throw new Exception($message);
 };
 
-$logMessage('Старт создания заявки Jira на загрузку МЧД из элемента ' . $elementId);
+
+
+if (!function_exists('resolveWorkflowElementId')) {
+    function resolveWorkflowElementId($rootActivity, $fallbackElementId)
+{
+    if (!is_object($rootActivity) || !method_exists($rootActivity, 'GetDocumentId')) {
+        return (int)$fallbackElementId;
+    }
+
+    $documentId = $rootActivity->GetDocumentId();
+
+    if (is_array($documentId)) {
+        for ($i = count($documentId) - 1; $i >= 0; $i--) {
+            if (preg_match('/(\d+)$/', (string)$documentId[$i], $matches)) {
+                return (int)$matches[1];
+            }
+        }
+    }
+
+    if (is_scalar($documentId) && preg_match('/(\d+)$/', (string)$documentId, $matches)) {
+        return (int)$matches[1];
+    }
+
+    return (int)$fallbackElementId;
+    }
+}
 
 if (!function_exists('interpolateTemplate')) {
     function interpolateTemplate($value, array $context)
@@ -59,21 +84,34 @@ if (!function_exists('interpolateTemplate')) {
     }
 }
 
-function getIblockPropertyValues($iblockId, $elementId, $propertyCode)
+if (!function_exists('getIblockPropertyValues')) {
+    function getIblockPropertyValues($iblockId, $elementId, $property)
 {
     $values = [];
-    $propertyResult = CIBlockElement::GetProperty($iblockId, $elementId, ['sort' => 'asc'], ['CODE' => $propertyCode]);
+    $filter = is_numeric($property) ? ['ID' => (int)$property] : ['CODE' => (string)$property];
+    $propertyResult = CIBlockElement::GetProperty($iblockId, $elementId, ['sort' => 'asc'], $filter);
 
-    while ($property = $propertyResult->Fetch()) {
-        if ($property['VALUE'] !== null && $property['VALUE'] !== '') {
-            $values[] = $property['VALUE'];
+    while ($propertyRow = $propertyResult->Fetch()) {
+        $value = $propertyRow['VALUE'];
+        if (is_array($value)) {
+            if (isset($value['TEXT'])) {
+                $value = $value['TEXT'];
+            } elseif (isset($value['VALUE'])) {
+                $value = $value['VALUE'];
+            }
+        }
+
+        if ($value !== null && $value !== '') {
+            $values[] = $value;
         }
     }
 
     return $values;
+    }
 }
 
-function jiraRequest($url, $username, $password, array $curlOptions, callable $logMessage)
+if (!function_exists('jiraRequest')) {
+    function jiraRequest($url, $username, $password, array $curlOptions, callable $logMessage)
 {
     $ch = curl_init();
     curl_setopt_array($ch, $curlOptions + [
@@ -100,9 +138,11 @@ function jiraRequest($url, $username, $password, array $curlOptions, callable $l
     }
 
     return $result;
+    }
 }
 
-function uploadJiraTemporaryAttachment($jiraBaseUrl, $serviceDeskId, $username, $password, array $file, callable $logMessage)
+if (!function_exists('uploadJiraTemporaryAttachment')) {
+    function uploadJiraTemporaryAttachment($jiraBaseUrl, $serviceDeskId, $username, $password, array $file, callable $logMessage)
 {
     $filePath = $file['tmp_name'];
     if (!is_readable($filePath)) {
@@ -138,17 +178,21 @@ function uploadJiraTemporaryAttachment($jiraBaseUrl, $serviceDeskId, $username, 
     $logMessage('Файл загружен во временное вложение Jira: ' . $attachments[0]['temporaryAttachmentId']);
 
     return $attachments[0]['temporaryAttachmentId'];
+    }
 }
 
-$employeeFioValues = getIblockPropertyValues($iblockId, $elementId, 'PROPERTY_1857');
+$elementId = resolveWorkflowElementId($rootActivity, $fallbackElementId);
+$logMessage('Старт создания заявки Jira на загрузку МЧД из элемента ' . $elementId);
+
+$employeeFioValues = getIblockPropertyValues($iblockId, $elementId, 1857);
 $employee_fio = trim((string)reset($employeeFioValues));
 if ($employee_fio === '') {
-    $fail('Не заполнено поле ФИО (PROPERTY_1857) в элементе ' . $elementId);
+    $fail('Не заполнено поле ФИО (свойство ID 1857 / PROPERTY_1857) в элементе ' . $elementId);
 }
 
-$fileIds = getIblockPropertyValues($iblockId, $elementId, 'PROPERTY_1874');
+$fileIds = getIblockPropertyValues($iblockId, $elementId, 1874);
 if (empty($fileIds)) {
-    $fail('Не заполнено поле Файлы (PROPERTY_1874) в элементе ' . $elementId);
+    $fail('Не заполнено поле Файлы (свойство ID 1874 / PROPERTY_1874) в элементе ' . $elementId);
 }
 
 $res = CIBlockElement::GetProperty($templateIblockId, $templateElementId, [], ['CODE' => 'JIRA_FIELDS']);
