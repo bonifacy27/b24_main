@@ -183,6 +183,7 @@ if (!function_exists('uploadJiraTemporaryAttachment')) {
 }
 
 $elementId = resolveWorkflowElementId($rootActivity, $fallbackElementId);
+$url_mchd = 'https://ourtricolortv.nsc.ru/workgroups/group/187/lists/310/element/0/' . $elementId . '/?list_section_id=';
 $logMessage('Старт создания заявки Jira на загрузку МЧД из элемента ' . $elementId);
 
 $employeeFioValues = getIblockPropertyValues($iblockId, $elementId, 1857);
@@ -214,6 +215,15 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 $description = 'Загрузить МЧД для ' . $employee_fio . ' в систему';
 $context = get_defined_vars();
 $data = interpolateTemplate($templateData, $context);
+
+if (isset($data['requestFieldValues']['priority']['value'])
+    && !isset($data['requestFieldValues']['priority']['name'])
+    && !isset($data['requestFieldValues']['priority']['id'])) {
+    $data['requestFieldValues']['priority'] = [
+        'name' => $data['requestFieldValues']['priority']['value'],
+    ];
+    $logMessage('Поле priority преобразовано из value в name для Jira Service Management');
+}
 
 $serviceDeskId = (string)($data['serviceDeskId'] ?? '');
 if ($serviceDeskId === '') {
