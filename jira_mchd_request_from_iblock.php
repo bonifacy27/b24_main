@@ -19,7 +19,7 @@ $jira_pass = (string)$rootActivity->GetVariable('var_JiraPass');
 $iblockId = 310;
 $fallbackElementId = 3616774;
 $templateIblockId = 385;
-$templateElementId = 3498876; // Замените на ID нового элемента справочника с шаблоном "Загрузка МЧД".
+$templateElementId = 3616765; // ID элемента справочника с шаблоном "Загрузка МЧД".
 
 $jiraBaseUrl = 'https://jira.tricolor.tv';
 $jiraUsername = 'jiraService';
@@ -230,9 +230,7 @@ foreach ($fileIds as $fileId) {
     $temporaryAttachmentIds[] = uploadJiraTemporaryAttachment($jiraBaseUrl, $serviceDeskId, $jiraUsername, $jira_pass, $file, $logMessage);
 }
 
-$data['requestFieldValues']['attachment'] = [
-    'temporaryAttachmentIds' => $temporaryAttachmentIds,
-];
+$data['requestFieldValues']['attachment'] = $temporaryAttachmentIds;
 
 $txt = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 if ($txt === false) {
