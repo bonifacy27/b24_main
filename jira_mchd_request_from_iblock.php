@@ -159,6 +159,7 @@ if (!function_exists('uploadJiraTemporaryAttachment')) {
         ],
         CURLOPT_HTTPHEADER => [
             'X-Atlassian-Token: no-check',
+            'X-ExperimentalApi: opt-in',
             'Authorization: Basic ' . base64_encode($username . ':' . $password),
         ],
     ], $logMessage);
