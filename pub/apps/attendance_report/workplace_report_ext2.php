@@ -490,17 +490,23 @@ $cabinetHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(74)->fetch();
 if ($cabinetHl) {
     $cabinetEntity = \Bitrix\Highloadblock\HighloadBlockTable::compileEntity($cabinetHl);
     $cabinetClass = $cabinetEntity->getDataClass();
-    $rsCabinets = $cabinetClass::getList(['select' => ['ID', 'UF_NAME', 'UF_WORKPLACES', 'UF_OFFICE']]);
+    $rsCabinets = $cabinetClass::getList(['select' => ['ID', 'UF_CABINET_ID', 'UF_NAME', 'UF_WORKPLACES', 'UF_OFFICE']]);
     while ($row = $rsCabinets->fetch()) {
         $title = trim((string)$row['UF_NAME']);
+        if ($title === '') { continue; }
         $normalized = $normalizeDirectoryCabinet($title);
-        if ($normalized === '') { continue; }
         $office = $resolveListDisplayValue(isset($row['UF_OFFICE']) ? $row['UF_OFFICE'] : '', $officeEnumValueMap);
         if ($office !== '') { $availableOfficesMap[$office] = true; }
         if ($officeFilterRaw !== '' && $office !== $officeFilterRaw) { continue; }
         $cabinetData = ['TITLE' => $title, 'WORKPLACES' => (int)$row['UF_WORKPLACES'], 'OFFICE' => $office];
-        $cabinetDirectory[$normalized] = $cabinetData;
+        if ($normalized !== '') {
+            $cabinetDirectory[$normalized] = $cabinetData;
+        }
         $cabinetDirectoryById[(int)$row['ID']] = $cabinetData + ['NORM' => $normalized];
+        $externalCabinetId = trim((string)($row['UF_CABINET_ID'] ?? ''));
+        if ($externalCabinetId !== '' && ctype_digit($externalCabinetId)) {
+            $cabinetDirectoryById[(int)$externalCabinetId] = $cabinetData + ['NORM' => $normalized];
+        }
     }
 }
 
