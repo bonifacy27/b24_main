@@ -1036,7 +1036,11 @@ $dashboardSelectionCardTitle = $dashboardIsCabinetScope ? 'Кабинет в в�
 $dashboardSelectionCardValue = $dashboardIsCabinetScope ? 1 : count($summaryCabinets);
 $dashboardCabinetTitles = array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $summaryCabinets);
 sort($dashboardCabinetTitles, SORT_NATURAL | SORT_FLAG_CASE);
-$dashboardSelectionCardNote = $dashboardIsCabinetScope ? ('Кабинет: ' . $dashboardScopeTitle) : (!empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены');
+$dashboardSelectionCardNote = $dashboardIsCabinetScope
+    ? ('Кабинет: ' . $dashboardScopeTitle)
+    : ($ceo1FilterRaw !== ''
+        ? (!empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены')
+        : ('Рабочих мест: ' . (int)$officeWorkplacesTotal));
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
