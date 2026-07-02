@@ -565,6 +565,51 @@ foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->m
     $periodDays[] = $day->format('Y-m-d');
 }
 
+$prodCalendarSource = 'Srvr=srv-off-1c01;Ref=1c_Pay83_NSC;';
+$prodCalendarByDate = [];
+$workingPeriodDays = [];
+if (!empty($periodDays)) {
+    try {
+        $connection = \Bitrix\Main\Application::getConnection('gatedb');
+        $sqlHelper = $connection->getSqlHelper();
+        $dateFromEscaped = $sqlHelper->forSql($dateFrom->format('Y-m-d'));
+        $dateToEscaped = $sqlHelper->forSql($dateTo->format('Y-m-d'));
+        $sourceEscaped = $sqlHelper->forSql($prodCalendarSource);
+        $calendarSql = "
+            SELECT CAST(Calend_Date AS date) AS CALEND_DATE, Calend_TimeType
+            FROM GateDB.dbo.ProdCalendar_1CZUP
+            WHERE CAST(Calend_Date AS date) BETWEEN '{$dateFromEscaped}' AND '{$dateToEscaped}'
+                AND Source = '{$sourceEscaped}'
+        ";
+        $calendarRows = $connection->query($calendarSql);
+        while ($calendarRow = $calendarRows->fetch()) {
+            $calendarDate = $calendarRow['CALEND_DATE'];
+            if ($calendarDate instanceof \DateTimeInterface) {
+                $calendarDateKey = $calendarDate->format('Y-m-d');
+            } else {
+                $calendarDateKey = (new \DateTime((string)$calendarDate))->format('Y-m-d');
+            }
+            $timeType = trim((string)$calendarRow['Calend_TimeType']);
+            $prodCalendarByDate[$calendarDateKey] = [
+                'TYPE' => $timeType,
+                'IS_WORKDAY' => in_array($timeType, ['Рабочий', 'Предпраздничный'], true),
+            ];
+        }
+    } catch (\Throwable $e) {
+        error_log('Ошибка загрузки производственного календаря 1C: ' . $e->getMessage());
+    }
+}
+foreach ($periodDays as $dateKey) {
+    if (!isset($prodCalendarByDate[$dateKey])) {
+        $weekday = (int)(new \DateTime($dateKey))->format('N');
+        $prodCalendarByDate[$dateKey] = [
+            'TYPE' => $weekday >= 6 ? 'Выходной' : 'Рабочий',
+            'IS_WORKDAY' => $weekday < 6,
+        ];
+    }
+    if (!empty($prodCalendarByDate[$dateKey]['IS_WORKDAY'])) { $workingPeriodDays[] = $dateKey; }
+}
+
 $cabinetDailyOffice = [];
 foreach ($periodDays as $dateKey) {
     $cabinetDailyOffice[$dateKey] = [];
@@ -870,6 +915,7 @@ $dashboardTotalOccupied = 0;
 $dashboardPeakOfficeLoad = 0;
 $dashboardPeakOfficeDate = '';
 foreach ($periodDays as $dateKey) {
+    $isDashboardWorkday = !empty($prodCalendarByDate[$dateKey]['IS_WORKDAY']);
     $dayOccupied = 0;
     $dayShortOccupied = 0;
     foreach ($dashboardSummaryCabinets as $cabNorm => $cabData) {
@@ -877,14 +923,14 @@ foreach ($periodDays as $dateKey) {
         $dayOccupied += isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
         $dayShortOccupied += isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
     }
-    $dayUtilization = $dashboardOfficeWorkplacesTotal > 0 ? round(($dayOccupied / $dashboardOfficeWorkplacesTotal) * 100, 1) : 0;
-    $dashboardOfficeByDate[$dateKey] = ['OCCUPIED' => $dayOccupied, 'SHORT_OCCUPIED' => $dayShortOccupied, 'WORKPLACES' => $dashboardOfficeWorkplacesTotal, 'UTILIZATION' => $dayUtilization];
-    $dashboardTotalOccupied += $dayOccupied;
-    if ($dayUtilization > $dashboardPeakOfficeLoad) { $dashboardPeakOfficeLoad = $dayUtilization; $dashboardPeakOfficeDate = $dateKey; }
+    $dayUtilization = ($isDashboardWorkday && $dashboardOfficeWorkplacesTotal > 0) ? round(($dayOccupied / $dashboardOfficeWorkplacesTotal) * 100, 1) : 0;
+    $dashboardOfficeByDate[$dateKey] = ['OCCUPIED' => $dayOccupied, 'SHORT_OCCUPIED' => $dayShortOccupied, 'WORKPLACES' => $dashboardOfficeWorkplacesTotal, 'UTILIZATION' => $dayUtilization, 'IS_WORKDAY' => $isDashboardWorkday];
+    if ($isDashboardWorkday) { $dashboardTotalOccupied += $dayOccupied; }
+    if ($isDashboardWorkday && $dayUtilization > $dashboardPeakOfficeLoad) { $dashboardPeakOfficeLoad = $dayUtilization; $dashboardPeakOfficeDate = $dateKey; }
 }
-$dashboardAverageOfficeLoad = ($dashboardOfficeWorkplacesTotal > 0 && count($periodDays) > 0) ? round(($dashboardTotalOccupied / ($dashboardOfficeWorkplacesTotal * count($periodDays))) * 100, 1) : 0;
-$dashboardScopeGenitive = $cabinetFilterNorm !== '' ? 'кабинета' : 'офиса';
-$dashboardScopePrepositional = $cabinetFilterNorm !== '' ? 'кабинету' : 'всему офису';
+$dashboardAverageOfficeLoad = ($dashboardOfficeWorkplacesTotal > 0 && count($workingPeriodDays) > 0) ? round(($dashboardTotalOccupied / ($dashboardOfficeWorkplacesTotal * count($workingPeriodDays))) * 100, 1) : 0;
+$dashboardScopeGenitive = $cabinetFilterNorm !== '' ? 'кабинета' : 'кабинетов';
+$dashboardScopePrepositional = $cabinetFilterNorm !== '' ? 'кабинету' : 'кабинетам';
 $dashboardSelectionCardTitle = $cabinetFilterNorm !== '' ? 'Кабинет в выборке' : 'Кабинетов в выборке';
 $dashboardSelectionCardValue = $cabinetFilterNorm !== '' ? 1 : count($dashboardSummaryCabinets);
 $dashboardCabinetTitles = array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $dashboardSummaryCabinets);
@@ -936,6 +982,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-chart { display: grid; gap: 10px; max-width: 980px; }
         .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
+        .office-load-row.is-non-workday .office-load-fill { background: #cbd5e1; }
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
@@ -977,7 +1024,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
     <div class="office-load-chart">
         <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-            <div class="office-load-row">
+            <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : '' ?>">
                 <div><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
                 <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ"><div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div></div>
                 <strong><?= $dayData['UTILIZATION'] ?>%</strong>
