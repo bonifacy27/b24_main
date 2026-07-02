@@ -1019,6 +1019,7 @@ foreach ($periodDays as $dateKey) {
         'UTILIZATION' => $dayUtilization,
         'DAY_TYPE' => (string)($prodCalendarByDate[$dateKey]['TYPE'] ?? ''),
         'IS_WORKDAY' => $isDashboardWorkday,
+        'IS_PREHOLIDAY' => (string)($prodCalendarByDate[$dateKey]['TYPE'] ?? '') === 'Предпраздничный',
     ];
     if ($isDashboardWorkday) { $dashboardTotalOccupied += $dayOccupied; }
     if ($isDashboardWorkday && $dayUtilization > $dashboardPeakOfficeLoad) {
@@ -1085,6 +1086,9 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-row { display: grid; grid-template-columns: 120px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
         .office-load-row.is-non-workday .office-load-fill { background: #cbd5e1; }
+        .office-load-date { font-weight: 700; }
+        .office-load-row.is-non-workday .office-load-date { color: #dc2626; }
+        .office-load-row.is-preholiday .office-load-date { color: #d97706; }
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
@@ -1144,8 +1148,8 @@ header('Content-Type: text/html; charset=UTF-8');
     <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
     <div class="office-load-chart">
         <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-            <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : '' ?>">
-                <div><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?><br><span class="dashboard-muted"><?=htmlspecialcharsbx((string)$dayData['DAY_TYPE'])?></span></div>
+            <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : (!empty($dayData['IS_PREHOLIDAY']) ? ' is-preholiday' : '') ?>">
+                <div class="office-load-date"><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
                 <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
                     <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
                 </div>
