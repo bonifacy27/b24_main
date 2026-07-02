@@ -887,7 +887,9 @@ $dashboardScopeGenitive = $cabinetFilterNorm !== '' ? 'кабинета' : 'оф
 $dashboardScopePrepositional = $cabinetFilterNorm !== '' ? 'кабинету' : 'всему офису';
 $dashboardSelectionCardTitle = $cabinetFilterNorm !== '' ? 'Кабинет в выборке' : 'Кабинетов в выборке';
 $dashboardSelectionCardValue = $cabinetFilterNorm !== '' ? 1 : count($dashboardSummaryCabinets);
-$dashboardSelectionCardNote = 'Рабочих мест: ' . (int)$dashboardOfficeWorkplacesTotal;
+$dashboardCabinetTitles = array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $dashboardSummaryCabinets);
+sort($dashboardCabinetTitles, SORT_NATURAL | SORT_FLAG_CASE);
+$dashboardSelectionCardNote = !empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены';
 
 header('Content-Type: text/html; charset=UTF-8');
 ?>
