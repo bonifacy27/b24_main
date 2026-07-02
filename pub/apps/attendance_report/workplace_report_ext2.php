@@ -1055,8 +1055,6 @@ $dashboardSelectionCardNote = $dashboardIsCabinetScope
         ? (!empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены')
         : ('Рабочих мест: ' . (int)$officeWorkplacesTotal));
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
-?>
-
 
 header('Content-Type: text/html; charset=UTF-8');
 ?>
