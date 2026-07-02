@@ -84,6 +84,13 @@ $isTemporaryOrGuestPass = static function (string $name): bool {
     return preg_match('/(Временный|Гостевой|Vendex)/ui', $name) === 1;
 };
 
+$weekdayShortNames = [1 => 'пн', 2 => 'вт', 3 => 'ср', 4 => 'чт', 5 => 'пт', 6 => 'сб', 7 => 'вс'];
+$formatReportDate = static function (string $dateKey, bool $withWeekday = false) use ($weekdayShortNames): string {
+    $date = new \DateTime($dateKey);
+    $formatted = $date->format('d.m.Y');
+    return $withWeekday ? ($formatted . ', ' . ($weekdayShortNames[(int)$date->format('N')] ?? '')) : $formatted;
+};
+
 $companyLegalEntityMap = [
     '26' => 'НСК',
     'НСК' => 'НСК',
@@ -843,6 +850,45 @@ foreach ($departments as $departmentId => $department) {
 $availableCeo1 = array_keys($availableCeo1);
 sort($availableCeo1, SORT_NATURAL | SORT_FLAG_CASE);
 
+
+$dashboardSummaryCabinets = [];
+foreach ($userCabinetMap as $cabName) {
+    $cabNorm = $normalizeCabinet((string)$cabName);
+    if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if (!isset($dashboardSummaryCabinets[$cabNorm])) {
+        $dashboardSummaryCabinets[$cabNorm] = [
+            'TITLE' => isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : (string)$cabName,
+            'WORKPLACES' => isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0,
+        ];
+    }
+}
+uasort($dashboardSummaryCabinets, static function (array $left, array $right): int { return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']); });
+$dashboardOfficeWorkplacesTotal = 0;
+foreach ($dashboardSummaryCabinets as $cabData) { $dashboardOfficeWorkplacesTotal += (int)$cabData['WORKPLACES']; }
+$dashboardOfficeByDate = [];
+$dashboardTotalOccupied = 0;
+$dashboardPeakOfficeLoad = 0;
+$dashboardPeakOfficeDate = '';
+foreach ($periodDays as $dateKey) {
+    $dayOccupied = 0;
+    $dayShortOccupied = 0;
+    foreach ($dashboardSummaryCabinets as $cabNorm => $cabData) {
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
+        $dayOccupied += isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $dayShortOccupied += isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
+    }
+    $dayUtilization = $dashboardOfficeWorkplacesTotal > 0 ? round(($dayOccupied / $dashboardOfficeWorkplacesTotal) * 100, 1) : 0;
+    $dashboardOfficeByDate[$dateKey] = ['OCCUPIED' => $dayOccupied, 'SHORT_OCCUPIED' => $dayShortOccupied, 'WORKPLACES' => $dashboardOfficeWorkplacesTotal, 'UTILIZATION' => $dayUtilization];
+    $dashboardTotalOccupied += $dayOccupied;
+    if ($dayUtilization > $dashboardPeakOfficeLoad) { $dashboardPeakOfficeLoad = $dayUtilization; $dashboardPeakOfficeDate = $dateKey; }
+}
+$dashboardAverageOfficeLoad = ($dashboardOfficeWorkplacesTotal > 0 && count($periodDays) > 0) ? round(($dashboardTotalOccupied / ($dashboardOfficeWorkplacesTotal * count($periodDays))) * 100, 1) : 0;
+$dashboardScopeGenitive = $cabinetFilterNorm !== '' ? 'кабинета' : 'офиса';
+$dashboardScopePrepositional = $cabinetFilterNorm !== '' ? 'кабинету' : 'всему офису';
+$dashboardSelectionCardTitle = $cabinetFilterNorm !== '' ? 'Кабинет в выборке' : 'Кабинетов в выборке';
+$dashboardSelectionCardValue = $cabinetFilterNorm !== '' ? 1 : count($dashboardSummaryCabinets);
+$dashboardSelectionCardNote = 'Рабочих мест: ' . (int)$dashboardOfficeWorkplacesTotal;
+
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
@@ -879,6 +925,22 @@ header('Content-Type: text/html; charset=UTF-8');
         .modal-table th, .modal-table td { border: 1px solid #d8e0ea; padding: 6px 8px; }
         .modal-status-in { color: #166534; font-weight: 600; }
         .modal-status-out { color: #991b1b; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 14px 0 18px; }
+        .dashboard-card { border: 1px solid #d8e0ea; border-radius: 14px; padding: 16px; background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%); box-shadow: 0 8px 24px rgba(15, 79, 147, .08); }
+        .dashboard-card-title { margin: 0 0 8px; color: #52616f; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+        .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
+        .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
+        .dashboard-section { margin: 18px 0 24px; }
+        .office-load-chart { display: grid; gap: 10px; max-width: 980px; }
+        .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
+        .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
+        .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
+        .dashboard-muted { color: #7a8794; }
+        .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
+        .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
+        .date-group-row.is-collapsed .date-group-toggle::after { content: " раскрыть"; }
+        .date-group-row:not(.is-collapsed) .date-group-toggle::after { content: " свернуть"; }
+        .date-detail-row.is-hidden { display: none; }
     </style>
 </head>
 <body>
@@ -896,12 +958,34 @@ header('Content-Type: text/html; charset=UTF-8');
 </form>
 
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
-    <button type="button" class="tab-button is-active" data-tab-target="employees" role="tab" aria-selected="true">Сотрудники</button>
+    <button type="button" class="tab-button is-active" data-tab-target="dashboard" role="tab" aria-selected="true">Дашборд загрузки</button>
+    <button type="button" class="tab-button" data-tab-target="employees" role="tab" aria-selected="false">Сотрудники</button>
     <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
     <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
 </div>
 
-<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
+<section class="tab-pane is-active" id="tab-dashboard" role="tabpanel">
+<h2>Дашборд загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></h2>
+<div class="dashboard-grid">
+    <div class="dashboard-card"><p class="dashboard-card-title">Средняя загрузка <?=htmlspecialcharsbx($dashboardScopeGenitive)?></p><div class="dashboard-card-value"><?= $dashboardAverageOfficeLoad ?>%</div><div class="dashboard-card-note">За выбранный период: <?=htmlspecialcharsbx($dateFrom->format('d.m.Y'))?> — <?=htmlspecialcharsbx($dateTo->format('d.m.Y'))?></div></div>
+    <div class="dashboard-card"><p class="dashboard-card-title">Пик загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></p><div class="dashboard-card-value"><?= $dashboardPeakOfficeLoad ?>%</div><div class="dashboard-card-note"><?= $dashboardPeakOfficeDate !== '' ? htmlspecialcharsbx((new \DateTime($dashboardPeakOfficeDate))->format('d.m.Y')) : 'Нет данных' ?></div></div>
+    <div class="dashboard-card"><p class="dashboard-card-title"><?=htmlspecialcharsbx($dashboardSelectionCardTitle)?></p><div class="dashboard-card-value"><?= $dashboardSelectionCardValue ?></div><div class="dashboard-card-note"><?=htmlspecialcharsbx($dashboardSelectionCardNote)?></div></div>
+</div>
+<div class="dashboard-section">
+    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
+    <div class="office-load-chart">
+        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+            <div class="office-load-row">
+                <div><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
+                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ"><div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div></div>
+                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+            </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+</section>
+
+<section class="tab-pane" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
 <table id="employees-report-table">
     <thead>
@@ -1250,30 +1334,53 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
     </tr>
     </thead>
     <tbody>
-    <?php foreach ($summaryCabinets as $cabNorm => $cabData): ?>
-        <?php
+    <?php
+    $cabinetSummaryRowsByDate = [];
+    foreach ($periodDays as $dateKey) { $cabinetSummaryRowsByDate[$dateKey] = ['ROWS' => [], 'TOTALS' => ['WORKPLACES' => 0, 'SHORT' => 0, 'OCCUPIED' => 0, 'FREE' => 0]]; }
+    foreach ($summaryCabinets as $cabNorm => $cabData) {
         $cabTitle = (string)$cabData['TITLE'];
         $workplaces = (int)$cabData['WORKPLACES'];
-        $rowspan = max(1, count($periodDays));
-        ?>
-        <?php foreach ($periodDays as $dateIndex => $dateKey): ?>
-            <?php
+        foreach ($periodDays as $dateKey) {
             $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0];
             $shortTotalOccupied = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
             $totalOccupied = (int)$dayData['TOTAL'];
             $utilization = $workplaces > 0 ? round(($totalOccupied / $workplaces) * 100, 1) : 0;
             $free = max(0, $workplaces - $totalOccupied);
-            ?>
-            <tr>
-                <?php if ($dateIndex === 0): ?>
-                    <td rowspan="<?= $rowspan ?>"><?=htmlspecialcharsbx($cabTitle)?></td>
-                <?php endif; ?>
-                <td><?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?></td>
-                <td><?= $workplaces ?></td>
-                <td><?= $shortTotalOccupied ?></td>
-                <td><?= $totalOccupied ?></td>
-                <td><?= $utilization ?>%</td>
-                <td><?= $free ?></td>
+            $cabinetSummaryRowsByDate[$dateKey]['ROWS'][] = [
+                'CABINET' => $cabTitle,
+                'WORKPLACES' => $workplaces,
+                'SHORT' => $shortTotalOccupied,
+                'OCCUPIED' => $totalOccupied,
+                'UTILIZATION' => $utilization,
+                'FREE' => $free,
+            ];
+            $cabinetSummaryRowsByDate[$dateKey]['TOTALS']['WORKPLACES'] += $workplaces;
+            $cabinetSummaryRowsByDate[$dateKey]['TOTALS']['SHORT'] += $shortTotalOccupied;
+            $cabinetSummaryRowsByDate[$dateKey]['TOTALS']['OCCUPIED'] += $totalOccupied;
+            $cabinetSummaryRowsByDate[$dateKey]['TOTALS']['FREE'] += $free;
+        }
+    }
+    ?>
+    <?php foreach ($cabinetSummaryRowsByDate as $dateIndex => $dateGroup): ?>
+        <?php $groupId = 'cabinet-summary-date-' . preg_replace('/[^0-9]/', '', (string)$dateIndex); $isCollapsed = count($periodDays) > 1; $totals = $dateGroup['TOTALS']; $totalUtilization = (int)$totals['WORKPLACES'] > 0 ? round(((int)$totals['OCCUPIED'] / (int)$totals['WORKPLACES']) * 100, 1) : 0; ?>
+        <tr class="date-group-row<?= $isCollapsed ? ' is-collapsed' : '' ?>" data-date-group="<?=htmlspecialcharsbx($groupId)?>">
+            <td><button type="button" class="date-group-toggle" aria-expanded="<?= $isCollapsed ? 'false' : 'true' ?>"></button> <?=htmlspecialcharsbx($formatReportDate((string)$dateIndex, true))?> — строк: <?= count($dateGroup['ROWS']) ?></td>
+            <td>Итого за день</td>
+            <td><?= (int)$totals['WORKPLACES'] ?></td>
+            <td><?= (int)$totals['SHORT'] ?></td>
+            <td><?= (int)$totals['OCCUPIED'] ?></td>
+            <td><?= $totalUtilization ?>%</td>
+            <td><?= (int)$totals['FREE'] ?></td>
+        </tr>
+        <?php foreach ($dateGroup['ROWS'] as $row): ?>
+            <tr class="date-detail-row<?= $isCollapsed ? ' is-hidden' : '' ?>" data-date-group="<?=htmlspecialcharsbx($groupId)?>">
+                <td><?=htmlspecialcharsbx((string)$row['CABINET'])?></td>
+                <td><?=htmlspecialcharsbx($formatReportDate((string)$dateIndex))?></td>
+                <td><?= (int)$row['WORKPLACES'] ?></td>
+                <td><?= (int)$row['SHORT'] ?></td>
+                <td><?= (int)$row['OCCUPIED'] ?></td>
+                <td><?= (float)$row['UTILIZATION'] ?>%</td>
+                <td><?= (int)$row['FREE'] ?></td>
             </tr>
         <?php endforeach; ?>
     <?php endforeach; ?>
@@ -1307,6 +1414,87 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
                 pane.classList.toggle('is-active', pane.id === 'tab-' + target);
             });
         });
+    });
+
+
+    function toggleDateGroup(row) {
+        var groupId = row.getAttribute('data-date-group');
+        if (!groupId) { return; }
+        var shouldCollapse = !row.classList.contains('is-collapsed');
+        row.classList.toggle('is-collapsed', shouldCollapse);
+        var toggle = row.querySelector('.date-group-toggle');
+        if (toggle) { toggle.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true'); }
+        document.querySelectorAll('.date-detail-row[data-date-group="' + groupId + '"]').forEach(function (detailRow) {
+            detailRow.classList.toggle('is-hidden', shouldCollapse);
+        });
+    }
+
+    function cellNumber(row, index) {
+        if (!row.cells[index]) { return 0; }
+        var value = (row.cells[index].textContent || '').replace(',', '.').replace(/[^0-9.\-]/g, '');
+        return value === '' ? 0 : Number(value) || 0;
+    }
+
+    function groupReportTableByDate(tableId, dateIndex, groupColspan, totalBuilder) {
+        var table = document.getElementById(tableId);
+        if (!table || !table.tBodies.length) { return; }
+        var tbody = table.tBodies[0];
+        var rows = Array.prototype.slice.call(tbody.rows);
+        var groups = {};
+        rows.forEach(function (row) {
+            var isTotal = row.cells[0] && (row.cells[0].textContent || '').trim() === 'Итого';
+            var dateCell = row.cells[dateIndex];
+            if (!dateCell) { return; }
+            var dateText = (dateCell.textContent || '').trim();
+            if (!dateText) { return; }
+            if (!groups[dateText]) { groups[dateText] = {details: [], total: null}; }
+            if (isTotal) { groups[dateText].total = row; } else { groups[dateText].details.push(row); }
+        });
+        if (Object.keys(groups).length === 0) { return; }
+        tbody.innerHTML = '';
+        Object.keys(groups).sort(function (a, b) {
+            var ap = a.split('.').reverse().join('-');
+            var bp = b.split('.').reverse().join('-');
+            return ap.localeCompare(bp);
+        }).forEach(function (dateText, index) {
+            var group = groups[dateText];
+            var groupId = tableId + '-date-' + index;
+            var groupRow = totalBuilder(dateText, group, groupId);
+            groupRow.classList.add('date-group-row', 'is-collapsed');
+            groupRow.setAttribute('data-date-group', groupId);
+            groupRow.setAttribute('data-date-group-bound', '1');
+            groupRow.addEventListener('click', function () { toggleDateGroup(groupRow); });
+            tbody.appendChild(groupRow);
+            group.details.forEach(function (detailRow) {
+                detailRow.classList.add('date-detail-row', 'is-hidden');
+                detailRow.setAttribute('data-date-group', groupId);
+                tbody.appendChild(detailRow);
+            });
+        });
+    }
+
+    groupReportTableByDate('employees-report-table', 7, 5, function (dateText, group, groupId) {
+        var total = group.total;
+        var row = document.createElement('tr');
+        row.innerHTML = '<td colspan="5"><button type="button" class="date-group-toggle" aria-expanded="false"></button> ' + dateText + ' — строк: ' + group.details.length + '</td>' +
+            '<td>' + (total && total.cells[5] ? total.cells[5].textContent : '') + '</td>' +
+            '<td>' + (total && total.cells[6] ? total.cells[6].textContent : '') + '</td>' +
+            '<td>Итого за день</td>' +
+            '<td>' + (total && total.cells[8] ? total.cells[8].textContent : '') + '</td>' +
+            '<td>' + (total && total.cells[9] ? total.cells[9].textContent : '') + '</td>';
+        return row;
+    });
+
+    groupReportTableByDate('unknown-report-table', 3, 3, function (dateText, group) {
+        var row = document.createElement('tr');
+        row.innerHTML = '<td colspan="3"><button type="button" class="date-group-toggle" aria-expanded="false"></button> ' + dateText + ' — строк: ' + group.details.length + '</td><td>Итого за день</td>';
+        return row;
+    });
+
+    document.querySelectorAll('.date-group-row').forEach(function (row) {
+        if (row.getAttribute('data-date-group-bound') === '1') { return; }
+        row.setAttribute('data-date-group-bound', '1');
+        row.addEventListener('click', function () { toggleDateGroup(row); });
     });
 
     document.querySelectorAll('.export-button').forEach(function (button) {
