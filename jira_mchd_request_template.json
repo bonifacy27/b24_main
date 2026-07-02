@@ -1,0 +1,11 @@
+{
+  "serviceDeskId": "45",
+  "requestTypeId": "1045",
+  "requestFieldValues": {
+    "summary": "Загрузить МЧД в СБИС ${employee_fio}",
+    "customfield_14651": { "value": "Запрос на обслуживание" },
+    "priority": { "name": "Средний" },
+    "description": "Загрузить МЧД ${employee_fio} в СБИС ${url_mchd}"
+  },
+  "raiseOnBehalfOf": "${responsible_login}"
+}
