@@ -1034,7 +1034,9 @@ $dashboardScopePrepositional = $dashboardIsCabinetScope ? 'кабинету' : '
 $dashboardScopeTitle = $dashboardIsCabinetScope ? (isset($summaryCabinets[$cabinetFilterNorm]) ? (string)$summaryCabinets[$cabinetFilterNorm]['TITLE'] : $cabinetFilterRaw) : 'весь офис';
 $dashboardSelectionCardTitle = $dashboardIsCabinetScope ? 'Кабинет в выборке' : 'Кабинетов в выборке';
 $dashboardSelectionCardValue = $dashboardIsCabinetScope ? 1 : count($summaryCabinets);
-$dashboardSelectionCardNote = $dashboardIsCabinetScope ? ('Кабинет: ' . $dashboardScopeTitle) : ('Рабочих мест: ' . (int)$officeWorkplacesTotal);
+$dashboardCabinetTitles = array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $summaryCabinets);
+sort($dashboardCabinetTitles, SORT_NATURAL | SORT_FLAG_CASE);
+$dashboardSelectionCardNote = $dashboardIsCabinetScope ? ('Кабинет: ' . $dashboardScopeTitle) : (!empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены');
 $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
 ?>
 
@@ -1054,6 +1056,8 @@ header('Content-Type: text/html; charset=UTF-8');
         #employees-report-table thead th { position: sticky; top: 0; z-index: 2; }
         .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
+        .filters-row { margin-top: 8px; }
+        .filters-row:first-child { margin-top: 0; }
         .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
         .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
         .tab-button.is-active { background: #fff; font-weight: 700; position: relative; top: 1px; }
@@ -1105,14 +1109,18 @@ header('Content-Type: text/html; charset=UTF-8');
 <?php endif; ?>
 <form method="get" class="filters">
     <input type="hidden" name="active_tab" id="active-tab-input" value="<?=htmlspecialcharsbx($activeTab)?>">
-    <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
-    <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
-    <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-    <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
-    <label style="margin-left:8px;">CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
-    <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select name="department_filter" id="department-filter"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= $departmentFilterRaw === $departmentOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
-    <button type="submit" style="margin-left:8px;">Показать</button>
-    <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
+    <div class="filters-row">
+        <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
+        <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+        <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
+        <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
+    </div>
+    <div class="filters-row">
+        <label>CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
+        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select name="department_filter" id="department-filter"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= $departmentFilterRaw === $departmentOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
+        <button type="submit" style="margin-left:8px;">Показать</button>
+        <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
+    </div>
 </form>
 
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
