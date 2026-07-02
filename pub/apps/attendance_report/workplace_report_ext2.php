@@ -944,6 +944,7 @@ ksort($legalEntityAssignedWorkplaces, SORT_NATURAL | SORT_FLAG_CASE);
 $otherVisitorsLegalSummary = [];
 $otherVisitorsAssignedWorkplaces = [];
 foreach ($unknownEmployees as $employee) {
+    if ($hasOrgUnitFilter) { continue; }
     $legalEntityTitle = trim((string)($employee['LEGAL_ENTITY'] ?? ''));
     $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
     $dateKey = (string)($employee['DATE'] ?? '');
@@ -969,7 +970,19 @@ foreach ($periodDays as $dateKey) {
     if (!isset($legalEntitySummary[$dateKey])) { $legalEntitySummary[$dateKey] = []; }
     foreach ($summaryCabinets as $cabNorm => $cabData) {
         $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : [];
-        $legalCounts = isset($dayData['BY_LEGAL_ENTITY']) && is_array($dayData['BY_LEGAL_ENTITY']) ? $dayData['BY_LEGAL_ENTITY'] : [];
+        $legalCounts = [];
+        if ($hasOrgUnitFilter) {
+            $departmentCounts = isset($dayData['BY_DEPARTMENT']) && is_array($dayData['BY_DEPARTMENT']) ? $dayData['BY_DEPARTMENT'] : [];
+            foreach (array_keys($selectedHeadDepartmentIds) as $selectedDepartmentId) {
+                if (empty($departmentCounts[$selectedDepartmentId]) || !is_array($departmentCounts[$selectedDepartmentId])) { continue; }
+                foreach ($departmentCounts[$selectedDepartmentId] as $legalEntity => $count) {
+                    if (!isset($legalCounts[$legalEntity])) { $legalCounts[$legalEntity] = 0; }
+                    $legalCounts[$legalEntity] += (int)$count;
+                }
+            }
+        } else {
+            $legalCounts = isset($dayData['BY_LEGAL_ENTITY']) && is_array($dayData['BY_LEGAL_ENTITY']) ? $dayData['BY_LEGAL_ENTITY'] : [];
+        }
         foreach ($legalCounts as $legalEntity => $count) {
             $legalEntityTitle = (string)($legalEntity !== '' ? $legalEntity : $undefinedLegalEntity);
             if (!isset($legalEntitySummary[$dateKey][$legalEntityTitle])) {
