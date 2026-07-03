@@ -880,11 +880,17 @@ usort($unknownEmployees, static function (array $left, array $right): int {
 });
 
 $allCabinets = [];
+foreach ($managerCabinetScopeIds as $cabNorm => $_) {
+    $cabNorm = (string)$cabNorm;
+    if ($cabNorm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if (isset($cabinetDirectory[$cabNorm])) {
+        $allCabinets[(string)$cabinetDirectory[$cabNorm]['TITLE']] = true;
+    }
+}
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
     if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
-    if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) { continue; }
-    $allCabinets[(string)$cabName] = true;
+    $allCabinets[isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : (string)$cabName] = true;
 }
 $availableCabinets = array_keys($allCabinets);
 sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
