@@ -14,6 +14,63 @@ define('BX_PUBLIC_MODE', true);
 define('PUBLIC_AJAX_MODE', true);
 define('DisableEventsCheck', true);
 
+$workplaceReportPerfStart = microtime(true);
+$workplaceReportPerfMarks = [];
+$workplaceReportPerfContext = [];
+$workplaceReportPerfMark = static function (string $label) use (&$workplaceReportPerfMarks, $workplaceReportPerfStart): void {
+    $workplaceReportPerfMarks[] = [
+        'label' => $label,
+        'elapsed_ms' => round((microtime(true) - $workplaceReportPerfStart) * 1000, 1),
+        'memory_mb' => round(memory_get_usage(true) / 1048576, 2),
+    ];
+};
+register_shutdown_function(static function () use (&$workplaceReportPerfMarks, &$workplaceReportPerfContext, $workplaceReportPerfStart): void {
+    $documentRoot = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    if ($documentRoot === '') { return; }
+
+    $logDir = $documentRoot . '/upload/logs';
+    if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+    if (!is_dir($logDir) || !is_writable($logDir)) { return; }
+
+    $lastElapsed = 0.0;
+    $marks = [];
+    foreach ($workplaceReportPerfMarks as $mark) {
+        $elapsed = (float)$mark['elapsed_ms'];
+        $marks[] = [
+            'label' => (string)$mark['label'],
+            'elapsed_ms' => $elapsed,
+            'delta_ms' => round($elapsed - $lastElapsed, 1),
+            'memory_mb' => (float)$mark['memory_mb'],
+        ];
+        $lastElapsed = $elapsed;
+    }
+
+    $error = error_get_last();
+    $payload = [
+        'time' => date('c'),
+        'script' => (string)($_SERVER['SCRIPT_NAME'] ?? ''),
+        'request_uri' => (string)($_SERVER['REQUEST_URI'] ?? ''),
+        'user_id' => (int)($workplaceReportPerfContext['current_user_id'] ?? 0),
+        'active_tab' => (string)($_GET['active_tab'] ?? 'dashboard'),
+        'dashboard_chart_mode' => (string)($workplaceReportPerfContext['dashboard_chart_mode'] ?? ($_GET['dashboard_chart_mode'] ?? '')),
+        'date_from' => (string)($_GET['date_from'] ?? ''),
+        'date_to' => (string)($_GET['date_to'] ?? ''),
+        'period_days' => (int)($workplaceReportPerfContext['period_days'] ?? 0),
+        'summary_cabinets' => (int)($workplaceReportPerfContext['summary_cabinets'] ?? 0),
+        'portal_users' => (int)($workplaceReportPerfContext['portal_users'] ?? 0),
+        'departments' => (int)($workplaceReportPerfContext['departments'] ?? 0),
+        'reverse_passes' => (int)($workplaceReportPerfContext['reverse_passes'] ?? 0),
+        'unknown_employees' => (int)($workplaceReportPerfContext['unknown_employees'] ?? 0),
+        'total_ms' => round((microtime(true) - $workplaceReportPerfStart) * 1000, 1),
+        'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 2),
+        'marks' => $marks,
+        'fatal' => $error && in_array((int)$error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true) ? $error : null,
+    ];
+
+    @file_put_contents($logDir . '/workplace_report_ext2_perf.log', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
+});
+$workplaceReportPerfMark('bootstrap_start');
+
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
 
 // Отчет формирует большой HTML самостоятельно и не использует шаблон Битрикса.
@@ -23,6 +80,7 @@ require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.
 while (ob_get_level() > 0) {
     ob_end_clean();
 }
+$workplaceReportPerfMark('prolog_loaded_buffers_cleared');
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime as BitrixDateTime;
@@ -116,6 +174,8 @@ $resolveCurrentUserId = static function () use (&$currentUserIdCandidates): int 
 };
 
 $currentUserId = $resolveCurrentUserId();
+$workplaceReportPerfContext['current_user_id'] = $currentUserId;
+$workplaceReportPerfMark('current_user_resolved');
 if ($currentUserId <= 0 && (string)($_GET['auth_retry'] ?? '') !== 'Y') {
     $requestUri = (string)($_SERVER['REQUEST_URI'] ?? '/pub/apps/attendance_report/workplace_report_ext2.php');
     $backUrlSeparator = strpos($requestUri, '?') === false ? '?' : '&';
@@ -152,6 +212,8 @@ if (!$isAhsAdmin && !$isHrDirector) {
     }
     exit;
 }
+
+$workplaceReportPerfMark('access_checked');
 
 $iblockId = (int)\COption::GetOptionInt('intranet', 'iblock_structure', 0);
 if ($iblockId <= 0) {
@@ -622,6 +684,10 @@ while ($user = $rsUsers->Fetch()) {
     }
 }
 
+$workplaceReportPerfContext['portal_users'] = count($portalUserInfoById);
+$workplaceReportPerfContext['departments'] = count($departments);
+$workplaceReportPerfMark('portal_users_loaded');
+
 $cabinetDirectory = [];
 $cabinetDirectoryById = [];
 $availableOfficesMap = [];
@@ -680,6 +746,8 @@ $periodDays = [];
 foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $day) {
     $periodDays[] = $day->format('Y-m-d');
 }
+$workplaceReportPerfContext['period_days'] = count($periodDays);
+$workplaceReportPerfMark('period_prepared');
 
 $prodCalendarSource = 'Srvr=srv-off-1c01;Ref=1c_Pay83_NSC;';
 $prodCalendarByDate = [];
@@ -731,6 +799,8 @@ foreach ($periodDays as $dateKey) {
     $cabinetDailyOffice[$dateKey] = [];
 }
 
+$workplaceReportPerfMark('directories_loaded');
+
 $reverseUsersByPass = [];
 $reverseUsersHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(100)->fetch();
 if ($reverseUsersHl) {
@@ -753,6 +823,9 @@ if ($reverseUsersHl) {
         ];
     }
 }
+
+$workplaceReportPerfContext['reverse_passes'] = count($reverseUsersByPass);
+$workplaceReportPerfMark('reverse_users_loaded');
 
 $reverseEventsByDayAndPass = [];
 $reverseHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(3)->fetch();
@@ -791,6 +864,8 @@ if ($reverseHl) {
 
 $officePresenceKeys = [];
 $shortOfficePresenceKeys = [];
+$workplaceReportPerfMark('reverse_events_loaded');
+
 $unknownEmployees = [];
 $temporaryGuestVisits = [];
 foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
@@ -970,6 +1045,9 @@ usort($temporaryGuestVisits, static function (array $left, array $right): int {
     return strcmp((string)$left['DATE'], (string)$right['DATE']);
 });
 
+$workplaceReportPerfContext['unknown_employees'] = count($unknownEmployees);
+$workplaceReportPerfMark('reverse_events_processed');
+
 usort($unknownEmployees, static function (array $left, array $right): int {
     $legalCompare = strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
     if ($legalCompare !== 0) { return $legalCompare; }
@@ -1051,6 +1129,8 @@ foreach ($userCabinetMap as $userId => $cabName) {
 uasort($summaryCabinets, static function (array $left, array $right): int {
     return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
 });
+$workplaceReportPerfContext['summary_cabinets'] = count($summaryCabinets);
+$workplaceReportPerfMark('summary_cabinets_prepared');
 
 $officeWorkplacesTotal = 0;
 foreach ($summaryCabinets as $cabData) {
@@ -1149,6 +1229,7 @@ $dashboardAllowedChartModes = [
 $dashboardChartMode = isset($_GET['dashboard_chart_mode'], $dashboardAllowedChartModes[(string)$_GET['dashboard_chart_mode']])
     ? (string)$_GET['dashboard_chart_mode']
     : $dashboardDefaultChartMode;
+$workplaceReportPerfContext['dashboard_chart_mode'] = $dashboardChartMode;
 $dashboardOfficeByDate = [];
 $dashboardTotalWorkplaces = $officeWorkplacesTotal * max(1, count($workingPeriodDays));
 $dashboardTotalOccupied = 0;
@@ -1229,6 +1310,7 @@ $buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate
     return $buckets;
 };
 $dashboardHorizontalBuckets = $buildDashboardHorizontalBuckets($dashboardOfficeByDate, $dashboardChartMode, $officeWorkplacesTotal);
+$workplaceReportPerfMark('dashboard_data_prepared');
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
 $dashboardIsCabinetScope = $hasCabinetFilter;
 $dashboardSelectedCabinetCount = count($summaryCabinets);
@@ -1246,6 +1328,7 @@ $dashboardSelectionCardNote = $dashboardIsCabinetScope
         : ('Рабочих мест: ' . (int)$officeWorkplacesTotal));
 $legalEntitySummaryScopeTitle = $hasCabinetFilter ? implode(', ', array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $summaryCabinets)) : 'офисе';
 
+$workplaceReportPerfMark('before_html_render');
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
@@ -2146,3 +2229,4 @@ header('Content-Type: text/html; charset=UTF-8');
 </script>
 </body>
 </html>
+<?php $workplaceReportPerfMark('html_render_finished'); ?>
