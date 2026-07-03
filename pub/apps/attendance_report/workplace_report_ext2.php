@@ -105,6 +105,13 @@ $resolveCurrentUserId = static function () use (&$currentUserIdCandidates): int 
 };
 
 $currentUserId = $resolveCurrentUserId();
+if ($currentUserId <= 0 && (string)($_GET['auth_retry'] ?? '') !== 'Y') {
+    $requestUri = (string)($_SERVER['REQUEST_URI'] ?? '/pub/apps/attendance_report/workplace_report_ext2.php');
+    $backUrlSeparator = strpos($requestUri, '?') === false ? '?' : '&';
+    $backUrl = $requestUri . $backUrlSeparator . 'auth_retry=Y';
+    LocalRedirect('/auth/?backurl=' . urlencode($backUrl), true);
+    exit;
+}
 $reportRoles = array_map(static function (array $roleUserIds): array {
     return array_map('intval', $roleUserIds);
 }, $reportRoles);
