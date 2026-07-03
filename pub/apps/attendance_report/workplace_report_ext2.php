@@ -1445,7 +1445,6 @@ header('Content-Type: text/html; charset=UTF-8');
                 <input type="text" class="token-input" list="cabinet-filter-options" placeholder="Начните вводить кабинет">
             </span>
             <datalist id="cabinet-filter-options"><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>"></option><?php endforeach; ?></datalist>
-            <span class="token-hint">Enter/запятая — добавить</span>
         </label>
     </div>
     <div class="filters-row">
@@ -1456,7 +1455,6 @@ header('Content-Type: text/html; charset=UTF-8');
                 <input type="text" class="token-input" list="department-filter-options" placeholder="Начните вводить подразделение">
             </span>
             <datalist id="department-filter-options"><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>"></option><?php endforeach; ?></datalist>
-            <span class="token-hint">Enter/запятая — добавить</span>
         </label>
         <span class="filter-actions">
             <button type="submit" class="filter-submit">Показать</button>
