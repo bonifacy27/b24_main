@@ -1453,7 +1453,8 @@ header('Content-Type: text/html; charset=UTF-8');
     <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
 </div>
 
-<section class="tab-pane<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" id="tab-dashboard" role="tabpanel">
+<?php if ($activeTab === 'dashboard'): ?>
+<section class="tab-pane is-active" id="tab-dashboard" role="tabpanel">
 <h2>Дашборд загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></h2>
 <div class="dashboard-grid">
     <div class="dashboard-card">
@@ -1521,8 +1522,10 @@ header('Content-Type: text/html; charset=UTF-8');
 </div>
 
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'employees' ? ' is-active' : '' ?>" id="tab-employees" role="tabpanel">
+<?php if ($activeTab === 'employees'): ?>
+<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
 <p class="dashboard-muted">Если выбран период, строки сгруппированы по датам. Нажмите на строку даты, чтобы раскрыть или свернуть детализацию за день.</p>
 <table id="employees-report-table">
@@ -1685,8 +1688,10 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" id="tab-unknown" role="tabpanel">
+<?php if ($activeTab === 'unknown'): ?>
+<section class="tab-pane is-active" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
 <table id="unknown-report-table">
@@ -1724,8 +1729,10 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" id="tab-temporary" role="tabpanel">
+<?php if ($activeTab === 'temporary'): ?>
+<section class="tab-pane is-active" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
 <table id="temporary-report-table">
@@ -1759,10 +1766,12 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
 
 
-<section class="tab-pane<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" id="tab-cabinet-summary" role="tabpanel">
+<?php if ($activeTab === 'cabinet-summary'): ?>
+<section class="tab-pane is-active" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="cabinet-summary-report-table" data-export-name="cabinet_summary">Экспорт в Excel</button></div>
 <table id="cabinet-summary-report-table">
@@ -1831,8 +1840,10 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" id="tab-legal-summary" role="tabpanel">
+<?php if ($activeTab === 'legal-summary'): ?>
+<section class="tab-pane is-active" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
 <table id="legal-summary-report-table">
@@ -1899,6 +1910,7 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
 
 
@@ -2058,6 +2070,12 @@ header('Content-Type: text/html; charset=UTF-8');
             var target = button.getAttribute('data-tab-target');
             if (!target) { return; }
             if (activeTabInput) { activeTabInput.value = target; }
+            if (!document.getElementById('tab-' + target)) {
+                var tabUrl = new URL(window.location.href);
+                tabUrl.searchParams.set('active_tab', target);
+                window.location.href = tabUrl.toString();
+                return;
+            }
 
             document.querySelectorAll('.tab-button').forEach(function (tabButton) {
                 var isActive = tabButton === button;
