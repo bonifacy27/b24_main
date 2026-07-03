@@ -1089,6 +1089,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .filters { margin: 10px 0 16px; }
         .filters-row { margin-top: 8px; }
         .filters-row:first-child { margin-top: 0; }
+        .compact-multiselect { width: 260px; max-width: 260px; height: 54px; vertical-align: top; }
         .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
         .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
         .tab-button.is-active { background: #fff; font-weight: 700; position: relative; top: 1px; }
@@ -1144,11 +1145,11 @@ header('Content-Type: text/html; charset=UTF-8');
         <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
         <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
         <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-        <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter[]" multiple size="5"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= in_array($cabOpt, $cabinetFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
+        <label style="margin-left:8px;">Кабинет: <select class="compact-multiselect" name="cabinet_filter[]" multiple size="3"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= in_array($cabOpt, $cabinetFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
     </div>
     <div class="filters-row">
         <label>CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
-        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select name="department_filter[]" id="department-filter" multiple size="5"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= in_array($departmentOpt, $departmentFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
+        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select class="compact-multiselect" name="department_filter[]" id="department-filter" multiple size="3"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= in_array($departmentOpt, $departmentFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
         <button type="submit" style="margin-left:8px;">Показать</button>
         <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
     </div>
