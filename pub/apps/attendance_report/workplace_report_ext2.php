@@ -1089,7 +1089,12 @@ header('Content-Type: text/html; charset=UTF-8');
         .filters { margin: 10px 0 16px; }
         .filters-row { margin-top: 8px; }
         .filters-row:first-child { margin-top: 0; }
-        .compact-multiselect { width: 260px; max-width: 260px; height: 54px; vertical-align: top; }
+        .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; min-height: 30px; max-height: 70px; overflow-y: auto; padding: 3px 6px; border: 1px solid #9aa7b4; background: #fff; vertical-align: middle; }
+        .token-multiselect input[type="text"] { flex: 1 1 120px; min-width: 120px; border: 0; outline: 0; font: inherit; }
+        .filter-token { display: inline-flex; align-items: center; gap: 4px; max-width: 310px; padding: 2px 6px; border-radius: 999px; background: #eaf4ff; color: #0f4f93; white-space: nowrap; }
+        .filter-token span { overflow: hidden; text-overflow: ellipsis; }
+        .filter-token button { border: 0; background: transparent; color: #0f4f93; cursor: pointer; font-weight: 700; padding: 0; }
+        .token-hint { color: #7a8794; font-size: 11px; margin-left: 4px; }
         .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
         .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
         .tab-button.is-active { background: #fff; font-weight: 700; position: relative; top: 1px; }
@@ -1145,11 +1150,25 @@ header('Content-Type: text/html; charset=UTF-8');
         <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
         <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
         <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-        <label style="margin-left:8px;">Кабинет: <select class="compact-multiselect" name="cabinet_filter[]" multiple size="3"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= in_array($cabOpt, $cabinetFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
+        <label style="margin-left:8px;">Кабинет:
+            <span class="token-multiselect" id="cabinet-filter-control" data-input-name="cabinet_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($cabinetFilterValues, JSON_UNESCAPED_UNICODE))?>">
+                <span class="token-list"></span>
+                <input type="text" class="token-input" list="cabinet-filter-options" placeholder="Начните вводить кабинет">
+            </span>
+            <datalist id="cabinet-filter-options"><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>"></option><?php endforeach; ?></datalist>
+            <span class="token-hint">Enter/запятая — добавить</span>
+        </label>
     </div>
     <div class="filters-row">
         <label>CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
-        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select class="compact-multiselect" name="department_filter[]" id="department-filter" multiple size="3"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= in_array($departmentOpt, $departmentFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
+        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение:
+            <span class="token-multiselect" id="department-filter-control" data-input-name="department_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($departmentFilterValues, JSON_UNESCAPED_UNICODE))?>">
+                <span class="token-list"></span>
+                <input type="text" class="token-input" list="department-filter-options" placeholder="Начните вводить подразделение">
+            </span>
+            <datalist id="department-filter-options"><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>"></option><?php endforeach; ?></datalist>
+            <span class="token-hint">Enter/запятая — добавить</span>
+        </label>
         <button type="submit" style="margin-left:8px;">Показать</button>
         <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
     </div>
@@ -1598,21 +1617,137 @@ header('Content-Type: text/html; charset=UTF-8');
     var departmentsByCeo1 = <?=\CUtil::PhpToJSObject(array_map('array_keys', $availableDepartmentsByCeo1), false, true)?>;
     var ceo1Filter = document.getElementById('ceo1-filter');
     var departmentWrap = document.getElementById('department-filter-wrap');
-    var departmentFilter = document.getElementById('department-filter');
-    function rebuildDepartmentFilter() {
-        if (!ceo1Filter || !departmentWrap || !departmentFilter) { return; }
-        var ceo1 = ceo1Filter.value || '';
-        var current = Array.prototype.slice.call(departmentFilter.selectedOptions || []).map(function (option) { return option.value; });
-        departmentWrap.style.display = ceo1 ? 'inline' : 'none';
-        departmentFilter.innerHTML = '<option value="">Все</option>';
-        (departmentsByCeo1[ceo1] || []).forEach(function (department) {
+    var departmentOptionsList = document.getElementById('department-filter-options');
+
+    function readJsonArray(value) {
+        try {
+            var parsed = JSON.parse(value || '[]');
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function normalizeTokenValue(value) {
+        return (value || '').trim();
+    }
+
+    function setDatalistOptions(datalist, options) {
+        if (!datalist) { return; }
+        datalist.innerHTML = '';
+        options.forEach(function (optionValue) {
             var option = document.createElement('option');
-            option.value = department;
-            option.textContent = department;
-            option.selected = current.indexOf(department) !== -1;
-            departmentFilter.appendChild(option);
+            option.value = optionValue;
+            datalist.appendChild(option);
         });
-        if (!ceo1) { departmentFilter.value = ''; }
+    }
+
+    function initTokenControl(control) {
+        if (!control) { return null; }
+        var inputName = control.getAttribute('data-input-name') || '';
+        var selectedValues = readJsonArray(control.getAttribute('data-selected'));
+        var tokenList = control.querySelector('.token-list');
+        var textInput = control.querySelector('.token-input');
+        var values = [];
+
+        function syncHiddenInputs() {
+            control.querySelectorAll('input[type="hidden"][data-token-hidden="1"]').forEach(function (hiddenInput) {
+                hiddenInput.remove();
+            });
+            values.forEach(function (value) {
+                var hiddenInput = document.createElement('input');
+                hiddenInput.type = 'hidden';
+                hiddenInput.name = inputName;
+                hiddenInput.value = value;
+                hiddenInput.setAttribute('data-token-hidden', '1');
+                control.appendChild(hiddenInput);
+            });
+        }
+
+        function renderTokens() {
+            tokenList.innerHTML = '';
+            values.forEach(function (value) {
+                var token = document.createElement('span');
+                token.className = 'filter-token';
+                var text = document.createElement('span');
+                text.textContent = value;
+                var removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.setAttribute('aria-label', 'Удалить ' + value);
+                removeButton.textContent = '×';
+                removeButton.addEventListener('click', function () {
+                    values = values.filter(function (currentValue) { return currentValue !== value; });
+                    renderTokens();
+                });
+                token.appendChild(text);
+                token.appendChild(removeButton);
+                tokenList.appendChild(token);
+            });
+            syncHiddenInputs();
+        }
+
+        function addValue(value) {
+            value = normalizeTokenValue(value);
+            if (value === '') {
+                values = [];
+                renderTokens();
+                return;
+            }
+            if (values.indexOf(value) === -1) {
+                values.push(value);
+                values.sort(function (left, right) { return left.localeCompare(right); });
+                renderTokens();
+            }
+        }
+
+        if (textInput) {
+            textInput.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ',') {
+                    event.preventDefault();
+                    addValue(textInput.value);
+                    textInput.value = '';
+                } else if (event.key === 'Backspace' && textInput.value === '' && values.length > 0) {
+                    values.pop();
+                    renderTokens();
+                }
+            });
+            textInput.addEventListener('change', function () {
+                addValue(textInput.value);
+                textInput.value = '';
+            });
+        }
+
+        selectedValues.forEach(addValue);
+
+        return {
+            getValues: function () { return values.slice(); },
+            setValues: function (newValues) {
+                values = [];
+                (newValues || []).forEach(addValue);
+                renderTokens();
+            },
+            clear: function () { values = []; renderTokens(); }
+        };
+    }
+
+    var cabinetTokenControl = initTokenControl(document.getElementById('cabinet-filter-control'));
+    var departmentTokenControl = initTokenControl(document.getElementById('department-filter-control'));
+
+    function rebuildDepartmentFilter() {
+        if (!ceo1Filter || !departmentWrap) { return; }
+        var ceo1 = ceo1Filter.value || '';
+        var availableDepartments = departmentsByCeo1[ceo1] || [];
+        departmentWrap.style.display = ceo1 ? 'inline' : 'none';
+        setDatalistOptions(departmentOptionsList, availableDepartments);
+        if (departmentTokenControl) {
+            if (!ceo1) {
+                departmentTokenControl.clear();
+            } else {
+                departmentTokenControl.setValues(departmentTokenControl.getValues().filter(function (value) {
+                    return availableDepartments.indexOf(value) !== -1;
+                }));
+            }
+        }
     }
     if (ceo1Filter) { ceo1Filter.addEventListener('change', rebuildDepartmentFilter); }
 
