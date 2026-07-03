@@ -28,10 +28,36 @@ if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loade
 }
 
 global $USER;
-$currentUserId = is_object($USER) ? (int)$USER->GetID() : 0;
+$resolveCurrentUserId = static function (): int {
+    global $USER;
+    $candidateIds = [];
+
+    if (is_object($USER) && method_exists($USER, 'GetID')) {
+        $candidateIds[] = (int)$USER->GetID();
+    }
+
+    try {
+        if (class_exists('\Bitrix\Main\Engine\CurrentUser')) {
+            $candidateIds[] = (int)\Bitrix\Main\Engine\CurrentUser::get()->getId();
+        }
+    } catch (\Throwable $e) {
+        error_log('workplace_report_ext2 access: CurrentUser getId failed: ' . $e->getMessage());
+    }
+
+    foreach ($candidateIds as $candidateId) {
+        if ($candidateId > 0) { return $candidateId; }
+    }
+    return 0;
+};
+
+$currentUserId = $resolveCurrentUserId();
+$reportRoles = array_map(static function (array $roleUserIds): array {
+    return array_map('intval', $roleUserIds);
+}, $reportRoles);
 $isAhsAdmin = in_array($currentUserId, $reportRoles['AHS_ADMIN'], true);
 $isHrDirector = in_array($currentUserId, $reportRoles['HR_DIRECTOR'], true);
 if (!$isAhsAdmin && !$isHrDirector) {
+    error_log('workplace_report_ext2 access denied for user ID ' . $currentUserId);
     http_response_code(403);
     header('Content-Type: text/plain; charset=UTF-8');
     echo 'Доступ запрещен.';
