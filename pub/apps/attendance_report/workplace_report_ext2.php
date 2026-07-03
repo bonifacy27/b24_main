@@ -1434,7 +1434,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .dashboard-card-title { margin: 0 0 8px; color: #52616f; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
         .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
         .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
-        .dashboard-section { margin: 18px 0 24px; }
+        .dashboard-section { margin: 18px 0 24px; padding: 18px; border: 1px solid #d8e0ea; border-radius: 14px; background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%); box-shadow: 0 8px 24px rgba(15, 79, 147, .08); }
         .dashboard-section h3 { margin: 0 0 12px; font-size: 18px; }
         .dashboard-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
         .dashboard-chart-mode { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #d8e0ea; border-radius: 999px; background: #fff; cursor: pointer; }
