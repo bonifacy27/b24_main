@@ -1398,6 +1398,8 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-row { display: grid; grid-template-columns: 120px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
         .office-load-row.is-non-workday .office-load-fill { background: #cbd5e1; }
+        .office-load-row.is-overload .office-load-fill { background: linear-gradient(90deg, #fb923c 0%, #ef4444 65%, #b91c1c 100%); }
+        .office-load-row.is-overload strong { color: #b91c1c; }
         .office-load-date { font-weight: 700; }
         .office-load-row.is-non-workday .office-load-date { color: #dc2626; }
         .office-load-row.is-preholiday .office-load-date { color: #d97706; }
@@ -1410,7 +1412,9 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-column-bar { display: flex; align-items: flex-end; width: 32px; height: 180px; border-radius: 10px 10px 0 0; background: #edf4fb; box-shadow: inset 0 0 0 1px #d8e0ea; overflow: hidden; }
         .office-load-timeline.is-compact-days .office-load-column-bar { width: 20px; height: 160px; }
         .office-load-column-fill { width: 100%; min-height: 2px; border-radius: inherit; background: linear-gradient(180deg, #7c3aed 0%, #2563eb 55%, #38bdf8 100%); }
+        .office-load-column.is-overload .office-load-column-fill { background: linear-gradient(180deg, #b91c1c 0%, #ef4444 65%, #fb923c 100%); }
         .office-load-column-value { font-weight: 700; color: #0f4f93; }
+        .office-load-column.is-overload .office-load-column-value { color: #b91c1c; }
         .office-load-timeline.is-compact-days .office-load-column-value { font-size: 10px; }
         .office-load-column-label { max-width: 70px; color: #52616f; font-size: 11px; line-height: 1.15; text-align: center; }
         .office-load-timeline.is-compact-days .office-load-column-label { max-width: 34px; font-size: 10px; white-space: nowrap; }
@@ -1511,7 +1515,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php if ($dashboardChartMode === 'vertical_days'): ?>
         <div class="office-load-chart">
             <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-                <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : (!empty($dayData['IS_PREHOLIDAY']) ? ' is-preholiday' : '') ?>">
+                <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : (!empty($dayData['IS_PREHOLIDAY']) ? ' is-preholiday' : '') ?><?= (float)$dayData['UTILIZATION'] > 90 ? ' is-overload' : '' ?>">
                     <div class="office-load-date"><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
                     <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
                         <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
@@ -1533,7 +1537,7 @@ header('Content-Type: text/html; charset=UTF-8');
                         ? '; ' . ($bucketWeekdayNames[(int)$bucketDateFrom->format('N')] ?? '')
                         : '; период ' . $bucketDateFrom->format('d.m.Y') . ' — ' . $bucketDateTo->format('d.m.Y');
                     ?>
-                    <div class="office-load-column" title="<?=htmlspecialcharsbx($bucketTitle)?>">
+                    <div class="office-load-column<?= (float)$bucket['UTILIZATION'] > 90 ? ' is-overload' : '' ?>" title="<?=htmlspecialcharsbx($bucketTitle)?>">
                         <div class="office-load-column-value"><?= $bucket['UTILIZATION'] ?>%</div>
                         <div class="office-load-column-bar">
                             <div class="office-load-column-fill" style="height: <?= min(100, (float)$bucket['UTILIZATION']) ?>%;"></div>
