@@ -1263,9 +1263,10 @@ foreach ($periodDays as $dateKey) {
         $dashboardPeakOfficeDate = $dateKey;
     }
 }
-$buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate, string $mode, int $officeWorkplacesTotal) use ($formatReportDate): array {
+$buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate, string $mode, int $officeWorkplacesTotal): array {
     $buckets = [];
     foreach ($dashboardOfficeByDate as $dateKey => $dayData) {
+        if ($mode === 'horizontal_days' && empty($dayData['IS_WORKDAY'])) { continue; }
         $date = new \DateTime($dateKey);
         if ($mode === 'horizontal_weeks') {
             $bucketKey = $date->format('o-\WW');
@@ -1279,7 +1280,7 @@ $buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate
             $bucketLabel = 'Q' . $quarter . ' ' . $date->format('Y');
         } else {
             $bucketKey = $dateKey;
-            $bucketLabel = $formatReportDate($dateKey, true);
+            $bucketLabel = $date->format('d.m');
         }
 
         if (!isset($buckets[$bucketKey])) {
@@ -1394,11 +1395,16 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
         .office-load-timeline-wrap { max-width: 100%; overflow-x: auto; padding: 8px 0 4px; }
         .office-load-timeline { display: flex; align-items: flex-end; gap: 10px; min-height: 260px; padding: 8px 4px 0; border-bottom: 1px solid #d8e0ea; }
+        .office-load-timeline.is-compact-days { gap: 5px; min-height: 230px; }
         .office-load-column { display: grid; grid-template-rows: 28px 180px 42px; justify-items: center; gap: 7px; min-width: 54px; }
+        .office-load-timeline.is-compact-days .office-load-column { grid-template-rows: 24px 160px 24px; gap: 5px; min-width: 30px; }
         .office-load-column-bar { display: flex; align-items: flex-end; width: 32px; height: 180px; border-radius: 10px 10px 0 0; background: #edf4fb; box-shadow: inset 0 0 0 1px #d8e0ea; overflow: hidden; }
+        .office-load-timeline.is-compact-days .office-load-column-bar { width: 20px; height: 160px; }
         .office-load-column-fill { width: 100%; min-height: 2px; border-radius: inherit; background: linear-gradient(180deg, #7c3aed 0%, #2563eb 55%, #38bdf8 100%); }
         .office-load-column-value { font-weight: 700; color: #0f4f93; }
+        .office-load-timeline.is-compact-days .office-load-column-value { font-size: 10px; }
         .office-load-column-label { max-width: 70px; color: #52616f; font-size: 11px; line-height: 1.15; text-align: center; }
+        .office-load-timeline.is-compact-days .office-load-column-label { max-width: 34px; font-size: 10px; white-space: nowrap; }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -1505,7 +1511,7 @@ header('Content-Type: text/html; charset=UTF-8');
         </div>
     <?php else: ?>
         <div class="office-load-timeline-wrap">
-            <div class="office-load-timeline">
+            <div class="office-load-timeline<?= $dashboardChartMode === 'horizontal_days' ? ' is-compact-days' : '' ?>">
                 <?php foreach ($dashboardHorizontalBuckets as $bucket): ?>
                     <?php $bucketTitle = (int)$bucket['OCCUPIED'] . ' из ' . (int)$bucket['WORKPLACES'] . ' РМ; период ' . (new \DateTime((string)$bucket['DATE_FROM']))->format('d.m.Y') . ' — ' . (new \DateTime((string)$bucket['DATE_TO']))->format('d.m.Y'); ?>
                     <div class="office-load-column" title="<?=htmlspecialcharsbx($bucketTitle)?>">
