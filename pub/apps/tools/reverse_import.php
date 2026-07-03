@@ -10,6 +10,8 @@ define('NO_KEEP_STATISTIC', true);
 define('NO_AGENT_STATISTIC', true);
 define('NO_AGENT_CHECK', true);
 
+@set_time_limit(0);
+
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
 
 use Bitrix\Highloadblock\HighloadBlockTable;
@@ -23,6 +25,7 @@ const REVERSE_SOURCE = 'Reverse';
 const REVERSE_TYPE_ENUM_ID = 1721;
 const REVERSE_EVENT_IN_ENUM_ID = 45;
 const REVERSE_EVENT_OUT_ENUM_ID = 46;
+const REVERSE_IMPORT_MAX_DETAILS = 1000;
 
 header('Content-Type: text/html; charset=UTF-8');
 
@@ -64,6 +67,13 @@ function reverseImportNormalize(string $value): string
     $value = trim(preg_replace('/\s+/u', ' ', $value));
 
     return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+}
+
+function reverseImportAddDetail(array &$details, string $message): void
+{
+    if (count($details) < REVERSE_IMPORT_MAX_DETAILS) {
+        $details[] = $message;
+    }
 }
 
 function reverseImportGetDataClass(int $hlBlockId): string
@@ -137,18 +147,36 @@ function reverseImportParseDateTime(string $value): ?BitrixDateTime
     return BitrixDateTime::createFromPhp($date);
 }
 
-function reverseImportHasEvent(string $eventsClass, BitrixDateTime $dateTime, string $reverseId): bool
+function reverseImportBuildEventKey(BitrixDateTime $dateTime, string $reverseId): string
 {
-    $row = $eventsClass::getList([
-        'select' => ['ID'],
-        'filter' => [
-            '=UF_DATETIME' => $dateTime,
-            '=UF_IDREVERSE' => $reverseId,
-        ],
-        'limit' => 1,
-    ])->fetch();
+    return $dateTime->format('d.m.Y H:i:s') . '|' . $reverseId;
+}
 
-    return (bool)$row;
+function reverseImportBuildExistingEventKeys(string $eventsClass, array $reverseIds, ?BitrixDateTime $minDateTime, ?BitrixDateTime $maxDateTime): array
+{
+    if (empty($reverseIds) || !$minDateTime || !$maxDateTime) {
+        return [];
+    }
+
+    $keys = [];
+    $rs = $eventsClass::getList([
+        'select' => ['ID', 'UF_DATETIME', 'UF_IDREVERSE'],
+        'filter' => [
+            '@UF_IDREVERSE' => array_values(array_unique($reverseIds)),
+            '>=UF_DATETIME' => $minDateTime,
+            '<=UF_DATETIME' => $maxDateTime,
+        ],
+    ]);
+
+    while ($row = $rs->fetch()) {
+        $dateTime = $row['UF_DATETIME'] ?? null;
+        $reverseId = (string)($row['UF_IDREVERSE'] ?? '');
+        if ($dateTime instanceof BitrixDateTime && $reverseId !== '') {
+            $keys[reverseImportBuildEventKey($dateTime, $reverseId)] = true;
+        }
+    }
+
+    return $keys;
 }
 
 function reverseImportReadCsvRows(string $filePath): array
@@ -197,6 +225,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $usersMap = reverseImportBuildUsersMap($usersClass);
         $turnstilesMap = reverseImportBuildTurnstilesMap($turnstilesClass);
         $rows = reverseImportReadCsvRows($_FILES['csv_file']['tmp_name']);
+        $preparedRows = [];
+        $reverseIds = [];
+        $minDateTime = null;
+        $maxDateTime = null;
 
         foreach ($rows as $lineNumber => $row) {
             $csvLineNumber = $lineNumber + 1;
@@ -215,31 +247,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$dateTime || $turnstileName === '' || $fio === '' || $reverseId === '' || $turnstileId <= 0 || $eventId <= 0) {
                 $stats['skipped']++;
-                $details[] = 'Строка ' . $csvLineNumber . ': пропуск — дата, ФИО, турникет или тип события не сопоставлены.';
+                reverseImportAddDetail($details, 'Строка ' . $csvLineNumber . ': пропуск — дата, ФИО, турникет или тип события не сопоставлены.');
                 continue;
             }
 
-            if (reverseImportHasEvent($eventsClass, $dateTime, $reverseId)) {
-                $stats['duplicates']++;
-                $details[] = 'Строка ' . $csvLineNumber . ': дубль для ID Reverse ' . $reverseId . ' на ' . $dateTimeRaw . '.';
-                continue;
-            }
-
-            $fields = [
-                'UF_DATETIME' => $dateTime,
-                'UF_IDREVERSE' => $reverseId,
-                'UF_EVENT' => $eventId,
-                'UF_TYPE' => REVERSE_TYPE_ENUM_ID,
-                'UF_REVERSE_AP' => $turnstileId,
+            $preparedRows[] = [
+                'line' => $csvLineNumber,
+                'date_time_raw' => $dateTimeRaw,
+                'date_time' => $dateTime,
+                'reverse_id' => $reverseId,
+                'fields' => [
+                    'UF_DATETIME' => $dateTime,
+                    'UF_IDREVERSE' => $reverseId,
+                    'UF_EVENT' => $eventId,
+                    'UF_TYPE' => REVERSE_TYPE_ENUM_ID,
+                    'UF_REVERSE_AP' => $turnstileId,
+                ],
             ];
+            $reverseIds[$reverseId] = $reverseId;
+
+            if (!$minDateTime || $dateTime->getTimestamp() < $minDateTime->getTimestamp()) {
+                $minDateTime = $dateTime;
+            }
+            if (!$maxDateTime || $dateTime->getTimestamp() > $maxDateTime->getTimestamp()) {
+                $maxDateTime = $dateTime;
+            }
+        }
+
+        $existingEventKeys = reverseImportBuildExistingEventKeys($eventsClass, $reverseIds, $minDateTime, $maxDateTime);
+
+        foreach ($preparedRows as $preparedRow) {
+            $eventKey = reverseImportBuildEventKey($preparedRow['date_time'], $preparedRow['reverse_id']);
+            if (isset($existingEventKeys[$eventKey])) {
+                $stats['duplicates']++;
+                reverseImportAddDetail($details, 'Строка ' . $preparedRow['line'] . ': дубль для ID Reverse ' . $preparedRow['reverse_id'] . ' на ' . $preparedRow['date_time_raw'] . '.');
+                continue;
+            }
 
             if (!$isDryRun) {
-                $result = $eventsClass::add($fields);
+                $result = $eventsClass::add($preparedRow['fields']);
                 if (!$result->isSuccess()) {
-                    throw new RuntimeException('Строка ' . $csvLineNumber . ': ошибка добавления — ' . implode('; ', $result->getErrorMessages()));
+                    throw new RuntimeException('Строка ' . $preparedRow['line'] . ': ошибка добавления — ' . implode('; ', $result->getErrorMessages()));
                 }
             }
 
+            $existingEventKeys[$eventKey] = true;
             $stats['added']++;
         }
 
@@ -290,6 +342,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <?php if ($details): ?>
         <h2>Детали</h2>
+        <?php if (($stats['duplicates'] + $stats['skipped']) > count($details)): ?>
+            <p>Показаны первые <?=REVERSE_IMPORT_MAX_DETAILS?> сообщений из <?=($stats['duplicates'] + $stats['skipped'])?>.</p>
+        <?php endif; ?>
         <div class="details"><?=reverseImportHtml(implode("\n", $details))?></div>
     <?php endif; ?>
 </div>
