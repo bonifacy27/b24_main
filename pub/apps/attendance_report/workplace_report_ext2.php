@@ -54,9 +54,20 @@ $dateFrom->setTime(0, 0, 0);
 $dateTo->setTime(0, 0, 0);
 
 $defaultOfficeFilter = 'Московский пр., 139/1';
-$cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
+$normalizeFilterValues = static function ($rawValue): array {
+    $values = is_array($rawValue) ? $rawValue : [$rawValue];
+    $normalized = [];
+    foreach ($values as $value) {
+        $value = trim((string)$value);
+        if ($value !== '') { $normalized[$value] = true; }
+    }
+    return array_keys($normalized);
+};
+$cabinetFilterValues = isset($_GET['cabinet_filter']) ? $normalizeFilterValues($_GET['cabinet_filter']) : [];
+$cabinetFilterRaw = !empty($cabinetFilterValues) ? (string)reset($cabinetFilterValues) : '';
 $ceo1FilterRaw = isset($_GET['ceo1_filter']) ? trim((string)$_GET['ceo1_filter']) : '';
-$departmentFilterRaw = isset($_GET['department_filter']) ? trim((string)$_GET['department_filter']) : '';
+$departmentFilterValues = isset($_GET['department_filter']) ? $normalizeFilterValues($_GET['department_filter']) : [];
+$departmentFilterRaw = !empty($departmentFilterValues) ? (string)reset($departmentFilterValues) : '';
 $officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
 $availableTabs = ['dashboard' => true, 'employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true];
 $activeTab = isset($_GET['active_tab']) && isset($availableTabs[(string)$_GET['active_tab']]) ? (string)$_GET['active_tab'] : 'dashboard';
@@ -271,12 +282,14 @@ $normalizeOrgNodeIds = static function ($rawValue): array {
 };
 
 $cabinetFilterNorm = '';
-if ($cabinetFilterRaw !== '') {
-    $cabinetFilterNorm = $normalizeCabinet($cabinetFilterRaw);
-    if ($cabinetFilterNorm === '') {
-        $cabinetFilterNorm = $normalizeDirectoryCabinet($cabinetFilterRaw);
-    }
+$cabinetFilterNorms = [];
+foreach ($cabinetFilterValues as $cabinetFilterValue) {
+    $cabinetNorm = $normalizeCabinet($cabinetFilterValue);
+    if ($cabinetNorm === '') { $cabinetNorm = $normalizeDirectoryCabinet($cabinetFilterValue); }
+    if ($cabinetNorm !== '') { $cabinetFilterNorms[$cabinetNorm] = true; }
 }
+if (!empty($cabinetFilterNorms)) { $cabinetFilterNorm = (string)array_key_first($cabinetFilterNorms); }
+$hasCabinetFilter = !empty($cabinetFilterNorms);
 
 $orgNodes = [];
 $orgNodesHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(99)->fetch();
@@ -797,7 +810,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $cabinetDailyOffice[$dateKey][$unknownCabinetNorm][$legalKey][$legalEntity]++;
         }
 
-        if ($cabinetFilterNorm !== '' && $unknownCabinetNorm !== $cabinetFilterNorm) { continue; }
+        if ($hasCabinetFilter && !isset($cabinetFilterNorms[$unknownCabinetNorm])) { continue; }
         $employeeName = trim((string)$reverseUser['FIO']);
         if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
         if ($isTemporaryOrGuestPass($employeeName)) {
@@ -884,7 +897,9 @@ if ($ceo1FilterRaw !== '' && isset($availableDepartmentsByCeo1[$ceo1FilterRaw]))
     $availableDepartments = array_keys($availableDepartmentsByCeo1[$ceo1FilterRaw]);
 }
 sort($availableDepartments, SORT_NATURAL | SORT_FLAG_CASE);
-if ($departmentFilterRaw !== '' && !in_array($departmentFilterRaw, $availableDepartments, true)) { $departmentFilterRaw = ''; }
+$departmentFilterValues = array_values(array_intersect($departmentFilterValues, $availableDepartments));
+$departmentFilterRaw = !empty($departmentFilterValues) ? (string)reset($departmentFilterValues) : '';
+$selectedDepartmentFilterMap = array_fill_keys($departmentFilterValues, true);
 $availableCeo1 = array_keys($availableCeo1);
 sort($availableCeo1, SORT_NATURAL | SORT_FLAG_CASE);
 
@@ -894,14 +909,14 @@ foreach ($departments as $departmentId => $department) {
     $headUserId = (int)$department['UF_HEAD'];
     $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
     if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
-    if ($departmentFilterRaw !== '' && (string)$departmentSummary['DEPARTMENT'] !== $departmentFilterRaw) { continue; }
+    if (!empty($selectedDepartmentFilterMap) && !isset($selectedDepartmentFilterMap[(string)$departmentSummary['DEPARTMENT']])) { continue; }
     $selectedHeadDepartmentIds[$departmentId] = true;
 }
-$hasOrgUnitFilter = $ceo1FilterRaw !== '' || $departmentFilterRaw !== '';
+$hasOrgUnitFilter = $ceo1FilterRaw !== '' || !empty($selectedDepartmentFilterMap);
 $summaryCabinets = [];
 foreach ($cabinetDirectory as $cabNorm => $cabData) {
     if ($hasOrgUnitFilter) { continue; }
-    if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+    if ($hasCabinetFilter && !isset($cabinetFilterNorms[$cabNorm])) { continue; }
     $summaryCabinets[$cabNorm] = [
         'TITLE' => (string)$cabData['TITLE'],
         'WORKPLACES' => (int)$cabData['WORKPLACES'],
@@ -910,7 +925,7 @@ foreach ($cabinetDirectory as $cabNorm => $cabData) {
 foreach ($userCabinetMap as $userId => $cabName) {
     if ($hasOrgUnitFilter && empty(array_intersect($userDepartmentsMap[(int)$userId] ?? [], array_keys($selectedHeadDepartmentIds)))) { continue; }
     $cabNorm = $normalizeCabinet((string)$cabName);
-    if ($cabNorm === '' || ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if ($cabNorm === '' || ($hasCabinetFilter && !isset($cabinetFilterNorms[$cabNorm])) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
     if (!isset($summaryCabinets[$cabNorm])) {
         $summaryCabinets[$cabNorm] = [
             'TITLE' => (string)$cabName,
@@ -1041,20 +1056,21 @@ foreach ($periodDays as $dateKey) {
     }
 }
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
-$dashboardIsCabinetScope = $cabinetFilterNorm !== '';
-$dashboardScopeGenitive = $dashboardIsCabinetScope ? 'кабинета' : 'офиса';
-$dashboardScopePrepositional = $dashboardIsCabinetScope ? 'кабинету' : 'всему офису';
-$dashboardScopeTitle = $dashboardIsCabinetScope ? (isset($summaryCabinets[$cabinetFilterNorm]) ? (string)$summaryCabinets[$cabinetFilterNorm]['TITLE'] : $cabinetFilterRaw) : 'весь офис';
-$dashboardSelectionCardTitle = $dashboardIsCabinetScope ? 'Кабинет в выборке' : 'Кабинетов в выборке';
-$dashboardSelectionCardValue = $dashboardIsCabinetScope ? 1 : count($summaryCabinets);
+$dashboardIsCabinetScope = $hasCabinetFilter;
+$dashboardSelectedCabinetCount = count($summaryCabinets);
+$dashboardScopeGenitive = $dashboardIsCabinetScope && $dashboardSelectedCabinetCount === 1 ? 'кабинета' : ($dashboardIsCabinetScope ? 'кабинетов' : 'офиса');
+$dashboardScopePrepositional = $dashboardIsCabinetScope && $dashboardSelectedCabinetCount === 1 ? 'кабинету' : ($dashboardIsCabinetScope ? 'кабинетам' : 'всему офису');
 $dashboardCabinetTitles = array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $summaryCabinets);
 sort($dashboardCabinetTitles, SORT_NATURAL | SORT_FLAG_CASE);
+$dashboardScopeTitle = $dashboardIsCabinetScope ? implode(', ', $dashboardCabinetTitles) : 'весь офис';
+$dashboardSelectionCardTitle = $dashboardIsCabinetScope && $dashboardSelectedCabinetCount === 1 ? 'Кабинет в выборке' : 'Кабинетов в выборке';
+$dashboardSelectionCardValue = $dashboardSelectedCabinetCount;
 $dashboardSelectionCardNote = $dashboardIsCabinetScope
-    ? ('Кабинет: ' . $dashboardScopeTitle)
+    ? (($dashboardSelectedCabinetCount === 1 ? 'Кабинет: ' : 'Кабинеты: ') . $dashboardScopeTitle)
     : ($ceo1FilterRaw !== ''
         ? (!empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены')
         : ('Рабочих мест: ' . (int)$officeWorkplacesTotal));
-$legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : 'офисе';
+$legalEntitySummaryScopeTitle = $hasCabinetFilter ? implode(', ', array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $summaryCabinets)) : 'офисе';
 
 header('Content-Type: text/html; charset=UTF-8');
 ?>
@@ -1128,11 +1144,11 @@ header('Content-Type: text/html; charset=UTF-8');
         <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
         <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
         <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-        <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
+        <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter[]" multiple size="5"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= in_array($cabOpt, $cabinetFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
     </div>
     <div class="filters-row">
         <label>CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
-        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select name="department_filter" id="department-filter"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= $departmentFilterRaw === $departmentOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
+        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение: <select name="department_filter[]" id="department-filter" multiple size="5"><option value="">Все</option><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>" <?= in_array($departmentOpt, $departmentFilterValues, true) ? 'selected' : '' ?>><?=htmlspecialcharsbx($departmentOpt)?></option><?php endforeach; ?></select></label>
         <button type="submit" style="margin-left:8px;">Показать</button>
         <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
     </div>
@@ -1224,7 +1240,7 @@ header('Content-Type: text/html; charset=UTF-8');
             $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
             $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
             if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
-            if ($departmentFilterRaw !== '' && (string)$departmentSummary['DEPARTMENT'] !== $departmentFilterRaw) { continue; }
+            if (!empty($selectedDepartmentFilterMap) && !isset($selectedDepartmentFilterMap[(string)$departmentSummary['DEPARTMENT']])) { continue; }
 
             $departmentCabinets = [];
             foreach ($userCabinetMap as $userId => $cabName) {
@@ -1235,7 +1251,7 @@ header('Content-Type: text/html; charset=UTF-8');
             }
 
             foreach (array_keys($departmentCabinets) as $cabNorm) {
-                if ($cabinetFilterNorm !== '' && $cabNorm !== $cabinetFilterNorm) { continue; }
+                if ($hasCabinetFilter && !isset($cabinetFilterNorms[$cabNorm])) { continue; }
 
                 $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
                 $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
@@ -1585,14 +1601,14 @@ header('Content-Type: text/html; charset=UTF-8');
     function rebuildDepartmentFilter() {
         if (!ceo1Filter || !departmentWrap || !departmentFilter) { return; }
         var ceo1 = ceo1Filter.value || '';
-        var current = departmentFilter.value || '';
+        var current = Array.prototype.slice.call(departmentFilter.selectedOptions || []).map(function (option) { return option.value; });
         departmentWrap.style.display = ceo1 ? 'inline' : 'none';
         departmentFilter.innerHTML = '<option value="">Все</option>';
         (departmentsByCeo1[ceo1] || []).forEach(function (department) {
             var option = document.createElement('option');
             option.value = department;
             option.textContent = department;
-            option.selected = department === current;
+            option.selected = current.indexOf(department) !== -1;
             departmentFilter.appendChild(option);
         });
         if (!ceo1) { departmentFilter.value = ''; }
