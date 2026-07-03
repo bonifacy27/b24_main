@@ -10,8 +10,19 @@ define('NO_KEEP_STATISTIC', true);
 define('NO_AGENT_STATISTIC', true);
 define('NO_AGENT_CHECK', true);
 define('NOT_CHECK_PERMISSIONS', true);
+define('BX_PUBLIC_MODE', true);
+define('PUBLIC_AJAX_MODE', true);
+define('DisableEventsCheck', true);
 
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
+
+// Отчет формирует большой HTML самостоятельно и не использует шаблон Битрикса.
+// На длинных периодах штатные output-buffer display handlers Битрикса могут
+// упасть при записи файлового кеша на финальном flush (cacheenginefiles.php).
+// Сбрасываем пустые буферы сразу после prolog_before, чтобы дальше писать ответ напрямую.
+while (ob_get_level() > 0) {
+    ob_end_clean();
+}
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime as BitrixDateTime;
