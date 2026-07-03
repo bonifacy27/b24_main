@@ -1315,6 +1315,40 @@ $buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate
     return $buckets;
 };
 $dashboardHorizontalBuckets = $buildDashboardHorizontalBuckets($dashboardOfficeByDate, $dashboardChartMode, $officeWorkplacesTotal);
+$dashboardTopCabinetLoads = [];
+foreach ($summaryCabinets as $cabNorm => $cabData) {
+    $cabTitle = (string)$cabData['TITLE'];
+    $workplaces = (int)$cabData['WORKPLACES'];
+    if ($workplaces <= 0) { continue; }
+
+    foreach ($periodDays as $dateKey) {
+        if (empty($prodCalendarByDate[$dateKey]['IS_WORKDAY'])) { continue; }
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0];
+        $occupied = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $utilization = round(($occupied / $workplaces) * 100, 1);
+        if ($utilization <= 90) { continue; }
+
+        if (!isset($dashboardTopCabinetLoads[$cabNorm]) || $utilization > (float)$dashboardTopCabinetLoads[$cabNorm]['UTILIZATION']) {
+            $dashboardTopCabinetLoads[$cabNorm] = [
+                'CABINET' => $cabTitle,
+                'DATE' => $dateKey,
+                'OCCUPIED' => $occupied,
+                'WORKPLACES' => $workplaces,
+                'UTILIZATION' => $utilization,
+            ];
+        }
+    }
+}
+usort($dashboardTopCabinetLoads, static function (array $left, array $right): int {
+    $loadCompare = (float)$right['UTILIZATION'] <=> (float)$left['UTILIZATION'];
+    if ($loadCompare !== 0) { return $loadCompare; }
+
+    $dateCompare = strcmp((string)$left['DATE'], (string)$right['DATE']);
+    if ($dateCompare !== 0) { return $dateCompare; }
+
+    return strnatcasecmp((string)$left['CABINET'], (string)$right['CABINET']);
+});
+$dashboardTopCabinetLoads = array_slice($dashboardTopCabinetLoads, 0, 10);
 $workplaceReportPerfMark('dashboard_data_prepared');
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
 $dashboardIsCabinetScope = $hasCabinetFilter;
@@ -1419,6 +1453,11 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-column-label { max-width: 70px; color: #52616f; font-size: 11px; line-height: 1.15; text-align: center; }
         .office-load-timeline.is-compact-days .office-load-column-label { max-width: 34px; font-size: 10px; white-space: nowrap; }
         .dashboard-muted { color: #7a8794; }
+        .cabinet-peak-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 10px; }
+        .cabinet-peak-card { border: 1px solid #fecaca; border-radius: 14px; padding: 14px; background: linear-gradient(135deg, #fff7ed 0%, #fff1f2 100%); box-shadow: 0 8px 22px rgba(185, 28, 28, .08); }
+        .cabinet-peak-card-title { display: flex; justify-content: space-between; gap: 10px; margin: 0 0 10px; color: #7f1d1d; font-weight: 800; }
+        .cabinet-peak-load { font-size: 28px; line-height: 1; color: #b91c1c; font-weight: 900; }
+        .cabinet-peak-meta { margin-top: 8px; color: #6b7280; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
         .date-group-row.is-collapsed .date-group-toggle::after { content: " раскрыть"; }
@@ -1544,6 +1583,23 @@ header('Content-Type: text/html; charset=UTF-8');
                     </div>
                 <?php endforeach; ?>
             </div>
+        </div>
+    <?php endif; ?>
+</div>
+
+<div class="dashboard-section">
+    <h3>Топ 10 загруженных кабинетов с пиком выше 90%</h3>
+    <?php if (empty($dashboardTopCabinetLoads)): ?>
+        <p class="dashboard-muted">За выбранный период нет кабинетов с загрузкой выше 90%.</p>
+    <?php else: ?>
+        <div class="cabinet-peak-grid">
+            <?php foreach ($dashboardTopCabinetLoads as $peak): ?>
+                <div class="cabinet-peak-card">
+                    <p class="cabinet-peak-card-title"><span><?=htmlspecialcharsbx((string)$peak['CABINET'])?></span><span><?=htmlspecialcharsbx($formatReportDate((string)$peak['DATE'], true))?></span></p>
+                    <div class="cabinet-peak-load"><?= (float)$peak['UTILIZATION'] ?>%</div>
+                    <div class="cabinet-peak-meta"><?= (int)$peak['OCCUPIED'] ?> из <?= (int)$peak['WORKPLACES'] ?> РМ занято в пиковый день</div>
+                </div>
+            <?php endforeach; ?>
         </div>
     <?php endif; ?>
 </div>
