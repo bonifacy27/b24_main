@@ -69,6 +69,13 @@ function reverseImportNormalize(string $value): string
     return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
 }
 
+function reverseImportNormalizeFio(string $value): string
+{
+    $value = preg_replace('/\s*\[\s*АРХИВ\s*\]\s*/ui', ' ', $value);
+
+    return reverseImportNormalize($value);
+}
+
 function reverseImportAddDetail(array &$details, string $message): void
 {
     if (count($details) < REVERSE_IMPORT_MAX_DETAILS) {
@@ -96,7 +103,7 @@ function reverseImportBuildUsersMap(string $usersClass): array
 
     while ($row = $rs->fetch()) {
         $fio = trim((string)$row['UF_LAST_NAME'] . ' ' . (string)$row['UF_FIRST_NAME'] . ' ' . (string)$row['UF_SECOND_NAME']);
-        $key = reverseImportNormalize($fio);
+        $key = reverseImportNormalizeFio($fio);
         if ($key !== '' && !isset($users[$key])) {
             $users[$key] = (string)$row['UF_EXT_ID'];
         }
@@ -241,7 +248,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $turnstileName = $row[1] ?? '';
             $fio = $row[4] ?? '';
             $dateTime = reverseImportParseDateTime($dateTimeRaw);
-            $reverseId = $usersMap[reverseImportNormalize($fio)] ?? '';
+            $reverseId = $usersMap[reverseImportNormalizeFio($fio)] ?? '';
             $turnstileId = $turnstilesMap[reverseImportNormalize($turnstileName)] ?? 0;
             $eventId = reverseImportDetectEvent($turnstileName);
 
