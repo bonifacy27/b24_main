@@ -143,7 +143,7 @@ function reverseImportHasEvent(string $eventsClass, BitrixDateTime $dateTime, st
         'select' => ['ID'],
         'filter' => [
             '=UF_DATETIME' => $dateTime,
-            '=UF_IDREVERS' => $reverseId,
+            '=UF_IDREVERSE' => $reverseId,
         ],
         'limit' => 1,
     ])->fetch();
@@ -227,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $fields = [
                 'UF_DATETIME' => $dateTime,
-                'UF_IDREVERS' => $reverseId,
+                'UF_IDREVERSE' => $reverseId,
                 'UF_EVENT' => $eventId,
                 'UF_TYPE' => REVERSE_TYPE_ENUM_ID,
                 'UF_REVERSE_AP' => $turnstileId,
