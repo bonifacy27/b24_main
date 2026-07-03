@@ -1222,7 +1222,7 @@ foreach ($periodDays as $dateKey) {
 }
 
 $dashboardPeriodDayCount = count($periodDays);
-$dashboardDefaultChartMode = $dashboardPeriodDayCount <= 1 ? 'vertical_days' : ($dashboardPeriodDayCount <= 31 ? 'horizontal_days' : 'horizontal_weeks');
+$dashboardDefaultChartMode = 'horizontal_days';
 $dashboardAllowedChartModes = [
     'vertical_days' => true,
     'horizontal_days' => true,
@@ -1348,12 +1348,17 @@ header('Content-Type: text/html; charset=UTF-8');
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
         #employees-report-table thead th { position: sticky; top: 0; z-index: 2; }
         .col-narrow { width: 70px; max-width: 70px; }
-        .filters { margin: 10px 0 16px; }
+        .filters { display: grid; gap: 12px; margin: 12px 0 18px; padding: 14px; border: 1px solid #d8e0ea; border-radius: 14px; background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%); box-shadow: 0 8px 22px rgba(15, 79, 147, .07); }
         .current-user-debug { color: #9aa7b4; font-size: 10px; margin: -6px 0 8px; }
-        .filters-row { margin-top: 8px; }
-        .filters-row:first-child { margin-top: 0; }
-        .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; min-height: 30px; max-height: 70px; overflow-y: auto; padding: 3px 6px; border: 1px solid #9aa7b4; background: #fff; vertical-align: middle; }
+        .filters-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 0; }
+        .filters label { display: inline-grid; gap: 5px; color: #52616f; font-size: 12px; font-weight: 700; }
+        .filters input[type="date"], .filters select, .token-multiselect { min-height: 38px; border: 1px solid #b8c7d8; border-radius: 10px; background: #fff; color: #17212b; box-shadow: inset 0 1px 2px rgba(15, 79, 147, .06); font: 14px Arial,sans-serif; }
+        .filters input[type="date"], .filters select { padding: 0 10px; }
+        .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; max-height: 82px; overflow-y: auto; padding: 3px 8px; vertical-align: middle; }
         .token-multiselect input[type="text"] { flex: 1 1 120px; min-width: 120px; border: 0; outline: 0; font: inherit; }
+        .filter-actions { display: inline-flex; align-items: center; gap: 10px; }
+        .filter-submit { min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-reset { color: #0f4f93; font-weight: 700; text-decoration: none; }
         .filter-token { display: inline-flex; align-items: center; gap: 4px; max-width: 310px; padding: 2px 6px; border-radius: 999px; background: #eaf4ff; color: #0f4f93; white-space: nowrap; }
         .filter-token span { overflow: hidden; text-overflow: ellipsis; }
         .filter-token button { border: 0; background: transparent; color: #0f4f93; cursor: pointer; font-weight: 700; padding: 0; }
@@ -1428,9 +1433,9 @@ header('Content-Type: text/html; charset=UTF-8');
     <input type="hidden" name="dashboard_chart_mode" value="<?=htmlspecialcharsbx($dashboardChartMode)?>">
     <div class="filters-row">
         <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
-        <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
-        <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-        <label style="margin-left:8px;">Кабинет:
+        <label>По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+        <label>Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
+        <label>Кабинет:
             <span class="token-multiselect" id="cabinet-filter-control" data-input-name="cabinet_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($cabinetFilterValues, JSON_UNESCAPED_UNICODE))?>">
                 <span class="token-list"></span>
                 <input type="text" class="token-input" list="cabinet-filter-options" placeholder="Начните вводить кабинет">
@@ -1441,7 +1446,7 @@ header('Content-Type: text/html; charset=UTF-8');
     </div>
     <div class="filters-row">
         <label>CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
-        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение:
+        <label id="department-filter-wrap" style="display: <?= $ceo1FilterRaw !== '' ? 'inline-grid' : 'none' ?>;">Подразделение:
             <span class="token-multiselect" id="department-filter-control" data-input-name="department_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($departmentFilterValues, JSON_UNESCAPED_UNICODE))?>">
                 <span class="token-list"></span>
                 <input type="text" class="token-input" list="department-filter-options" placeholder="Начните вводить подразделение">
@@ -1449,8 +1454,10 @@ header('Content-Type: text/html; charset=UTF-8');
             <datalist id="department-filter-options"><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>"></option><?php endforeach; ?></datalist>
             <span class="token-hint">Enter/запятая — добавить</span>
         </label>
-        <button type="submit" style="margin-left:8px;">Показать</button>
-        <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
+        <span class="filter-actions">
+            <button type="submit" class="filter-submit">Показать</button>
+            <a class="filter-reset" href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>">Сбросить</a>
+        </span>
     </div>
 </form>
 
@@ -1517,7 +1524,15 @@ header('Content-Type: text/html; charset=UTF-8');
         <div class="office-load-timeline-wrap">
             <div class="office-load-timeline<?= $dashboardChartMode === 'horizontal_days' ? ' is-compact-days' : '' ?>">
                 <?php foreach ($dashboardHorizontalBuckets as $bucket): ?>
-                    <?php $bucketTitle = (int)$bucket['OCCUPIED'] . ' из ' . (int)$bucket['WORKPLACES'] . ' РМ; период ' . (new \DateTime((string)$bucket['DATE_FROM']))->format('d.m.Y') . ' — ' . (new \DateTime((string)$bucket['DATE_TO']))->format('d.m.Y'); ?>
+                    <?php
+                    $bucketDateFrom = new \DateTime((string)$bucket['DATE_FROM']);
+                    $bucketDateTo = new \DateTime((string)$bucket['DATE_TO']);
+                    $bucketWeekdayNames = [1 => 'понедельник', 2 => 'вторник', 3 => 'среда', 4 => 'четверг', 5 => 'пятница', 6 => 'суббота', 7 => 'воскресенье'];
+                    $bucketTitle = (int)$bucket['OCCUPIED'] . ' из ' . (int)$bucket['WORKPLACES'] . ' РМ';
+                    $bucketTitle .= $dashboardChartMode === 'horizontal_days'
+                        ? '; ' . ($bucketWeekdayNames[(int)$bucketDateFrom->format('N')] ?? '')
+                        : '; период ' . $bucketDateFrom->format('d.m.Y') . ' — ' . $bucketDateTo->format('d.m.Y');
+                    ?>
                     <div class="office-load-column" title="<?=htmlspecialcharsbx($bucketTitle)?>">
                         <div class="office-load-column-value"><?= $bucket['UTILIZATION'] ?>%</div>
                         <div class="office-load-column-bar">
