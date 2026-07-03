@@ -16,6 +16,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 
 const CABINET_HL_BLOCK_ID = 74;
+const EXCLUDED_CABINET_ROW_IDS = [249, 210];
 const REPORT_URL = '/pub/apps/attendance_report/workplace_report_ext2.php';
 
 $cabinetEditorRoles = [
@@ -163,6 +164,10 @@ function cabinetEditorLoadCabinets(string $cabinetClass, array $offices, string 
 
     $searchLower = mb_strtolower($search);
     while ($row = $rows->fetch()) {
+        if (in_array((int)$row['ID'], EXCLUDED_CABINET_ROW_IDS, true)) {
+            continue;
+        }
+
         $officeId = cabinetEditorNormalizeOfficeValue($row['UF_OFFICE'] ?? 0);
         $row['OFFICE_ID'] = $officeId;
         $row['OFFICE_NAME'] = cabinetEditorOfficeName($officeId, $offices);
