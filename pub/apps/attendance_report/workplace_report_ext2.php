@@ -68,12 +68,14 @@ if (!$isAhsAdmin && !$isHrDirector) {
     $accessDebugInfo = [
         'Определенный ID пользователя' => (string)$currentUserId,
         'Проверенные источники ID' => !empty($currentUserIdCandidates) ? implode('; ', $currentUserIdCandidates) : 'нет данных',
-        'Разрешенные AHS_ADMIN' => implode(', ', $reportRoles['AHS_ADMIN']),
-        'Разрешенные HR_DIRECTOR' => implode(', ', $reportRoles['HR_DIRECTOR']),
         'Совпадение AHS_ADMIN' => $isAhsAdmin ? 'да' : 'нет',
         'Совпадение HR_DIRECTOR' => $isHrDirector ? 'да' : 'нет',
     ];
-    error_log('workplace_report_ext2 access denied: ' . json_encode($accessDebugInfo, JSON_UNESCAPED_UNICODE));
+    $accessDebugLogInfo = $accessDebugInfo + [
+        'Разрешенные AHS_ADMIN' => implode(', ', $reportRoles['AHS_ADMIN']),
+        'Разрешенные HR_DIRECTOR' => implode(', ', $reportRoles['HR_DIRECTOR']),
+    ];
+    error_log('workplace_report_ext2 access denied: ' . json_encode($accessDebugLogInfo, JSON_UNESCAPED_UNICODE));
     http_response_code(403);
     header('Content-Type: text/plain; charset=UTF-8');
     echo "Доступ запрещен.
@@ -1136,6 +1138,7 @@ header('Content-Type: text/html; charset=UTF-8');
         #employees-report-table thead th { position: sticky; top: 0; z-index: 2; }
         .col-narrow { width: 70px; max-width: 70px; }
         .filters { margin: 10px 0 16px; }
+        .current-user-debug { color: #9aa7b4; font-size: 10px; margin: -6px 0 8px; }
         .filters-row { margin-top: 8px; }
         .filters-row:first-child { margin-top: 0; }
         .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; min-height: 30px; max-height: 70px; overflow-y: auto; padding: 3px 6px; border: 1px solid #9aa7b4; background: #fff; vertical-align: middle; }
@@ -1190,6 +1193,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </head>
 <body>
 <h1>Расширенный отчет по рабочим местам Reverse</h1>
+<div class="current-user-debug">ID пользователя: <?= (int)$currentUserId ?></div>
 <?php if ($isAhsAdmin): ?>
     <a class="management-link" href="/pub/apps/attendance_report/cabinet_edit.php">Управление РМ</a>
 <?php endif; ?>
