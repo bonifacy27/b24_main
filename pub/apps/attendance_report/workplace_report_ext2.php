@@ -33,6 +33,48 @@ $resolveCurrentUserId = static function () use (&$currentUserIdCandidates): int 
     global $USER;
     $candidateIds = [];
 
+    $findUserIdByLogin = static function (string $login) use (&$currentUserIdCandidates): int {
+        $login = trim($login);
+        if ($login === '') { return 0; }
+
+        try {
+            $userRow = \Bitrix\Main\UserTable::getList([
+                'select' => ['ID', 'LOGIN'],
+                'filter' => ['=LOGIN' => $login],
+                'limit' => 1,
+            ])->fetch();
+            $userId = $userRow && !empty($userRow['ID']) ? (int)$userRow['ID'] : 0;
+            $currentUserIdCandidates[] = 'SSO login lookup (' . $login . '): ' . $userId;
+            return $userId;
+        } catch (\Throwable $e) {
+            $currentUserIdCandidates[] = 'SSO login lookup (' . $login . '): ошибка - ' . $e->getMessage();
+            error_log('workplace_report_ext2 access: SSO login lookup failed for ' . $login . ': ' . $e->getMessage());
+            return 0;
+        }
+    };
+
+    $getServerLoginCandidates = static function (): array {
+        $serverKeys = ['REMOTE_USER', 'AUTH_USER', 'LOGON_USER', 'PHP_AUTH_USER'];
+        $logins = [];
+        foreach ($serverKeys as $serverKey) {
+            $rawLogin = trim((string)($_SERVER[$serverKey] ?? ''));
+            if ($rawLogin === '') { continue; }
+            $logins[$rawLogin] = true;
+
+            $normalizedLogin = str_replace('/', '\\', $rawLogin);
+            if (strpos($normalizedLogin, '\\') !== false) {
+                $parts = explode('\\', $normalizedLogin);
+                $plainLogin = trim((string)end($parts));
+                if ($plainLogin !== '') { $logins[$plainLogin] = true; }
+            }
+            if (strpos($rawLogin, '@') !== false) {
+                $plainLogin = trim((string)strstr($rawLogin, '@', true));
+                if ($plainLogin !== '') { $logins[$plainLogin] = true; }
+            }
+        }
+        return array_keys($logins);
+    };
+
     if (is_object($USER) && method_exists($USER, 'GetID')) {
         $userId = (int)$USER->GetID();
         $candidateIds[] = $userId;
@@ -50,6 +92,10 @@ $resolveCurrentUserId = static function () use (&$currentUserIdCandidates): int 
     } catch (\Throwable $e) {
         $currentUserIdCandidates[] = 'CurrentUser::get()->getId(): ошибка - ' . $e->getMessage();
         error_log('workplace_report_ext2 access: CurrentUser getId failed: ' . $e->getMessage());
+    }
+
+    foreach ($getServerLoginCandidates() as $loginCandidate) {
+        $candidateIds[] = $findUserIdByLogin($loginCandidate);
     }
 
     foreach ($candidateIds as $candidateId) {
