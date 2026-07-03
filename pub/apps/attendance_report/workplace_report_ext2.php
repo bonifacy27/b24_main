@@ -56,6 +56,7 @@ register_shutdown_function(static function () use (&$workplaceReportPerfMarks, &
         'date_from' => (string)($_GET['date_from'] ?? ''),
         'date_to' => (string)($_GET['date_to'] ?? ''),
         'period_days' => (int)($workplaceReportPerfContext['period_days'] ?? 0),
+        'calendar_days' => (int)($workplaceReportPerfContext['calendar_days'] ?? 0),
         'summary_cabinets' => (int)($workplaceReportPerfContext['summary_cabinets'] ?? 0),
         'portal_users' => (int)($workplaceReportPerfContext['portal_users'] ?? 0),
         'departments' => (int)($workplaceReportPerfContext['departments'] ?? 0),
@@ -746,8 +747,8 @@ $periodDays = [];
 foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $day) {
     $periodDays[] = $day->format('Y-m-d');
 }
-$workplaceReportPerfContext['period_days'] = count($periodDays);
-$workplaceReportPerfMark('period_prepared');
+$workplaceReportPerfContext['calendar_days'] = count($periodDays);
+$workplaceReportPerfMark('calendar_period_prepared');
 
 $prodCalendarSource = 'Srvr=srv-off-1c01;Ref=1c_Pay83_NSC;';
 $prodCalendarByDate = [];
@@ -793,6 +794,9 @@ foreach ($periodDays as $dateKey) {
     }
     if (!empty($prodCalendarByDate[$dateKey]['IS_WORKDAY'])) { $workingPeriodDays[] = $dateKey; }
 }
+$periodDays = $workingPeriodDays;
+$workplaceReportPerfContext['period_days'] = count($periodDays);
+$workplaceReportPerfMark('working_period_prepared');
 
 $cabinetDailyOffice = [];
 foreach ($periodDays as $dateKey) {
