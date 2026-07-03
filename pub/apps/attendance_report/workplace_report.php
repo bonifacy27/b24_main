@@ -25,6 +25,13 @@ global $USER;
 $authorizedUserId = is_object($USER) ? (int)$USER->GetID() : 0;
 $debugChiefUserId = isset($_GET['chief']) ? (int)$_GET['chief'] : 0;
 $currentUserId = $debugChiefUserId > 0 ? $debugChiefUserId : $authorizedUserId;
+if ($currentUserId <= 0 && (string)($_GET['auth_retry'] ?? '') !== 'Y') {
+    $requestUri = (string)($_SERVER['REQUEST_URI'] ?? '/pub/apps/attendance_report/workplace_report.php');
+    $backUrlSeparator = strpos($requestUri, '?') === false ? '?' : '&';
+    $backUrl = $requestUri . $backUrlSeparator . 'auth_retry=Y';
+    LocalRedirect('/auth/?backurl=' . urlencode($backUrl), true);
+    exit;
+}
 if ($currentUserId <= 0) {
     http_response_code(403);
     header('Content-Type: text/plain; charset=UTF-8');
@@ -609,6 +616,7 @@ foreach ($periodDays as $dateKey) {
     }
     if (!empty($prodCalendarByDate[$dateKey]['IS_WORKDAY'])) { $workingPeriodDays[] = $dateKey; }
 }
+$periodDays = $workingPeriodDays;
 
 $cabinetDailyOffice = [];
 foreach ($periodDays as $dateKey) {
@@ -872,11 +880,17 @@ usort($unknownEmployees, static function (array $left, array $right): int {
 });
 
 $allCabinets = [];
+foreach ($managerCabinetScopeIds as $cabNorm => $_) {
+    $cabNorm = (string)$cabNorm;
+    if ($cabNorm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+    if (isset($cabinetDirectory[$cabNorm])) {
+        $allCabinets[(string)$cabinetDirectory[$cabNorm]['TITLE']] = true;
+    }
+}
 foreach ($userCabinetMap as $cabName) {
     $cabNorm = $normalizeCabinet((string)$cabName);
     if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm]) || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
-    if ($cabNorm !== '' && isset($cabinetDirectory[$cabNorm])) { continue; }
-    $allCabinets[(string)$cabName] = true;
+    $allCabinets[isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : (string)$cabName] = true;
 }
 $availableCabinets = array_keys($allCabinets);
 sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
@@ -937,6 +951,53 @@ $dashboardCabinetTitles = array_map(static function (array $cabData): string { r
 sort($dashboardCabinetTitles, SORT_NATURAL | SORT_FLAG_CASE);
 $dashboardSelectionCardNote = !empty($dashboardCabinetTitles) ? implode(', ', $dashboardCabinetTitles) : 'Кабинеты не найдены';
 
+$dashboardDefaultChartMode = 'horizontal_days';
+$dashboardAllowedChartModes = [
+    'vertical_days' => true,
+    'horizontal_days' => true,
+    'horizontal_weeks' => true,
+    'horizontal_months' => true,
+    'horizontal_quarters' => true,
+];
+$dashboardChartMode = isset($_GET['dashboard_chart_mode'], $dashboardAllowedChartModes[(string)$_GET['dashboard_chart_mode']])
+    ? (string)$_GET['dashboard_chart_mode']
+    : $dashboardDefaultChartMode;
+$buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate, string $mode, int $dashboardOfficeWorkplacesTotal): array {
+    $buckets = [];
+    foreach ($dashboardOfficeByDate as $dateKey => $dayData) {
+        if ($mode === 'horizontal_days' && empty($dayData['IS_WORKDAY'])) { continue; }
+        $date = new \DateTime($dateKey);
+        if ($mode === 'horizontal_weeks') {
+            $bucketKey = $date->format('o-\WW');
+            $bucketLabel = 'Нед. ' . $date->format('W') . ', ' . $date->format('o');
+        } elseif ($mode === 'horizontal_months') {
+            $bucketKey = $date->format('Y-m');
+            $bucketLabel = $date->format('m.Y');
+        } elseif ($mode === 'horizontal_quarters') {
+            $quarter = (int)ceil(((int)$date->format('n')) / 3);
+            $bucketKey = $date->format('Y') . '-Q' . $quarter;
+            $bucketLabel = 'Q' . $quarter . ' ' . $date->format('Y');
+        } else {
+            $bucketKey = $dateKey;
+            $bucketLabel = $date->format('d.m');
+        }
+        if (!isset($buckets[$bucketKey])) {
+            $buckets[$bucketKey] = ['LABEL' => $bucketLabel, 'DATE_FROM' => $dateKey, 'DATE_TO' => $dateKey, 'OCCUPIED' => 0, 'WORKPLACES' => 0, 'UTILIZATION' => 0];
+        }
+        $buckets[$bucketKey]['DATE_TO'] = $dateKey;
+        if (!empty($dayData['IS_WORKDAY'])) {
+            $buckets[$bucketKey]['OCCUPIED'] += (int)$dayData['OCCUPIED'];
+            $buckets[$bucketKey]['WORKPLACES'] += $dashboardOfficeWorkplacesTotal;
+        }
+    }
+    foreach ($buckets as &$bucket) {
+        $bucket['UTILIZATION'] = (int)$bucket['WORKPLACES'] > 0 ? round(((int)$bucket['OCCUPIED'] / (int)$bucket['WORKPLACES']) * 100, 1) : 0;
+    }
+    unset($bucket);
+    return $buckets;
+};
+$dashboardHorizontalBuckets = $buildDashboardHorizontalBuckets($dashboardOfficeByDate, $dashboardChartMode, $dashboardOfficeWorkplacesTotal);
+
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
@@ -951,7 +1012,12 @@ header('Content-Type: text/html; charset=UTF-8');
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
         #employees-report-table thead th { position: sticky; top: 0; z-index: 2; }
         .col-narrow { width: 70px; max-width: 70px; }
-        .filters { margin: 10px 0 16px; }
+        .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 12px 0 18px; padding: 14px; border: 1px solid #d8e0ea; border-radius: 14px; background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%); box-shadow: 0 8px 22px rgba(15, 79, 147, .07); }
+        .filters label { display: inline-grid; gap: 5px; color: #52616f; font-size: 12px; font-weight: 700; }
+        .filters input[type="date"], .filters select { min-height: 38px; border: 1px solid #b8c7d8; border-radius: 10px; background: #fff; color: #17212b; box-shadow: inset 0 1px 2px rgba(15, 79, 147, .06); font: 14px Arial,sans-serif; padding: 0 10px; }
+        .filter-actions { display: inline-flex; align-items: center; gap: 10px; }
+        .filter-submit { min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-reset { color: #0f4f93; font-weight: 700; text-decoration: none; }
         .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
         .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
         .tab-button.is-active { background: #fff; font-weight: 700; position: relative; top: 1px; }
@@ -979,11 +1045,30 @@ header('Content-Type: text/html; charset=UTF-8');
         .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
         .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
         .dashboard-section { margin: 18px 0 24px; }
-        .office-load-chart { display: grid; gap: 10px; max-width: 980px; }
-        .office-load-row { display: grid; grid-template-columns: 92px 1fr 76px; gap: 10px; align-items: center; }
+        .dashboard-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+        .dashboard-chart-mode { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #d8e0ea; border-radius: 999px; background: #fff; cursor: pointer; color: #0f4f93; text-decoration: none; }
+        .dashboard-chart-mode.is-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+        .office-load-chart { display: grid; gap: 10px; max-width: 980px; max-height: 520px; overflow-y: auto; padding-right: 6px; }
+        .office-load-row { display: grid; grid-template-columns: 120px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
         .office-load-row.is-non-workday .office-load-fill { background: #cbd5e1; }
+        .office-load-row.is-overload .office-load-fill { background: linear-gradient(90deg, #fb923c 0%, #ef4444 65%, #b91c1c 100%); }
+        .office-load-row.is-overload strong { color: #b91c1c; }
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
+        .office-load-timeline-wrap { max-width: 100%; overflow-x: auto; padding: 8px 0 4px; }
+        .office-load-timeline { display: flex; align-items: flex-end; gap: 10px; min-height: 260px; padding: 8px 4px 0; border-bottom: 1px solid #d8e0ea; }
+        .office-load-timeline.is-compact-days { gap: 5px; min-height: 230px; }
+        .office-load-column { display: grid; grid-template-rows: 28px 180px 42px; justify-items: center; gap: 7px; min-width: 54px; }
+        .office-load-timeline.is-compact-days .office-load-column { grid-template-rows: 24px 160px 24px; gap: 5px; min-width: 30px; }
+        .office-load-column-bar { display: flex; align-items: flex-end; width: 32px; height: 180px; border-radius: 10px 10px 0 0; background: #edf4fb; box-shadow: inset 0 0 0 1px #d8e0ea; overflow: hidden; }
+        .office-load-timeline.is-compact-days .office-load-column-bar { width: 20px; height: 160px; }
+        .office-load-column-fill { width: 100%; min-height: 2px; border-radius: inherit; background: linear-gradient(180deg, #7c3aed 0%, #2563eb 55%, #38bdf8 100%); }
+        .office-load-column.is-overload .office-load-column-fill { background: linear-gradient(180deg, #b91c1c 0%, #ef4444 65%, #fb923c 100%); }
+        .office-load-column-value { font-weight: 700; color: #0f4f93; }
+        .office-load-column.is-overload .office-load-column-value { color: #b91c1c; }
+        .office-load-timeline.is-compact-days .office-load-column-value { font-size: 10px; }
+        .office-load-column-label { max-width: 70px; color: #52616f; font-size: 11px; line-height: 1.15; text-align: center; }
+        .office-load-timeline.is-compact-days .office-load-column-label { max-width: 34px; font-size: 10px; white-space: nowrap; }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -998,12 +1083,15 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php if ($debugChiefUserId > 0): ?>
         <input type="hidden" name="chief" value="<?= (int)$debugChiefUserId ?>">
     <?php endif; ?>
+    <input type="hidden" name="dashboard_chart_mode" value="<?=htmlspecialcharsbx($dashboardChartMode)?>">
     <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
-    <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
-    <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-    <label style="margin-left:8px;">Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
-    <button type="submit" style="margin-left:8px;">Показать</button>
-    <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
+    <label>По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+    <label>Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
+    <label>Кабинет: <select name="cabinet_filter"><option value="">Все</option><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>" <?= $cabinetFilterRaw === $cabOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($cabOpt)?></option><?php endforeach; ?></select></label>
+    <span class="filter-actions">
+        <button type="submit" class="filter-submit">Показать</button>
+        <a class="filter-reset" href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>">Сбросить</a>
+    </span>
 </form>
 
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
@@ -1021,16 +1109,54 @@ header('Content-Type: text/html; charset=UTF-8');
     <div class="dashboard-card"><p class="dashboard-card-title"><?=htmlspecialcharsbx($dashboardSelectionCardTitle)?></p><div class="dashboard-card-value"><?= $dashboardSelectionCardValue ?></div><div class="dashboard-card-note"><?=htmlspecialcharsbx($dashboardSelectionCardNote)?></div></div>
 </div>
 <div class="dashboard-section">
-    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
-    <div class="office-load-chart">
-        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-            <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : '' ?>">
-                <div><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
-                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ"><div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div></div>
-                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
-            </div>
+    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?>: график загрузки кабинетов</h3>
+    <?php
+    $dashboardChartModeLabels = [
+        'vertical_days' => 'Вертикально по дням',
+        'horizontal_days' => 'Горизонтально по дням',
+        'horizontal_weeks' => 'Горизонтально по неделям',
+        'horizontal_months' => 'Горизонтально по месяцам',
+        'horizontal_quarters' => 'Горизонтально по кварталам',
+    ];
+    ?>
+    <div class="dashboard-chart-controls" aria-label="Режим графика загрузки">
+        <?php foreach ($dashboardChartModeLabels as $modeKey => $modeLabel): ?>
+            <?php $modeQuery = $_GET; $modeQuery['dashboard_chart_mode'] = $modeKey; ?>
+            <a class="dashboard-chart-mode<?= $dashboardChartMode === $modeKey ? ' is-active' : '' ?>" href="?<?=htmlspecialcharsbx(http_build_query($modeQuery))?>"><?=htmlspecialcharsbx($modeLabel)?></a>
         <?php endforeach; ?>
     </div>
+    <?php if ($dashboardChartMode === 'vertical_days'): ?>
+        <div class="office-load-chart">
+            <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+                <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : '' ?><?= (float)$dayData['UTILIZATION'] > 90 ? ' is-overload' : '' ?>">
+                    <div><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
+                    <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ"><div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div></div>
+                    <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php else: ?>
+        <div class="office-load-timeline-wrap">
+            <div class="office-load-timeline<?= $dashboardChartMode === 'horizontal_days' ? ' is-compact-days' : '' ?>">
+                <?php foreach ($dashboardHorizontalBuckets as $bucket): ?>
+                    <?php
+                    $bucketDateFrom = new \DateTime((string)$bucket['DATE_FROM']);
+                    $bucketDateTo = new \DateTime((string)$bucket['DATE_TO']);
+                    $bucketWeekdayNames = [1 => 'понедельник', 2 => 'вторник', 3 => 'среда', 4 => 'четверг', 5 => 'пятница', 6 => 'суббота', 7 => 'воскресенье'];
+                    $bucketTitle = (int)$bucket['OCCUPIED'] . ' из ' . (int)$bucket['WORKPLACES'] . ' РМ';
+                    $bucketTitle .= $dashboardChartMode === 'horizontal_days'
+                        ? '; ' . ($bucketWeekdayNames[(int)$bucketDateFrom->format('N')] ?? '')
+                        : '; период ' . $bucketDateFrom->format('d.m.Y') . ' — ' . $bucketDateTo->format('d.m.Y');
+                    ?>
+                    <div class="office-load-column<?= (float)$bucket['UTILIZATION'] > 90 ? ' is-overload' : '' ?>" title="<?=htmlspecialcharsbx($bucketTitle)?>">
+                        <div class="office-load-column-value"><?= $bucket['UTILIZATION'] ?>%</div>
+                        <div class="office-load-column-bar"><div class="office-load-column-fill" style="height: <?= min(100, (float)$bucket['UTILIZATION']) ?>%;"></div></div>
+                        <div class="office-load-column-label"><?=htmlspecialcharsbx((string)$bucket['LABEL'])?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    <?php endif; ?>
 </div>
 </section>
 

@@ -10,8 +10,78 @@ define('NO_KEEP_STATISTIC', true);
 define('NO_AGENT_STATISTIC', true);
 define('NO_AGENT_CHECK', true);
 define('NOT_CHECK_PERMISSIONS', true);
+define('BX_PUBLIC_MODE', true);
+define('PUBLIC_AJAX_MODE', true);
+define('DisableEventsCheck', true);
+
+$workplaceReportPerfStart = microtime(true);
+$workplaceReportPerfMarks = [];
+$workplaceReportPerfContext = [];
+$workplaceReportPerfMark = static function (string $label) use (&$workplaceReportPerfMarks, $workplaceReportPerfStart): void {
+    $workplaceReportPerfMarks[] = [
+        'label' => $label,
+        'elapsed_ms' => round((microtime(true) - $workplaceReportPerfStart) * 1000, 1),
+        'memory_mb' => round(memory_get_usage(true) / 1048576, 2),
+    ];
+};
+register_shutdown_function(static function () use (&$workplaceReportPerfMarks, &$workplaceReportPerfContext, $workplaceReportPerfStart): void {
+    $documentRoot = rtrim((string)($_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    if ($documentRoot === '') { return; }
+
+    $logDir = $documentRoot . '/upload/logs';
+    if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+    if (!is_dir($logDir) || !is_writable($logDir)) { return; }
+
+    $lastElapsed = 0.0;
+    $marks = [];
+    foreach ($workplaceReportPerfMarks as $mark) {
+        $elapsed = (float)$mark['elapsed_ms'];
+        $marks[] = [
+            'label' => (string)$mark['label'],
+            'elapsed_ms' => $elapsed,
+            'delta_ms' => round($elapsed - $lastElapsed, 1),
+            'memory_mb' => (float)$mark['memory_mb'],
+        ];
+        $lastElapsed = $elapsed;
+    }
+
+    $error = error_get_last();
+    $payload = [
+        'time' => date('c'),
+        'script' => (string)($_SERVER['SCRIPT_NAME'] ?? ''),
+        'request_uri' => (string)($_SERVER['REQUEST_URI'] ?? ''),
+        'user_id' => (int)($workplaceReportPerfContext['current_user_id'] ?? 0),
+        'active_tab' => (string)($_GET['active_tab'] ?? 'dashboard'),
+        'dashboard_chart_mode' => (string)($workplaceReportPerfContext['dashboard_chart_mode'] ?? ($_GET['dashboard_chart_mode'] ?? '')),
+        'date_from' => (string)($_GET['date_from'] ?? ''),
+        'date_to' => (string)($_GET['date_to'] ?? ''),
+        'period_days' => (int)($workplaceReportPerfContext['period_days'] ?? 0),
+        'calendar_days' => (int)($workplaceReportPerfContext['calendar_days'] ?? 0),
+        'summary_cabinets' => (int)($workplaceReportPerfContext['summary_cabinets'] ?? 0),
+        'portal_users' => (int)($workplaceReportPerfContext['portal_users'] ?? 0),
+        'departments' => (int)($workplaceReportPerfContext['departments'] ?? 0),
+        'reverse_passes' => (int)($workplaceReportPerfContext['reverse_passes'] ?? 0),
+        'unknown_employees' => (int)($workplaceReportPerfContext['unknown_employees'] ?? 0),
+        'total_ms' => round((microtime(true) - $workplaceReportPerfStart) * 1000, 1),
+        'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 2),
+        'marks' => $marks,
+        'fatal' => $error && in_array((int)$error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true) ? $error : null,
+    ];
+
+    @file_put_contents($logDir . '/workplace_report_ext2_perf.log', json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
+});
+$workplaceReportPerfMark('bootstrap_start');
 
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php');
+
+// Отчет формирует большой HTML самостоятельно и не использует шаблон Битрикса.
+// На длинных периодах штатные output-buffer display handlers Битрикса могут
+// упасть при записи файлового кеша на финальном flush (cacheenginefiles.php).
+// Сбрасываем пустые буферы сразу после prolog_before, чтобы дальше писать ответ напрямую.
+while (ob_get_level() > 0) {
+    ob_end_clean();
+}
+$workplaceReportPerfMark('prolog_loaded_buffers_cleared');
 
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime as BitrixDateTime;
@@ -105,6 +175,8 @@ $resolveCurrentUserId = static function () use (&$currentUserIdCandidates): int 
 };
 
 $currentUserId = $resolveCurrentUserId();
+$workplaceReportPerfContext['current_user_id'] = $currentUserId;
+$workplaceReportPerfMark('current_user_resolved');
 if ($currentUserId <= 0 && (string)($_GET['auth_retry'] ?? '') !== 'Y') {
     $requestUri = (string)($_SERVER['REQUEST_URI'] ?? '/pub/apps/attendance_report/workplace_report_ext2.php');
     $backUrlSeparator = strpos($requestUri, '?') === false ? '?' : '&';
@@ -141,6 +213,8 @@ if (!$isAhsAdmin && !$isHrDirector) {
     }
     exit;
 }
+
+$workplaceReportPerfMark('access_checked');
 
 $iblockId = (int)\COption::GetOptionInt('intranet', 'iblock_structure', 0);
 if ($iblockId <= 0) {
@@ -611,6 +685,10 @@ while ($user = $rsUsers->Fetch()) {
     }
 }
 
+$workplaceReportPerfContext['portal_users'] = count($portalUserInfoById);
+$workplaceReportPerfContext['departments'] = count($departments);
+$workplaceReportPerfMark('portal_users_loaded');
+
 $cabinetDirectory = [];
 $cabinetDirectoryById = [];
 $availableOfficesMap = [];
@@ -669,6 +747,8 @@ $periodDays = [];
 foreach (new \DatePeriod($dateFrom, new \DateInterval('P1D'), (clone $dateTo)->modify('+1 day')) as $day) {
     $periodDays[] = $day->format('Y-m-d');
 }
+$workplaceReportPerfContext['calendar_days'] = count($periodDays);
+$workplaceReportPerfMark('calendar_period_prepared');
 
 $prodCalendarSource = 'Srvr=srv-off-1c01;Ref=1c_Pay83_NSC;';
 $prodCalendarByDate = [];
@@ -714,11 +794,16 @@ foreach ($periodDays as $dateKey) {
     }
     if (!empty($prodCalendarByDate[$dateKey]['IS_WORKDAY'])) { $workingPeriodDays[] = $dateKey; }
 }
+$periodDays = $workingPeriodDays;
+$workplaceReportPerfContext['period_days'] = count($periodDays);
+$workplaceReportPerfMark('working_period_prepared');
 
 $cabinetDailyOffice = [];
 foreach ($periodDays as $dateKey) {
     $cabinetDailyOffice[$dateKey] = [];
 }
+
+$workplaceReportPerfMark('directories_loaded');
 
 $reverseUsersByPass = [];
 $reverseUsersHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(100)->fetch();
@@ -742,6 +827,9 @@ if ($reverseUsersHl) {
         ];
     }
 }
+
+$workplaceReportPerfContext['reverse_passes'] = count($reverseUsersByPass);
+$workplaceReportPerfMark('reverse_users_loaded');
 
 $reverseEventsByDayAndPass = [];
 $reverseHl = \Bitrix\Highloadblock\HighloadBlockTable::getById(3)->fetch();
@@ -780,6 +868,8 @@ if ($reverseHl) {
 
 $officePresenceKeys = [];
 $shortOfficePresenceKeys = [];
+$workplaceReportPerfMark('reverse_events_loaded');
+
 $unknownEmployees = [];
 $temporaryGuestVisits = [];
 foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
@@ -959,6 +1049,9 @@ usort($temporaryGuestVisits, static function (array $left, array $right): int {
     return strcmp((string)$left['DATE'], (string)$right['DATE']);
 });
 
+$workplaceReportPerfContext['unknown_employees'] = count($unknownEmployees);
+$workplaceReportPerfMark('reverse_events_processed');
+
 usort($unknownEmployees, static function (array $left, array $right): int {
     $legalCompare = strnatcasecmp((string)$left['LEGAL_ENTITY'], (string)$right['LEGAL_ENTITY']);
     if ($legalCompare !== 0) { return $legalCompare; }
@@ -1040,6 +1133,8 @@ foreach ($userCabinetMap as $userId => $cabName) {
 uasort($summaryCabinets, static function (array $left, array $right): int {
     return strnatcasecmp((string)$left['TITLE'], (string)$right['TITLE']);
 });
+$workplaceReportPerfContext['summary_cabinets'] = count($summaryCabinets);
+$workplaceReportPerfMark('summary_cabinets_prepared');
 
 $officeWorkplacesTotal = 0;
 foreach ($summaryCabinets as $cabData) {
@@ -1126,6 +1221,19 @@ foreach ($periodDays as $dateKey) {
     ksort($legalEntitySummary[$dateKey], SORT_NATURAL | SORT_FLAG_CASE);
 }
 
+$dashboardPeriodDayCount = count($periodDays);
+$dashboardDefaultChartMode = 'horizontal_days';
+$dashboardAllowedChartModes = [
+    'vertical_days' => true,
+    'horizontal_days' => true,
+    'horizontal_weeks' => true,
+    'horizontal_months' => true,
+    'horizontal_quarters' => true,
+];
+$dashboardChartMode = isset($_GET['dashboard_chart_mode'], $dashboardAllowedChartModes[(string)$_GET['dashboard_chart_mode']])
+    ? (string)$_GET['dashboard_chart_mode']
+    : $dashboardDefaultChartMode;
+$workplaceReportPerfContext['dashboard_chart_mode'] = $dashboardChartMode;
 $dashboardOfficeByDate = [];
 $dashboardTotalWorkplaces = $officeWorkplacesTotal * max(1, count($workingPeriodDays));
 $dashboardTotalOccupied = 0;
@@ -1159,6 +1267,55 @@ foreach ($periodDays as $dateKey) {
         $dashboardPeakOfficeDate = $dateKey;
     }
 }
+$buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate, string $mode, int $officeWorkplacesTotal): array {
+    $buckets = [];
+    foreach ($dashboardOfficeByDate as $dateKey => $dayData) {
+        if ($mode === 'horizontal_days' && empty($dayData['IS_WORKDAY'])) { continue; }
+        $date = new \DateTime($dateKey);
+        if ($mode === 'horizontal_weeks') {
+            $bucketKey = $date->format('o-\WW');
+            $bucketLabel = 'Нед. ' . $date->format('W') . ', ' . $date->format('o');
+        } elseif ($mode === 'horizontal_months') {
+            $bucketKey = $date->format('Y-m');
+            $bucketLabel = $date->format('m.Y');
+        } elseif ($mode === 'horizontal_quarters') {
+            $quarter = (int)ceil(((int)$date->format('n')) / 3);
+            $bucketKey = $date->format('Y') . '-Q' . $quarter;
+            $bucketLabel = 'Q' . $quarter . ' ' . $date->format('Y');
+        } else {
+            $bucketKey = $dateKey;
+            $bucketLabel = $date->format('d.m');
+        }
+
+        if (!isset($buckets[$bucketKey])) {
+            $buckets[$bucketKey] = [
+                'LABEL' => $bucketLabel,
+                'DATE_FROM' => $dateKey,
+                'DATE_TO' => $dateKey,
+                'OCCUPIED' => 0,
+                'WORKPLACES' => 0,
+                'DAYS' => 0,
+                'WORKDAYS' => 0,
+                'UTILIZATION' => 0,
+            ];
+        }
+        $buckets[$bucketKey]['DATE_TO'] = $dateKey;
+        $buckets[$bucketKey]['DAYS']++;
+        if (!empty($dayData['IS_WORKDAY'])) {
+            $buckets[$bucketKey]['WORKDAYS']++;
+            $buckets[$bucketKey]['OCCUPIED'] += (int)$dayData['OCCUPIED'];
+            $buckets[$bucketKey]['WORKPLACES'] += $officeWorkplacesTotal;
+        }
+    }
+
+    foreach ($buckets as &$bucket) {
+        $bucket['UTILIZATION'] = (int)$bucket['WORKPLACES'] > 0 ? round(((int)$bucket['OCCUPIED'] / (int)$bucket['WORKPLACES']) * 100, 1) : 0;
+    }
+    unset($bucket);
+    return $buckets;
+};
+$dashboardHorizontalBuckets = $buildDashboardHorizontalBuckets($dashboardOfficeByDate, $dashboardChartMode, $officeWorkplacesTotal);
+$workplaceReportPerfMark('dashboard_data_prepared');
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
 $dashboardIsCabinetScope = $hasCabinetFilter;
 $dashboardSelectedCabinetCount = count($summaryCabinets);
@@ -1176,6 +1333,7 @@ $dashboardSelectionCardNote = $dashboardIsCabinetScope
         : ('Рабочих мест: ' . (int)$officeWorkplacesTotal));
 $legalEntitySummaryScopeTitle = $hasCabinetFilter ? implode(', ', array_map(static function (array $cabData): string { return (string)$cabData['TITLE']; }, $summaryCabinets)) : 'офисе';
 
+$workplaceReportPerfMark('before_html_render');
 header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
@@ -1190,12 +1348,17 @@ header('Content-Type: text/html; charset=UTF-8');
         th { background:#f5f9ff; white-space: normal; word-break: break-word; line-height: 1.2; }
         #employees-report-table thead th { position: sticky; top: 0; z-index: 2; }
         .col-narrow { width: 70px; max-width: 70px; }
-        .filters { margin: 10px 0 16px; }
+        .filters { display: grid; gap: 12px; margin: 12px 0 18px; padding: 14px; border: 1px solid #d8e0ea; border-radius: 14px; background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%); box-shadow: 0 8px 22px rgba(15, 79, 147, .07); }
         .current-user-debug { color: #9aa7b4; font-size: 10px; margin: -6px 0 8px; }
-        .filters-row { margin-top: 8px; }
-        .filters-row:first-child { margin-top: 0; }
-        .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; min-height: 30px; max-height: 70px; overflow-y: auto; padding: 3px 6px; border: 1px solid #9aa7b4; background: #fff; vertical-align: middle; }
+        .filters-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin-top: 0; }
+        .filters label { display: inline-grid; gap: 5px; color: #52616f; font-size: 12px; font-weight: 700; }
+        .filters input[type="date"], .filters select, .token-multiselect { min-height: 38px; border: 1px solid #b8c7d8; border-radius: 10px; background: #fff; color: #17212b; box-shadow: inset 0 1px 2px rgba(15, 79, 147, .06); font: 14px Arial,sans-serif; }
+        .filters input[type="date"], .filters select { padding: 0 10px; }
+        .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; max-height: 82px; overflow-y: auto; padding: 3px 8px; vertical-align: middle; }
         .token-multiselect input[type="text"] { flex: 1 1 120px; min-width: 120px; border: 0; outline: 0; font: inherit; }
+        .filter-actions { display: inline-flex; align-items: center; gap: 10px; }
+        .filter-submit { min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-reset { color: #0f4f93; font-weight: 700; text-decoration: none; }
         .filter-token { display: inline-flex; align-items: center; gap: 4px; max-width: 310px; padding: 2px 6px; border-radius: 999px; background: #eaf4ff; color: #0f4f93; white-space: nowrap; }
         .filter-token span { overflow: hidden; text-overflow: ellipsis; }
         .filter-token button { border: 0; background: transparent; color: #0f4f93; cursor: pointer; font-weight: 700; padding: 0; }
@@ -1228,14 +1391,33 @@ header('Content-Type: text/html; charset=UTF-8');
         .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
         .dashboard-section { margin: 18px 0 24px; }
         .dashboard-section h3 { margin: 0 0 12px; font-size: 18px; }
-        .office-load-chart { display: grid; gap: 10px; max-width: 980px; }
+        .dashboard-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+        .dashboard-chart-mode { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #d8e0ea; border-radius: 999px; background: #fff; cursor: pointer; }
+        .dashboard-chart-mode.is-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+        .office-load-chart { display: grid; gap: 10px; max-width: 980px; max-height: 520px; overflow-y: auto; padding-right: 6px; }
         .office-load-row { display: grid; grid-template-columns: 120px 1fr 76px; gap: 10px; align-items: center; }
         .office-load-bar { height: 28px; border-radius: 999px; background: #edf4fb; overflow: hidden; box-shadow: inset 0 0 0 1px #d8e0ea; }
         .office-load-row.is-non-workday .office-load-fill { background: #cbd5e1; }
+        .office-load-row.is-overload .office-load-fill { background: linear-gradient(90deg, #fb923c 0%, #ef4444 65%, #b91c1c 100%); }
+        .office-load-row.is-overload strong { color: #b91c1c; }
         .office-load-date { font-weight: 700; }
         .office-load-row.is-non-workday .office-load-date { color: #dc2626; }
         .office-load-row.is-preholiday .office-load-date { color: #d97706; }
         .office-load-fill { height: 100%; min-width: 3px; border-radius: inherit; background: linear-gradient(90deg, #38bdf8 0%, #2563eb 55%, #7c3aed 100%); }
+        .office-load-timeline-wrap { max-width: 100%; overflow-x: auto; padding: 8px 0 4px; }
+        .office-load-timeline { display: flex; align-items: flex-end; gap: 10px; min-height: 260px; padding: 8px 4px 0; border-bottom: 1px solid #d8e0ea; }
+        .office-load-timeline.is-compact-days { gap: 5px; min-height: 230px; }
+        .office-load-column { display: grid; grid-template-rows: 28px 180px 42px; justify-items: center; gap: 7px; min-width: 54px; }
+        .office-load-timeline.is-compact-days .office-load-column { grid-template-rows: 24px 160px 24px; gap: 5px; min-width: 30px; }
+        .office-load-column-bar { display: flex; align-items: flex-end; width: 32px; height: 180px; border-radius: 10px 10px 0 0; background: #edf4fb; box-shadow: inset 0 0 0 1px #d8e0ea; overflow: hidden; }
+        .office-load-timeline.is-compact-days .office-load-column-bar { width: 20px; height: 160px; }
+        .office-load-column-fill { width: 100%; min-height: 2px; border-radius: inherit; background: linear-gradient(180deg, #7c3aed 0%, #2563eb 55%, #38bdf8 100%); }
+        .office-load-column.is-overload .office-load-column-fill { background: linear-gradient(180deg, #b91c1c 0%, #ef4444 65%, #fb923c 100%); }
+        .office-load-column-value { font-weight: 700; color: #0f4f93; }
+        .office-load-column.is-overload .office-load-column-value { color: #b91c1c; }
+        .office-load-timeline.is-compact-days .office-load-column-value { font-size: 10px; }
+        .office-load-column-label { max-width: 70px; color: #52616f; font-size: 11px; line-height: 1.15; text-align: center; }
+        .office-load-timeline.is-compact-days .office-load-column-label { max-width: 34px; font-size: 10px; white-space: nowrap; }
         .dashboard-muted { color: #7a8794; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
@@ -1252,31 +1434,32 @@ header('Content-Type: text/html; charset=UTF-8');
 <?php endif; ?>
 <form method="get" class="filters">
     <input type="hidden" name="active_tab" id="active-tab-input" value="<?=htmlspecialcharsbx($activeTab)?>">
+    <input type="hidden" name="dashboard_chart_mode" value="<?=htmlspecialcharsbx($dashboardChartMode)?>">
     <div class="filters-row">
         <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
-        <label style="margin-left:8px;">По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
-        <label style="margin-left:8px;">Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
-        <label style="margin-left:8px;">Кабинет:
+        <label>По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+        <label>Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
+        <label>Кабинет:
             <span class="token-multiselect" id="cabinet-filter-control" data-input-name="cabinet_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($cabinetFilterValues, JSON_UNESCAPED_UNICODE))?>">
                 <span class="token-list"></span>
                 <input type="text" class="token-input" list="cabinet-filter-options" placeholder="Начните вводить кабинет">
             </span>
             <datalist id="cabinet-filter-options"><?php foreach ($availableCabinets as $cabOpt): ?><option value="<?=htmlspecialcharsbx($cabOpt)?>"></option><?php endforeach; ?></datalist>
-            <span class="token-hint">Enter/запятая — добавить</span>
         </label>
     </div>
     <div class="filters-row">
         <label>CEO-1: <select name="ceo1_filter" id="ceo1-filter"><option value="">Все</option><?php foreach ($availableCeo1 as $ceo1Opt): ?><option value="<?=htmlspecialcharsbx($ceo1Opt)?>" <?= $ceo1FilterRaw === $ceo1Opt ? 'selected' : '' ?>><?=htmlspecialcharsbx($ceo1Opt)?></option><?php endforeach; ?></select></label>
-        <label id="department-filter-wrap" style="margin-left:8px; display: <?= $ceo1FilterRaw !== '' ? 'inline' : 'none' ?>;">Подразделение:
+        <label id="department-filter-wrap" style="display: <?= $ceo1FilterRaw !== '' ? 'inline-grid' : 'none' ?>;">Подразделение:
             <span class="token-multiselect" id="department-filter-control" data-input-name="department_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($departmentFilterValues, JSON_UNESCAPED_UNICODE))?>">
                 <span class="token-list"></span>
                 <input type="text" class="token-input" list="department-filter-options" placeholder="Начните вводить подразделение">
             </span>
             <datalist id="department-filter-options"><?php foreach ($availableDepartments as $departmentOpt): ?><option value="<?=htmlspecialcharsbx($departmentOpt)?>"></option><?php endforeach; ?></datalist>
-            <span class="token-hint">Enter/запятая — добавить</span>
         </label>
-        <button type="submit" style="margin-left:8px;">Показать</button>
-        <a href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>" style="margin-left:8px;">Сбросить</a>
+        <span class="filter-actions">
+            <button type="submit" class="filter-submit">Показать</button>
+            <a class="filter-reset" href="<?=htmlspecialcharsbx((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))?>">Сбросить</a>
+        </span>
     </div>
 </form>
 
@@ -1289,7 +1472,8 @@ header('Content-Type: text/html; charset=UTF-8');
     <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
 </div>
 
-<section class="tab-pane<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" id="tab-dashboard" role="tabpanel">
+<?php if ($activeTab === 'dashboard'): ?>
+<section class="tab-pane is-active" id="tab-dashboard" role="tabpanel">
 <h2>Дашборд загрузки <?=htmlspecialcharsbx($dashboardScopeGenitive)?></h2>
 <div class="dashboard-grid">
     <div class="dashboard-card">
@@ -1310,23 +1494,65 @@ header('Content-Type: text/html; charset=UTF-8');
 </div>
 
 <div class="dashboard-section">
-    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?> по дням</h3>
-    <div class="office-load-chart">
-        <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
-            <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : (!empty($dayData['IS_PREHOLIDAY']) ? ' is-preholiday' : '') ?>">
-                <div class="office-load-date"><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
-                <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
-                    <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
-                </div>
-                <strong><?= $dayData['UTILIZATION'] ?>%</strong>
-            </div>
+    <h3>Загрузка по <?=htmlspecialcharsbx($dashboardScopePrepositional)?>: график загрузки кабинетов</h3>
+    <?php
+    $dashboardChartModeLabels = [
+        'vertical_days' => 'Вертикально по дням',
+        'horizontal_days' => 'Горизонтально по дням',
+        'horizontal_weeks' => 'Горизонтально по неделям',
+        'horizontal_months' => 'Горизонтально по месяцам',
+        'horizontal_quarters' => 'Горизонтально по кварталам',
+    ];
+    ?>
+    <div class="dashboard-chart-controls" aria-label="Режим графика загрузки">
+        <?php foreach ($dashboardChartModeLabels as $modeKey => $modeLabel): ?>
+            <?php $modeQuery = $_GET; $modeQuery['dashboard_chart_mode'] = $modeKey; $modeQuery['active_tab'] = 'dashboard'; ?>
+            <a class="dashboard-chart-mode<?= $dashboardChartMode === $modeKey ? ' is-active' : '' ?>" href="?<?=htmlspecialcharsbx(http_build_query($modeQuery))?>"><?=htmlspecialcharsbx($modeLabel)?></a>
         <?php endforeach; ?>
     </div>
+    <?php if ($dashboardChartMode === 'vertical_days'): ?>
+        <div class="office-load-chart">
+            <?php foreach ($dashboardOfficeByDate as $dateKey => $dayData): ?>
+                <div class="office-load-row<?= empty($dayData['IS_WORKDAY']) ? ' is-non-workday' : (!empty($dayData['IS_PREHOLIDAY']) ? ' is-preholiday' : '') ?><?= (float)$dayData['UTILIZATION'] > 90 ? ' is-overload' : '' ?>">
+                    <div class="office-load-date"><?=htmlspecialcharsbx($formatReportDate($dateKey, true))?></div>
+                    <div class="office-load-bar" title="<?= (int)$dayData['OCCUPIED'] ?> из <?= (int)$dayData['WORKPLACES'] ?> РМ">
+                        <div class="office-load-fill" style="width: <?= min(100, (float)$dayData['UTILIZATION']) ?>%;"></div>
+                    </div>
+                    <strong><?= $dayData['UTILIZATION'] ?>%</strong>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php else: ?>
+        <div class="office-load-timeline-wrap">
+            <div class="office-load-timeline<?= $dashboardChartMode === 'horizontal_days' ? ' is-compact-days' : '' ?>">
+                <?php foreach ($dashboardHorizontalBuckets as $bucket): ?>
+                    <?php
+                    $bucketDateFrom = new \DateTime((string)$bucket['DATE_FROM']);
+                    $bucketDateTo = new \DateTime((string)$bucket['DATE_TO']);
+                    $bucketWeekdayNames = [1 => 'понедельник', 2 => 'вторник', 3 => 'среда', 4 => 'четверг', 5 => 'пятница', 6 => 'суббота', 7 => 'воскресенье'];
+                    $bucketTitle = (int)$bucket['OCCUPIED'] . ' из ' . (int)$bucket['WORKPLACES'] . ' РМ';
+                    $bucketTitle .= $dashboardChartMode === 'horizontal_days'
+                        ? '; ' . ($bucketWeekdayNames[(int)$bucketDateFrom->format('N')] ?? '')
+                        : '; период ' . $bucketDateFrom->format('d.m.Y') . ' — ' . $bucketDateTo->format('d.m.Y');
+                    ?>
+                    <div class="office-load-column<?= (float)$bucket['UTILIZATION'] > 90 ? ' is-overload' : '' ?>" title="<?=htmlspecialcharsbx($bucketTitle)?>">
+                        <div class="office-load-column-value"><?= $bucket['UTILIZATION'] ?>%</div>
+                        <div class="office-load-column-bar">
+                            <div class="office-load-column-fill" style="height: <?= min(100, (float)$bucket['UTILIZATION']) ?>%;"></div>
+                        </div>
+                        <div class="office-load-column-label"><?=htmlspecialcharsbx((string)$bucket['LABEL'])?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    <?php endif; ?>
 </div>
 
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'employees' ? ' is-active' : '' ?>" id="tab-employees" role="tabpanel">
+<?php if ($activeTab === 'employees'): ?>
+<section class="tab-pane is-active" id="tab-employees" role="tabpanel">
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="employees-report-table" data-export-name="employees">Экспорт в Excel</button></div>
 <p class="dashboard-muted">Если выбран период, строки сгруппированы по датам. Нажмите на строку даты, чтобы раскрыть или свернуть детализацию за день.</p>
 <table id="employees-report-table">
@@ -1489,8 +1715,10 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" id="tab-unknown" role="tabpanel">
+<?php if ($activeTab === 'unknown'): ?>
+<section class="tab-pane is-active" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
 <table id="unknown-report-table">
@@ -1528,8 +1756,10 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" id="tab-temporary" role="tabpanel">
+<?php if ($activeTab === 'temporary'): ?>
+<section class="tab-pane is-active" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
 <table id="temporary-report-table">
@@ -1563,10 +1793,12 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
 
 
-<section class="tab-pane<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" id="tab-cabinet-summary" role="tabpanel">
+<?php if ($activeTab === 'cabinet-summary'): ?>
+<section class="tab-pane is-active" id="tab-cabinet-summary" role="tabpanel">
 <h2>Сводная таблица по кабинетам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="cabinet-summary-report-table" data-export-name="cabinet_summary">Экспорт в Excel</button></div>
 <table id="cabinet-summary-report-table">
@@ -1635,8 +1867,10 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
-<section class="tab-pane<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" id="tab-legal-summary" role="tabpanel">
+<?php if ($activeTab === 'legal-summary'): ?>
+<section class="tab-pane is-active" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="legal-summary-report-table" data-export-name="legal_entity_summary">Экспорт в Excel</button></div>
 <table id="legal-summary-report-table">
@@ -1703,6 +1937,7 @@ header('Content-Type: text/html; charset=UTF-8');
     </tbody>
 </table>
 </section>
+<?php endif; ?>
 
 
 
@@ -1862,6 +2097,12 @@ header('Content-Type: text/html; charset=UTF-8');
             var target = button.getAttribute('data-tab-target');
             if (!target) { return; }
             if (activeTabInput) { activeTabInput.value = target; }
+            if (!document.getElementById('tab-' + target)) {
+                var tabUrl = new URL(window.location.href);
+                tabUrl.searchParams.set('active_tab', target);
+                window.location.href = tabUrl.toString();
+                return;
+            }
 
             document.querySelectorAll('.tab-button').forEach(function (tabButton) {
                 var isActive = tabButton === button;
@@ -2033,3 +2274,4 @@ header('Content-Type: text/html; charset=UTF-8');
 </script>
 </body>
 </html>
+<?php $workplaceReportPerfMark('html_render_finished'); ?>
