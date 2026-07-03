@@ -28,19 +28,27 @@ if (!Loader::includeModule('iblock') || !Loader::includeModule('main') || !Loade
 }
 
 global $USER;
-$resolveCurrentUserId = static function (): int {
+$currentUserIdCandidates = [];
+$resolveCurrentUserId = static function () use (&$currentUserIdCandidates): int {
     global $USER;
     $candidateIds = [];
 
     if (is_object($USER) && method_exists($USER, 'GetID')) {
-        $candidateIds[] = (int)$USER->GetID();
+        $userId = (int)$USER->GetID();
+        $candidateIds[] = $userId;
+        $currentUserIdCandidates[] = 'global $USER->GetID(): ' . $userId;
+    } else {
+        $currentUserIdCandidates[] = 'global $USER->GetID(): недоступен';
     }
 
     try {
         if (class_exists('\Bitrix\Main\Engine\CurrentUser')) {
-            $candidateIds[] = (int)\Bitrix\Main\Engine\CurrentUser::get()->getId();
+            $currentUserId = (int)\Bitrix\Main\Engine\CurrentUser::get()->getId();
+            $candidateIds[] = $currentUserId;
+            $currentUserIdCandidates[] = 'CurrentUser::get()->getId(): ' . $currentUserId;
         }
     } catch (\Throwable $e) {
+        $currentUserIdCandidates[] = 'CurrentUser::get()->getId(): ошибка - ' . $e->getMessage();
         error_log('workplace_report_ext2 access: CurrentUser getId failed: ' . $e->getMessage());
     }
 
@@ -57,10 +65,25 @@ $reportRoles = array_map(static function (array $roleUserIds): array {
 $isAhsAdmin = in_array($currentUserId, $reportRoles['AHS_ADMIN'], true);
 $isHrDirector = in_array($currentUserId, $reportRoles['HR_DIRECTOR'], true);
 if (!$isAhsAdmin && !$isHrDirector) {
-    error_log('workplace_report_ext2 access denied for user ID ' . $currentUserId);
+    $accessDebugInfo = [
+        'Определенный ID пользователя' => (string)$currentUserId,
+        'Проверенные источники ID' => !empty($currentUserIdCandidates) ? implode('; ', $currentUserIdCandidates) : 'нет данных',
+        'Разрешенные AHS_ADMIN' => implode(', ', $reportRoles['AHS_ADMIN']),
+        'Разрешенные HR_DIRECTOR' => implode(', ', $reportRoles['HR_DIRECTOR']),
+        'Совпадение AHS_ADMIN' => $isAhsAdmin ? 'да' : 'нет',
+        'Совпадение HR_DIRECTOR' => $isHrDirector ? 'да' : 'нет',
+    ];
+    error_log('workplace_report_ext2 access denied: ' . json_encode($accessDebugInfo, JSON_UNESCAPED_UNICODE));
     http_response_code(403);
     header('Content-Type: text/plain; charset=UTF-8');
-    echo 'Доступ запрещен.';
+    echo "Доступ запрещен.
+
+Отладочная информация:
+";
+    foreach ($accessDebugInfo as $debugKey => $debugValue) {
+        echo $debugKey . ': ' . $debugValue . "
+";
+    }
     exit;
 }
 
