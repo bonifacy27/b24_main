@@ -1399,7 +1399,10 @@ header('Content-Type: text/html; charset=UTF-8');
         .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; max-height: 82px; overflow-y: auto; padding: 3px 8px; vertical-align: middle; }
         .token-multiselect input[type="text"] { flex: 1 1 120px; min-width: 120px; border: 0; outline: 0; font: inherit; }
         .filter-actions { display: inline-flex; align-items: center; gap: 10px; }
-        .filter-submit { min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-submit { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-submit:disabled { cursor: wait; opacity: .82; }
+        .filter-submit.is-loading::before { content: ""; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%; animation: filter-submit-spin .8s linear infinite; }
+        @keyframes filter-submit-spin { to { transform: rotate(360deg); } }
         .filter-reset { color: #0f4f93; font-weight: 700; text-decoration: none; }
         .filter-token { display: inline-flex; align-items: center; gap: 4px; max-width: 310px; padding: 2px 6px; border-radius: 999px; background: #eaf4ff; color: #0f4f93; white-space: nowrap; }
         .filter-token span { overflow: hidden; text-overflow: ellipsis; }
@@ -2036,6 +2039,25 @@ header('Content-Type: text/html; charset=UTF-8');
 <script>
 (function () {
     var activeTabInput = document.getElementById('active-tab-input');
+    var filtersForm = document.querySelector('form.filters');
+    var filterSubmitButton = filtersForm ? filtersForm.querySelector('.filter-submit') : null;
+    var filterSubmitDefaultText = filterSubmitButton ? filterSubmitButton.textContent : '';
+
+    function resetFilterSubmitButton() {
+        if (!filterSubmitButton) { return; }
+        filterSubmitButton.disabled = false;
+        filterSubmitButton.classList.remove('is-loading');
+        filterSubmitButton.textContent = filterSubmitDefaultText || 'Показать';
+    }
+
+    if (filtersForm && filterSubmitButton) {
+        filtersForm.addEventListener('submit', function () {
+            filterSubmitButton.disabled = true;
+            filterSubmitButton.classList.add('is-loading');
+            filterSubmitButton.textContent = 'Формируется…';
+        });
+        window.addEventListener('pageshow', resetFilterSubmitButton);
+    }
 
     var departmentsByCeo1 = <?=\CUtil::PhpToJSObject(array_map('array_keys', $availableDepartmentsByCeo1), false, true)?>;
     var ceo1Filter = document.getElementById('ceo1-filter');
