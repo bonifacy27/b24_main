@@ -1466,7 +1466,11 @@ header('Content-Type: text/html; charset=UTF-8');
         .cabinet-peak-card-title { display: flex; justify-content: space-between; gap: 10px; margin: 0 0 10px; color: #7f1d1d; font-weight: 800; }
         .cabinet-peak-load { font-size: 28px; line-height: 1; color: #b91c1c; font-weight: 900; }
         .cabinet-peak-meta { margin-top: 8px; color: #6b7280; }
-        .cabinet-peak-dates { display: grid; gap: 6px; margin-top: 12px; }
+        .cabinet-peak-details { margin-top: 12px; }
+        .cabinet-peak-details summary { display: inline-flex; align-items: center; gap: 6px; color: #0f4f93; font-weight: 700; cursor: pointer; }
+        .cabinet-peak-details summary::after { content: " раскрыть"; font-weight: 400; color: #6b7280; }
+        .cabinet-peak-details[open] summary::after { content: " свернуть"; }
+        .cabinet-peak-dates { display: grid; gap: 6px; margin-top: 10px; }
         .cabinet-peak-date-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, .72); color: #374151; }
         .cabinet-peak-date-row strong { color: #b91c1c; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
@@ -1600,7 +1604,6 @@ header('Content-Type: text/html; charset=UTF-8');
 
 <div class="dashboard-section">
     <h3>Загруженные кабинеты с загрузкой выше 90%</h3>
-    <p class="dashboard-muted">Учитываются кабинеты, где больше 3 РМ. Внутри плашки показаны все даты периода, когда загрузка кабинета была выше 90%.</p>
     <?php if (empty($dashboardOverloadedCabinets)): ?>
         <p class="dashboard-muted">За выбранный период нет кабинетов с загрузкой выше 90%.</p>
     <?php else: ?>
@@ -1609,16 +1612,18 @@ header('Content-Type: text/html; charset=UTF-8');
                 <div class="cabinet-peak-card">
                     <p class="cabinet-peak-card-title"><span><?=htmlspecialcharsbx((string)$cabinetLoad['CABINET'])?></span><span><?= count($cabinetLoad['ROWS']) ?> дн.</span></p>
                     <div class="cabinet-peak-load"><?= (float)$cabinetLoad['MAX_UTILIZATION'] ?>%</div>
-                    <div class="cabinet-peak-meta">Максимальная загрузка за период, всего <?= (int)$cabinetLoad['WORKPLACES'] ?> РМ</div>
-                    <div class="cabinet-peak-dates">
-                        <?php foreach ($cabinetLoad['ROWS'] as $loadRow): ?>
-                            <div class="cabinet-peak-date-row">
-                                <span><?=htmlspecialcharsbx($formatReportDate((string)$loadRow['DATE'], true))?></span>
-                                <span><?= (int)$loadRow['OCCUPIED'] ?> / <?= (int)$cabinetLoad['WORKPLACES'] ?> РМ</span>
-                                <strong><?= (float)$loadRow['UTILIZATION'] ?>%</strong>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
+                    <details class="cabinet-peak-details">
+                        <summary>Даты загрузки</summary>
+                        <div class="cabinet-peak-dates">
+                            <?php foreach ($cabinetLoad['ROWS'] as $loadRow): ?>
+                                <div class="cabinet-peak-date-row">
+                                    <span><?=htmlspecialcharsbx($formatReportDate((string)$loadRow['DATE'], true))?></span>
+                                    <span><?= (int)$loadRow['OCCUPIED'] ?> / <?= (int)$cabinetLoad['WORKPLACES'] ?> РМ</span>
+                                    <strong><?= (float)$loadRow['UTILIZATION'] ?>%</strong>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </details>
                 </div>
             <?php endforeach; ?>
         </div>
