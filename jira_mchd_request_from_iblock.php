@@ -1,4 +1,3 @@
-<?php
 /**
  * Создание заявки Jira Service Management на загрузку МЧД из элемента списка Bitrix24.
  *
@@ -15,11 +14,12 @@ $rootActivity = $this->GetRootActivity();
 
 $responsible_login = (string)$rootActivity->GetVariable('var_Initiator_Login');
 $jira_pass = (string)$rootActivity->GetVariable('var_JiraPass');
+$fallbackElementId  = (string)$rootActivity->GetVariable('var_ID');
+$organisation  = (string)$rootActivity->GetVariable('var_Org');
 
 $iblockId = 310;
-$fallbackElementId = 3616774;
 $templateIblockId = 385;
-$templateElementId = 3616765; // ID элемента справочника с шаблоном "Загрузка МЧД".
+$templateElementId = 3616785; // ID элемента справочника с шаблоном "Загрузка МЧД".
 
 $jiraBaseUrl = 'https://jira.tricolor.tv';
 $jiraUsername = 'jiraService';
@@ -81,6 +81,52 @@ if (!function_exists('interpolateTemplate')) {
 
             return array_key_exists($key, $context) ? (string)$context[$key] : $matches[0];
         }, $value);
+    }
+}
+
+if (!function_exists('normalizeJiraOrganizationName')) {
+    function normalizeJiraOrganizationName($value)
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+
+        $value = strtr($value, [
+            '«' => '"',
+            '»' => '"',
+            '„' => '"',
+            '“' => '"',
+            '”' => '"',
+        ]);
+
+        return trim(preg_replace('/\s+/u', ' ', $value));
+    }
+}
+
+if (!function_exists('normalizeJiraOrganizationField')) {
+    function normalizeJiraOrganizationField(array $data, callable $logMessage)
+    {
+        $fieldId = 'customfield_13727';
+        if (!isset($data['requestFieldValues'][$fieldId])) {
+            return $data;
+        }
+
+        $fieldValue = $data['requestFieldValues'][$fieldId];
+        if (is_array($fieldValue) && array_key_exists('value', $fieldValue)) {
+            $normalizedValue = normalizeJiraOrganizationName($fieldValue['value']);
+            if ($normalizedValue !== $fieldValue['value']) {
+                $logMessage('Поле Организация нормализовано для Jira: ' . $fieldValue['value'] . ' -> ' . $normalizedValue);
+                $data['requestFieldValues'][$fieldId]['value'] = $normalizedValue;
+            }
+        } elseif (is_string($fieldValue)) {
+            $normalizedValue = normalizeJiraOrganizationName($fieldValue);
+            if ($normalizedValue !== $fieldValue) {
+                $logMessage('Поле Организация нормализовано для Jira: ' . $fieldValue . ' -> ' . $normalizedValue);
+                $data['requestFieldValues'][$fieldId] = $normalizedValue;
+            }
+        }
+
+        return $data;
     }
 }
 
@@ -215,6 +261,7 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 $description = 'Загрузить МЧД для ' . $employee_fio . ' в систему';
 $context = get_defined_vars();
 $data = interpolateTemplate($templateData, $context);
+$data = normalizeJiraOrganizationField($data, $logMessage);
 
 if (isset($data['requestFieldValues']['priority']['value'])
     && !isset($data['requestFieldValues']['priority']['name'])
