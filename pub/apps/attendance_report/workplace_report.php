@@ -1016,7 +1016,10 @@ header('Content-Type: text/html; charset=UTF-8');
         .filters label { display: inline-grid; gap: 5px; color: #52616f; font-size: 12px; font-weight: 700; }
         .filters input[type="date"], .filters select { min-height: 38px; border: 1px solid #b8c7d8; border-radius: 10px; background: #fff; color: #17212b; box-shadow: inset 0 1px 2px rgba(15, 79, 147, .06); font: 14px Arial,sans-serif; padding: 0 10px; }
         .filter-actions { display: inline-flex; align-items: center; gap: 10px; }
-        .filter-submit { min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-submit { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-submit:disabled { cursor: wait; opacity: .82; }
+        .filter-submit.is-loading::before { content: ""; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%; animation: filter-submit-spin .8s linear infinite; }
+        @keyframes filter-submit-spin { to { transform: rotate(360deg); } }
         .filter-reset { color: #0f4f93; font-weight: 700; text-decoration: none; }
         .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 12px; border-bottom: 1px solid #d8e0ea; }
         .tab-button { border: 1px solid #d8e0ea; border-bottom: 0; background: #f5f9ff; padding: 8px 12px; cursor: pointer; border-radius: 6px 6px 0 0; font: inherit; }
@@ -1044,7 +1047,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .dashboard-card-title { margin: 0 0 8px; color: #52616f; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
         .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
         .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
-        .dashboard-section { margin: 18px 0 24px; }
+        .dashboard-section { margin: 18px 0 24px; padding: 18px; border: 1px solid #d8e0ea; border-radius: 14px; background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%); box-shadow: 0 8px 24px rgba(15, 79, 147, .08); }
         .dashboard-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
         .dashboard-chart-mode { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #d8e0ea; border-radius: 999px; background: #fff; cursor: pointer; color: #0f4f93; text-decoration: none; }
         .dashboard-chart-mode.is-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 700; }
@@ -1575,6 +1578,26 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
 </div>
 <script>
 (function () {
+    var filtersForm = document.querySelector('form.filters');
+    var filterSubmitButton = filtersForm ? filtersForm.querySelector('.filter-submit') : null;
+    var filterSubmitDefaultText = filterSubmitButton ? filterSubmitButton.textContent : '';
+
+    function resetFilterSubmitButton() {
+        if (!filterSubmitButton) { return; }
+        filterSubmitButton.disabled = false;
+        filterSubmitButton.classList.remove('is-loading');
+        filterSubmitButton.textContent = filterSubmitDefaultText || 'Показать';
+    }
+
+    if (filtersForm && filterSubmitButton) {
+        filtersForm.addEventListener('submit', function () {
+            filterSubmitButton.disabled = true;
+            filterSubmitButton.classList.add('is-loading');
+            filterSubmitButton.textContent = 'Формируется…';
+        });
+        window.addEventListener('pageshow', resetFilterSubmitButton);
+    }
+
     document.querySelectorAll('.tab-button').forEach(function (button) {
         button.addEventListener('click', function () {
             var target = button.getAttribute('data-tab-target');

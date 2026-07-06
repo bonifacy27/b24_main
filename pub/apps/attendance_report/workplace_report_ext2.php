@@ -1315,6 +1315,48 @@ $buildDashboardHorizontalBuckets = static function (array $dashboardOfficeByDate
     return $buckets;
 };
 $dashboardHorizontalBuckets = $buildDashboardHorizontalBuckets($dashboardOfficeByDate, $dashboardChartMode, $officeWorkplacesTotal);
+$dashboardOverloadedCabinets = [];
+foreach ($summaryCabinets as $cabNorm => $cabData) {
+    $cabTitle = (string)$cabData['TITLE'];
+    $workplaces = (int)$cabData['WORKPLACES'];
+    if ($workplaces <= 3) { continue; }
+
+    foreach ($periodDays as $dateKey) {
+        if (empty($prodCalendarByDate[$dateKey]['IS_WORKDAY'])) { continue; }
+        $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0];
+        $occupied = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $utilization = round(($occupied / $workplaces) * 100, 1);
+        if ($utilization <= 90) { continue; }
+
+        if (!isset($dashboardOverloadedCabinets[$cabNorm])) {
+            $dashboardOverloadedCabinets[$cabNorm] = [
+                'CABINET' => $cabTitle,
+                'WORKPLACES' => $workplaces,
+                'MAX_UTILIZATION' => $utilization,
+                'ROWS' => [],
+            ];
+        }
+
+        $dashboardOverloadedCabinets[$cabNorm]['MAX_UTILIZATION'] = max((float)$dashboardOverloadedCabinets[$cabNorm]['MAX_UTILIZATION'], $utilization);
+        $dashboardOverloadedCabinets[$cabNorm]['ROWS'][] = [
+            'DATE' => $dateKey,
+            'OCCUPIED' => $occupied,
+            'UTILIZATION' => $utilization,
+        ];
+    }
+}
+foreach ($dashboardOverloadedCabinets as &$overloadedCabinet) {
+    usort($overloadedCabinet['ROWS'], static function (array $left, array $right): int {
+        return strcmp((string)$left['DATE'], (string)$right['DATE']);
+    });
+}
+unset($overloadedCabinet);
+uasort($dashboardOverloadedCabinets, static function (array $left, array $right): int {
+    $loadCompare = (float)$right['MAX_UTILIZATION'] <=> (float)$left['MAX_UTILIZATION'];
+    if ($loadCompare !== 0) { return $loadCompare; }
+
+    return strnatcasecmp((string)$left['CABINET'], (string)$right['CABINET']);
+});
 $workplaceReportPerfMark('dashboard_data_prepared');
 $dashboardAverageOfficeLoad = $dashboardTotalWorkplaces > 0 ? round(($dashboardTotalOccupied / $dashboardTotalWorkplaces) * 100, 1) : 0;
 $dashboardIsCabinetScope = $hasCabinetFilter;
@@ -1357,7 +1399,10 @@ header('Content-Type: text/html; charset=UTF-8');
         .token-multiselect { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 360px; max-height: 82px; overflow-y: auto; padding: 3px 8px; vertical-align: middle; }
         .token-multiselect input[type="text"] { flex: 1 1 120px; min-width: 120px; border: 0; outline: 0; font: inherit; }
         .filter-actions { display: inline-flex; align-items: center; gap: 10px; }
-        .filter-submit { min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-submit { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; border: 0; border-radius: 999px; padding: 0 18px; background: linear-gradient(135deg, #38bdf8 0%, #2563eb 70%); color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, .24); cursor: pointer; font: 700 14px Arial,sans-serif; }
+        .filter-submit:disabled { cursor: wait; opacity: .82; }
+        .filter-submit.is-loading::before { content: ""; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%; animation: filter-submit-spin .8s linear infinite; }
+        @keyframes filter-submit-spin { to { transform: rotate(360deg); } }
         .filter-reset { color: #0f4f93; font-weight: 700; text-decoration: none; }
         .filter-token { display: inline-flex; align-items: center; gap: 4px; max-width: 310px; padding: 2px 6px; border-radius: 999px; background: #eaf4ff; color: #0f4f93; white-space: nowrap; }
         .filter-token span { overflow: hidden; text-overflow: ellipsis; }
@@ -1389,7 +1434,7 @@ header('Content-Type: text/html; charset=UTF-8');
         .dashboard-card-title { margin: 0 0 8px; color: #52616f; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
         .dashboard-card-value { font-size: 30px; line-height: 1; font-weight: 800; color: #0f4f93; }
         .dashboard-card-note { margin-top: 8px; color: #6b7a88; }
-        .dashboard-section { margin: 18px 0 24px; }
+        .dashboard-section { margin: 18px 0 24px; padding: 18px; border: 1px solid #d8e0ea; border-radius: 14px; background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%); box-shadow: 0 8px 24px rgba(15, 79, 147, .08); }
         .dashboard-section h3 { margin: 0 0 12px; font-size: 18px; }
         .dashboard-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
         .dashboard-chart-mode { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 1px solid #d8e0ea; border-radius: 999px; background: #fff; cursor: pointer; }
@@ -1419,6 +1464,18 @@ header('Content-Type: text/html; charset=UTF-8');
         .office-load-column-label { max-width: 70px; color: #52616f; font-size: 11px; line-height: 1.15; text-align: center; }
         .office-load-timeline.is-compact-days .office-load-column-label { max-width: 34px; font-size: 10px; white-space: nowrap; }
         .dashboard-muted { color: #7a8794; }
+        .cabinet-peak-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 10px; }
+        .cabinet-peak-card { border: 1px solid #fecaca; border-radius: 14px; padding: 14px; background: linear-gradient(135deg, #fff7ed 0%, #fff1f2 100%); box-shadow: 0 8px 22px rgba(185, 28, 28, .08); }
+        .cabinet-peak-card-title { display: flex; justify-content: space-between; gap: 10px; margin: 0 0 10px; color: #7f1d1d; font-weight: 800; }
+        .cabinet-peak-load { font-size: 28px; line-height: 1; color: #b91c1c; font-weight: 900; }
+        .cabinet-peak-meta { margin-top: 8px; color: #6b7280; }
+        .cabinet-peak-details { margin-top: 12px; }
+        .cabinet-peak-details summary { display: inline-flex; align-items: center; gap: 6px; color: #0f4f93; font-weight: 700; cursor: pointer; }
+        .cabinet-peak-details summary::after { content: " раскрыть"; font-weight: 400; color: #6b7280; }
+        .cabinet-peak-details[open] summary::after { content: " свернуть"; }
+        .cabinet-peak-dates { display: grid; gap: 6px; margin-top: 10px; }
+        .cabinet-peak-date-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, .72); color: #374151; }
+        .cabinet-peak-date-row strong { color: #b91c1c; }
         .date-group-row { background: #eef6ff; font-weight: 700; cursor: pointer; }
         .date-group-toggle { border: 1px solid #8bb6e8; background: #fff; color: #0f4f93; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; }
         .date-group-row.is-collapsed .date-group-toggle::after { content: " раскрыть"; }
@@ -1544,6 +1601,34 @@ header('Content-Type: text/html; charset=UTF-8');
                     </div>
                 <?php endforeach; ?>
             </div>
+        </div>
+    <?php endif; ?>
+</div>
+
+<div class="dashboard-section">
+    <h3>Загруженные кабинеты с загрузкой выше 90%</h3>
+    <?php if (empty($dashboardOverloadedCabinets)): ?>
+        <p class="dashboard-muted">За выбранный период нет кабинетов с загрузкой выше 90%.</p>
+    <?php else: ?>
+        <div class="cabinet-peak-grid">
+            <?php foreach ($dashboardOverloadedCabinets as $cabinetLoad): ?>
+                <div class="cabinet-peak-card">
+                    <p class="cabinet-peak-card-title"><span><?=htmlspecialcharsbx((string)$cabinetLoad['CABINET'])?></span><span><?= count($cabinetLoad['ROWS']) ?> дн.</span></p>
+                    <div class="cabinet-peak-load"><?= (float)$cabinetLoad['MAX_UTILIZATION'] ?>%</div>
+                    <details class="cabinet-peak-details">
+                        <summary>Даты загрузки</summary>
+                        <div class="cabinet-peak-dates">
+                            <?php foreach ($cabinetLoad['ROWS'] as $loadRow): ?>
+                                <div class="cabinet-peak-date-row">
+                                    <span><?=htmlspecialcharsbx($formatReportDate((string)$loadRow['DATE'], true))?></span>
+                                    <span><?= (int)$loadRow['OCCUPIED'] ?> / <?= (int)$cabinetLoad['WORKPLACES'] ?> РМ</span>
+                                    <strong><?= (float)$loadRow['UTILIZATION'] ?>%</strong>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </details>
+                </div>
+            <?php endforeach; ?>
         </div>
     <?php endif; ?>
 </div>
@@ -1954,6 +2039,25 @@ header('Content-Type: text/html; charset=UTF-8');
 <script>
 (function () {
     var activeTabInput = document.getElementById('active-tab-input');
+    var filtersForm = document.querySelector('form.filters');
+    var filterSubmitButton = filtersForm ? filtersForm.querySelector('.filter-submit') : null;
+    var filterSubmitDefaultText = filterSubmitButton ? filterSubmitButton.textContent : '';
+
+    function resetFilterSubmitButton() {
+        if (!filterSubmitButton) { return; }
+        filterSubmitButton.disabled = false;
+        filterSubmitButton.classList.remove('is-loading');
+        filterSubmitButton.textContent = filterSubmitDefaultText || 'Показать';
+    }
+
+    if (filtersForm && filterSubmitButton) {
+        filtersForm.addEventListener('submit', function () {
+            filterSubmitButton.disabled = true;
+            filterSubmitButton.classList.add('is-loading');
+            filterSubmitButton.textContent = 'Формируется…';
+        });
+        window.addEventListener('pageshow', resetFilterSubmitButton);
+    }
 
     var departmentsByCeo1 = <?=\CUtil::PhpToJSObject(array_map('array_keys', $availableDepartmentsByCeo1), false, true)?>;
     var ceo1Filter = document.getElementById('ceo1-filter');
