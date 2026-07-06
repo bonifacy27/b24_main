@@ -84,6 +84,52 @@ if (!function_exists('interpolateTemplate')) {
     }
 }
 
+if (!function_exists('normalizeJiraOrganizationName')) {
+    function normalizeJiraOrganizationName($value)
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+
+        $value = strtr($value, [
+            '«' => '"',
+            '»' => '"',
+            '„' => '"',
+            '“' => '"',
+            '”' => '"',
+        ]);
+
+        return trim(preg_replace('/\s+/u', ' ', $value));
+    }
+}
+
+if (!function_exists('normalizeJiraOrganizationField')) {
+    function normalizeJiraOrganizationField(array $data, callable $logMessage)
+    {
+        $fieldId = 'customfield_13727';
+        if (!isset($data['requestFieldValues'][$fieldId])) {
+            return $data;
+        }
+
+        $fieldValue = $data['requestFieldValues'][$fieldId];
+        if (is_array($fieldValue) && array_key_exists('value', $fieldValue)) {
+            $normalizedValue = normalizeJiraOrganizationName($fieldValue['value']);
+            if ($normalizedValue !== $fieldValue['value']) {
+                $logMessage('Поле Организация нормализовано для Jira: ' . $fieldValue['value'] . ' -> ' . $normalizedValue);
+                $data['requestFieldValues'][$fieldId]['value'] = $normalizedValue;
+            }
+        } elseif (is_string($fieldValue)) {
+            $normalizedValue = normalizeJiraOrganizationName($fieldValue);
+            if ($normalizedValue !== $fieldValue) {
+                $logMessage('Поле Организация нормализовано для Jira: ' . $fieldValue . ' -> ' . $normalizedValue);
+                $data['requestFieldValues'][$fieldId] = $normalizedValue;
+            }
+        }
+
+        return $data;
+    }
+}
+
 if (!function_exists('getIblockPropertyValues')) {
     function getIblockPropertyValues($iblockId, $elementId, $property)
 {
@@ -215,6 +261,7 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 $description = 'Загрузить МЧД для ' . $employee_fio . ' в систему';
 $context = get_defined_vars();
 $data = interpolateTemplate($templateData, $context);
+$data = normalizeJiraOrganizationField($data, $logMessage);
 
 if (isset($data['requestFieldValues']['priority']['value'])
     && !isset($data['requestFieldValues']['priority']['name'])
