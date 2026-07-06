@@ -1,4 +1,3 @@
-<?php
 /**
  * Создание заявки Jira Service Management на загрузку МЧД из элемента списка Bitrix24.
  *
@@ -15,11 +14,12 @@ $rootActivity = $this->GetRootActivity();
 
 $responsible_login = (string)$rootActivity->GetVariable('var_Initiator_Login');
 $jira_pass = (string)$rootActivity->GetVariable('var_JiraPass');
+$fallbackElementId  = (string)$rootActivity->GetVariable('var_ID');
+$organisation  = (string)$rootActivity->GetVariable('var_Org');
 
 $iblockId = 310;
-$fallbackElementId = 3616774;
 $templateIblockId = 385;
-$templateElementId = 3616765; // ID элемента справочника с шаблоном "Загрузка МЧД".
+$templateElementId = 3616785; // ID элемента справочника с шаблоном "Загрузка МЧД".
 
 $jiraBaseUrl = 'https://jira.tricolor.tv';
 $jiraUsername = 'jiraService';
