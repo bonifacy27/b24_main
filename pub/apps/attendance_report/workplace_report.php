@@ -1030,6 +1030,9 @@ header('Content-Type: text/html; charset=UTF-8');
         .export-button { border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
         .management-link { display: inline-block; margin: 0 0 10px; border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 7px 12px; border-radius: 4px; text-decoration: none; }
         .head-modal-trigger { padding: 0; border: 0; background: none; color: #1d5fbf; cursor: pointer; text-decoration: underline; font: inherit; text-align: left; }
+        .other-visitors-modal-trigger { cursor: pointer; }
+        .other-visitors-modal-trigger:hover td { background: #f0f7ff; }
+        .other-visitors-modal-trigger .other-visitors-link { color: #1d5fbf; text-decoration: underline; font-weight: 700; }
         .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); align-items: center; justify-content: center; padding: 24px; }
         .modal-backdrop.is-open { display: flex; }
         .modal-window { width: min(560px, 100%); max-height: 80vh; overflow: auto; background: #fff; border-radius: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.28); padding: 18px 20px; }
@@ -1306,12 +1309,10 @@ header('Content-Type: text/html; charset=UTF-8');
             ];
         }
         $otherVisitorsRows[$rowKey]['VISITORS'][] = [
-            'NAME' => (string)($employee['EMPLOYEE'] ?? ''),
             'LEGAL_ENTITY' => $legalEntityTitle,
-            'CABINET' => (string)($employee['CABINET'] ?? ''),
+            'NAME' => (string)($employee['EMPLOYEE'] ?? ''),
             'DATE' => (new \DateTime($dateKey))->format('d.m.Y'),
-            'PRESENCE' => !empty($employee['IS_SHORT']) ? '<4ч' : '>4ч',
-            'REASON' => (string)($employee['REASON'] ?? ''),
+            'IN_OFFICE' => !empty($employee['IS_SHORT']) ? 'Да (<4ч)' : 'Да (>4ч)',
         ];
         if (!empty($employee['IS_SHORT'])) {
             $otherVisitorsRows[$rowKey]['SHORT']++;
@@ -1343,8 +1344,8 @@ header('Content-Type: text/html; charset=UTF-8');
         <tr class="other-visitors-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$otherVisitorsJson?>">
             <td><?=htmlspecialcharsbx((string)$visitorRow['LEGAL_ENTITY'])?></td>
             <td></td>
-            <td>Прочие посетители</td>
-            <td>Прочие посетители</td>
+            <td><span class="other-visitors-link">Прочие посетители</span></td>
+            <td><span class="other-visitors-link">Прочие посетители</span></td>
             <td><?=htmlspecialcharsbx($cabTitle)?></td>
             <td><?= $workplaces ?></td>
             <td><?= $assignedCount ?></td>
@@ -1825,7 +1826,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
         table.className = 'modal-table';
         var thead = document.createElement('thead');
         var headerRow = document.createElement('tr');
-        ['ФИО', 'ЮЛ', 'Кабинет', 'Дата', 'Присутствие', 'Причина'].forEach(function (title) {
+        ['ЮЛ', 'ФИО', 'Дата', 'В офисе'].forEach(function (title) {
             var th = document.createElement('th');
             th.textContent = title;
             headerRow.appendChild(th);
@@ -1835,7 +1836,7 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
         var tbody = document.createElement('tbody');
         visitors.forEach(function (visitor) {
             var row = document.createElement('tr');
-            ['NAME', 'LEGAL_ENTITY', 'CABINET', 'DATE', 'PRESENCE', 'REASON'].forEach(function (field) {
+            ['LEGAL_ENTITY', 'NAME', 'DATE', 'IN_OFFICE'].forEach(function (field) {
                 var cell = document.createElement('td');
                 cell.textContent = visitor[field] || '';
                 row.appendChild(cell);
