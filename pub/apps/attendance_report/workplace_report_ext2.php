@@ -1156,6 +1156,29 @@ foreach ($departments as $departmentId => $department) {
     $selectedHeadDepartmentIds[$departmentId] = true;
 }
 $hasOrgUnitFilter = $ceo1FilterRaw !== '' || !empty($selectedDepartmentFilterMap);
+if ($hasOrgUnitFilter) {
+    $availableCabinetMap = [];
+    $availableCabinetNorms = [];
+    foreach ($userCabinetMap as $userId => $cabName) {
+        if (empty(array_intersect($userDepartmentsMap[(int)$userId] ?? [], array_keys($selectedHeadDepartmentIds)))) { continue; }
+        $cabNorm = $normalizeCabinet((string)$cabName);
+        if ($cabNorm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+        $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : (string)$cabName;
+        if ($cabTitle !== '') { $availableCabinetMap[$cabTitle] = true; }
+        $availableCabinetNorms[$cabNorm] = true;
+    }
+    $cabinetFilterValues = array_values(array_filter($cabinetFilterValues, static function (string $cabinetFilterValue) use ($normalizeCabinet, $normalizeDirectoryCabinet, $availableCabinetNorms): bool {
+        $cabinetNorm = $normalizeCabinet($cabinetFilterValue);
+        if ($cabinetNorm === '') { $cabinetNorm = $normalizeDirectoryCabinet($cabinetFilterValue); }
+        return $cabinetNorm !== '' && isset($availableCabinetNorms[$cabinetNorm]);
+    }));
+    $cabinetFilterRaw = !empty($cabinetFilterValues) ? (string)reset($cabinetFilterValues) : '';
+    $cabinetFilterNorms = array_intersect_key($cabinetFilterNorms, $availableCabinetNorms);
+    $cabinetFilterNorm = !empty($cabinetFilterNorms) ? (string)array_key_first($cabinetFilterNorms) : '';
+    $hasCabinetFilter = !empty($cabinetFilterNorms);
+    $availableCabinets = array_keys($availableCabinetMap);
+    sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
+}
 $showVisitorTabs = !$hasOrgUnitFilter;
 if (!$showVisitorTabs && in_array($activeTab, ['unknown', 'temporary'], true)) {
     $activeTab = 'employees';
