@@ -1717,6 +1717,9 @@ header('Content-Type: text/html; charset=UTF-8');
                 'OFFICE_BY_CABINET' => [],
             ],
         ];
+        foreach ($summaryCabinets as $summaryCabNorm => $summaryCabData) {
+            $employeeRowsByDate[$dateKey]['TOTALS']['WORKPLACES_BY_CABINET'][$summaryCabNorm] = (int)$summaryCabData['WORKPLACES'];
+        }
 
         foreach ($departments as $departmentId => $department) {
             if ((int)$department['UF_HEAD'] <= 0) { continue; }
