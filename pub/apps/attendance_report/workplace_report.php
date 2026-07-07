@@ -1302,8 +1302,17 @@ header('Content-Type: text/html; charset=UTF-8');
                 'LEGAL_ENTITY' => $legalEntityTitle,
                 'SHORT' => 0,
                 'FULL' => 0,
+                'VISITORS' => [],
             ];
         }
+        $otherVisitorsRows[$rowKey]['VISITORS'][] = [
+            'NAME' => (string)($employee['EMPLOYEE'] ?? ''),
+            'LEGAL_ENTITY' => $legalEntityTitle,
+            'CABINET' => (string)($employee['CABINET'] ?? ''),
+            'DATE' => (new \DateTime($dateKey))->format('d.m.Y'),
+            'PRESENCE' => !empty($employee['IS_SHORT']) ? '<4ч' : '>4ч',
+            'REASON' => (string)($employee['REASON'] ?? ''),
+        ];
         if (!empty($employee['IS_SHORT'])) {
             $otherVisitorsRows[$rowKey]['SHORT']++;
         } else {
@@ -1329,8 +1338,9 @@ header('Content-Type: text/html; charset=UTF-8');
         $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
         $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
         $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $otherVisitorsJson = htmlspecialcharsbx(json_encode($visitorRow['VISITORS'], JSON_UNESCAPED_UNICODE));
         ?>
-        <tr>
+        <tr class="other-visitors-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$otherVisitorsJson?>">
             <td><?=htmlspecialcharsbx((string)$visitorRow['LEGAL_ENTITY'])?></td>
             <td></td>
             <td>Прочие посетители</td>
@@ -1801,6 +1811,54 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
         table.appendChild(tbody);
         body.appendChild(table);
     }
+
+    function renderOtherVisitors(visitors) {
+        body.innerHTML = '';
+        if (!visitors.length) {
+            var empty = document.createElement('p');
+            empty.className = 'modal-empty';
+            empty.textContent = 'Нет прочих посетителей для этой строки.';
+            body.appendChild(empty);
+            return;
+        }
+        var table = document.createElement('table');
+        table.className = 'modal-table';
+        var thead = document.createElement('thead');
+        var headerRow = document.createElement('tr');
+        ['ФИО', 'ЮЛ', 'Кабинет', 'Дата', 'Присутствие', 'Причина'].forEach(function (title) {
+            var th = document.createElement('th');
+            th.textContent = title;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        visitors.forEach(function (visitor) {
+            var row = document.createElement('tr');
+            ['NAME', 'LEGAL_ENTITY', 'CABINET', 'DATE', 'PRESENCE', 'REASON'].forEach(function (field) {
+                var cell = document.createElement('td');
+                cell.textContent = visitor[field] || '';
+                row.appendChild(cell);
+            });
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+    }
+
+    document.querySelectorAll('.other-visitors-modal-trigger').forEach(function (row) {
+        row.addEventListener('click', function () {
+            var visitors = [];
+            try { visitors = JSON.parse(row.getAttribute('data-employees') || '[]'); } catch (error) { visitors = []; }
+            if (!Array.isArray(visitors)) { visitors = []; }
+            document.getElementById('departmentCabinetModalTitle').textContent = 'Прочие посетители';
+            subtitle.textContent = 'Кабинет: ' + (row.getAttribute('data-cabinet') || '') + '. Дата: ' + (row.getAttribute('data-date') || '') + '.';
+            renderOtherVisitors(visitors);
+            modal.classList.add('is-open');
+            modal.setAttribute('aria-hidden', 'false');
+            closeButton.focus();
+        });
+    });
 
     document.querySelectorAll('.head-modal-trigger').forEach(function (button) {
         button.addEventListener('click', function () {
