@@ -1156,6 +1156,10 @@ foreach ($departments as $departmentId => $department) {
     $selectedHeadDepartmentIds[$departmentId] = true;
 }
 $hasOrgUnitFilter = $ceo1FilterRaw !== '' || !empty($selectedDepartmentFilterMap);
+$showVisitorTabs = !$hasOrgUnitFilter;
+if (!$showVisitorTabs && in_array($activeTab, ['unknown', 'temporary'], true)) {
+    $activeTab = 'employees';
+}
 $summaryCabinets = [];
 foreach ($cabinetDirectory as $cabNorm => $cabData) {
     if ($hasOrgUnitFilter) { continue; }
@@ -1569,8 +1573,10 @@ header('Content-Type: text/html; charset=UTF-8');
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
     <button type="button" class="tab-button<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" data-tab-target="dashboard" role="tab" aria-selected="<?= $activeTab === 'dashboard' ? 'true' : 'false' ?>">Дашборд загрузки</button>
     <button type="button" class="tab-button<?= $activeTab === 'employees' ? ' is-active' : '' ?>" data-tab-target="employees" role="tab" aria-selected="<?= $activeTab === 'employees' ? 'true' : 'false' ?>">Сотрудники</button>
-    <button type="button" class="tab-button<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" data-tab-target="unknown" role="tab" aria-selected="<?= $activeTab === 'unknown' ? 'true' : 'false' ?>">Прочие посетители</button>
-    <button type="button" class="tab-button<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" data-tab-target="temporary" role="tab" aria-selected="<?= $activeTab === 'temporary' ? 'true' : 'false' ?>">Посещения по временным и гостевым пропускам</button>
+    <?php if ($showVisitorTabs): ?>
+        <button type="button" class="tab-button<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" data-tab-target="unknown" role="tab" aria-selected="<?= $activeTab === 'unknown' ? 'true' : 'false' ?>">Прочие посетители</button>
+        <button type="button" class="tab-button<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" data-tab-target="temporary" role="tab" aria-selected="<?= $activeTab === 'temporary' ? 'true' : 'false' ?>">Посещения по временным и гостевым пропускам</button>
+    <?php endif; ?>
     <button type="button" class="tab-button<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" data-tab-target="cabinet-summary" role="tab" aria-selected="<?= $activeTab === 'cabinet-summary' ? 'true' : 'false' ?>">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
 </div>
@@ -1867,7 +1873,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </section>
 <?php endif; ?>
 
-<?php if ($activeTab === 'unknown'): ?>
+<?php if ($showVisitorTabs && $activeTab === 'unknown'): ?>
 <section class="tab-pane is-active" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
@@ -1908,7 +1914,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </section>
 <?php endif; ?>
 
-<?php if ($activeTab === 'temporary'): ?>
+<?php if ($showVisitorTabs && $activeTab === 'temporary'): ?>
 <section class="tab-pane is-active" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
