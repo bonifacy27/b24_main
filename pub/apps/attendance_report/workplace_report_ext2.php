@@ -1118,13 +1118,41 @@ $selectedDepartmentFilterMap = array_fill_keys($departmentFilterValues, true);
 $availableCeo1 = array_keys($availableCeo1);
 sort($availableCeo1, SORT_NATURAL | SORT_FLAG_CASE);
 
+$selectedCeo1OrgStructureDepartmentIds = [];
+if ($ceo1FilterRaw !== '' && empty($selectedDepartmentFilterMap)) {
+    $addDepartmentWithChildren = static function (int $departmentId) use (&$addDepartmentWithChildren, &$selectedCeo1OrgStructureDepartmentIds, $departmentChildren): void {
+        $selectedCeo1OrgStructureDepartmentIds[$departmentId] = true;
+        foreach ($departmentChildren[$departmentId] ?? [] as $childDepartmentId) {
+            $addDepartmentWithChildren((int)$childDepartmentId);
+        }
+    };
+
+    foreach ($departments as $departmentId => $department) {
+        $headUserId = (int)$department['UF_HEAD'];
+        if ($headUserId <= 0) { continue; }
+        $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+        if ((string)($departmentSummary['CEO1'] ?? '') === $ceo1FilterRaw || (string)($departmentSummary['DEPARTMENT'] ?? '') === $ceo1FilterRaw) {
+            $addDepartmentWithChildren((int)$departmentId);
+        }
+    }
+}
+
+$departmentMatchesOrgUnitFilter = static function (int $departmentId, int $headUserId, array $departmentSummary) use ($orgUnitMatchesCeo1Filter, $selectedCeo1OrgStructureDepartmentIds, $selectedDepartmentFilterMap): bool {
+    if (!empty($selectedDepartmentFilterMap)) {
+        return $orgUnitMatchesCeo1Filter($headUserId, $departmentSummary)
+            && isset($selectedDepartmentFilterMap[(string)($departmentSummary['DEPARTMENT'] ?? '')]);
+    }
+
+    return $orgUnitMatchesCeo1Filter($headUserId, $departmentSummary)
+        || isset($selectedCeo1OrgStructureDepartmentIds[$departmentId]);
+};
+
 $selectedHeadDepartmentIds = [];
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $headUserId = (int)$department['UF_HEAD'];
     $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-    if (!$orgUnitMatchesCeo1Filter($headUserId, $departmentSummary)) { continue; }
-    if (!empty($selectedDepartmentFilterMap) && !isset($selectedDepartmentFilterMap[(string)$departmentSummary['DEPARTMENT']])) { continue; }
+    if (!$departmentMatchesOrgUnitFilter((int)$departmentId, $headUserId, $departmentSummary)) { continue; }
     $selectedHeadDepartmentIds[$departmentId] = true;
 }
 $hasOrgUnitFilter = $ceo1FilterRaw !== '' || !empty($selectedDepartmentFilterMap);
@@ -1695,8 +1723,7 @@ header('Content-Type: text/html; charset=UTF-8');
             $headUserId = (int)$department['UF_HEAD'];
             $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
             $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-            if (!$orgUnitMatchesCeo1Filter($headUserId, $departmentSummary)) { continue; }
-            if (!empty($selectedDepartmentFilterMap) && !isset($selectedDepartmentFilterMap[(string)$departmentSummary['DEPARTMENT']])) { continue; }
+            if (!$departmentMatchesOrgUnitFilter((int)$departmentId, $headUserId, $departmentSummary)) { continue; }
 
             $departmentCabinets = [];
             foreach ($userCabinetMap as $userId => $cabName) {
@@ -1783,6 +1810,22 @@ header('Content-Type: text/html; charset=UTF-8');
             }
         }
     }
+    foreach ($employeeRowsByDate as &$employeeDateGroup) {
+        usort($employeeDateGroup['ROWS'], static function (array $left, array $right): int {
+            $leftHasOrgSummary = trim((string)$left['CEO1']) !== '' || trim((string)$left['DEPARTMENT']) !== '';
+            $rightHasOrgSummary = trim((string)$right['CEO1']) !== '' || trim((string)$right['DEPARTMENT']) !== '';
+            if ($leftHasOrgSummary !== $rightHasOrgSummary) { return $leftHasOrgSummary ? -1 : 1; }
+
+            $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
+            if ($departmentCompare !== 0) { return $departmentCompare; }
+
+            $headCompare = strnatcasecmp((string)$left['HEAD'], (string)$right['HEAD']);
+            if ($headCompare !== 0) { return $headCompare; }
+
+            return strnatcasecmp((string)$left['CABINET'], (string)$right['CABINET']);
+        });
+    }
+    unset($employeeDateGroup);
     ?>
     <?php foreach ($employeeRowsByDate as $dateKey => $dateGroup): ?>
         <?php
