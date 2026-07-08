@@ -5,6 +5,10 @@
  * Оснастка для проверки и исправления прав элементов списка 42 за период
  * 19.06.2026-07.07.2026 с комментарием "Создана автоматически по формату работы".
  *
+ * Дату START_DATE скрипт проверяет в PHP, а не в фильтре CIBlockElement::GetList:
+ * для свойств типа date/datetime в списках Bitrix фильтрация по PROPERTY_148 может
+ * зависеть от внутреннего формата хранения и не находить подходящие элементы.
+ *
  * За эталон берутся права элемента 3619762. По умолчанию работает dry-run;
  * фактическое исправление выполняется только с ключом --run или GET-параметром run=Y.
  *
@@ -71,6 +75,52 @@ function normalizeComment($value): string
     return trim((string)$text);
 }
 
+
+function parseDateTimeValue($value): ?\DateTimeImmutable
+{
+    if (is_array($value)) {
+        $value = $value['VALUE'] ?? $value['TEXT'] ?? reset($value) ?: '';
+    }
+
+    $raw = trim((string)$value);
+    if ($raw === '') {
+        return null;
+    }
+
+    $formats = [
+        'd.m.Y H:i:s',
+        'd.m.Y H:i',
+        'd.m.Y',
+        'Y-m-d H:i:s',
+        'Y-m-d H:i',
+        'Y-m-d',
+    ];
+
+    foreach ($formats as $format) {
+        $dt = \DateTimeImmutable::createFromFormat($format, $raw);
+        if ($dt instanceof \DateTimeImmutable) {
+            return $dt;
+        }
+    }
+
+    $timestamp = strtotime($raw);
+    if ($timestamp === false) {
+        return null;
+    }
+
+    return (new \DateTimeImmutable())->setTimestamp($timestamp);
+}
+
+function dateRangeBoundary(string $value, bool $endOfDay): \DateTimeImmutable
+{
+    $dt = parseDateTimeValue($value);
+    if (!$dt instanceof \DateTimeImmutable) {
+        throw new \InvalidArgumentException('Некорректная дата: ' . $value);
+    }
+
+    return $endOfDay ? $dt->setTime(23, 59, 59) : $dt->setTime(0, 0, 0);
+}
+
 function rightsSignature(array $rights): string
 {
     ksort($rights);
@@ -102,6 +152,18 @@ $dateFrom = optionValue('date-from', optionValue('date_from', DEFAULT_DATE_FROM)
 $dateTo = optionValue('date-to', optionValue('date_to', DEFAULT_DATE_TO));
 $limit = max(0, (int)optionValue('limit', '0'));
 
+try {
+    $dateFromBoundary = dateRangeBoundary((string)$dateFrom, false);
+    $dateToBoundary = dateRangeBoundary((string)$dateTo, true);
+} catch (\InvalidArgumentException $exception) {
+    out('Ошибка: ' . $exception->getMessage());
+    exit(1);
+}
+
+if ($dateFromBoundary > $dateToBoundary) {
+    [$dateFromBoundary, $dateToBoundary] = [$dateToBoundary, $dateFromBoundary];
+}
+
 $referenceRightsObject = new \CIBlockElementRights(TARGET_IBLOCK_ID, REFERENCE_ELEMENT_ID);
 $referenceRights = $referenceRightsObject->GetRights();
 $referenceSignature = rightsSignature($referenceRights);
@@ -118,8 +180,6 @@ out('Комментарий: ' . TARGET_COMMENT . '.');
 $filter = [
     'IBLOCK_ID' => TARGET_IBLOCK_ID,
     'ACTIVE' => 'Y',
-    '>=PROPERTY_148' => $dateFrom . ' 00:00:00',
-    '<=PROPERTY_148' => $dateTo . ' 23:59:59',
 ];
 
 $select = ['ID', 'NAME', 'IBLOCK_ID', 'PROPERTY_148', 'PROPERTY_164'];
@@ -127,6 +187,7 @@ $nav = $limit > 0 ? ['nTopCount' => $limit] : false;
 $rsElements = \CIBlockElement::GetList(['ID' => 'ASC'], $filter, false, $nav, $select);
 
 $checked = 0;
+$matchedByDate = 0;
 $matched = 0;
 $alreadyCorrect = 0;
 $fixed = 0;
@@ -135,6 +196,13 @@ $errors = 0;
 while ($element = $rsElements->Fetch()) {
     $checked++;
     $elementId = (int)$element['ID'];
+    $startDate = parseDateTimeValue($element['PROPERTY_148_VALUE'] ?? '');
+
+    if (!$startDate instanceof \DateTimeImmutable || $startDate < $dateFromBoundary || $startDate > $dateToBoundary) {
+        continue;
+    }
+
+    $matchedByDate++;
     $comment = normalizeComment($element['PROPERTY_164_VALUE'] ?? '');
 
     if ($comment !== TARGET_COMMENT) {
@@ -165,7 +233,7 @@ while ($element = $rsElements->Fetch()) {
     }
 }
 
-out('Итог: проверено по дате=' . $checked . ', совпало по комментарию=' . $matched . ', уже корректно=' . $alreadyCorrect . ', исправлено=' . $fixed . ', ошибок=' . $errors . '.');
+out('Итог: проверено кандидатов=' . $checked . ', совпало по дате=' . $matchedByDate . ', совпало по комментарию=' . $matched . ', уже корректно=' . $alreadyCorrect . ', исправлено=' . $fixed . ', ошибок=' . $errors . '.');
 
 if (!$dryRun && $errors > 0) {
     exit(1);
