@@ -33,8 +33,8 @@ const RAW_DATE_START_PROPERTY_ID = 148;
 const RAW_DATE_FINISH_PROPERTY_ID = 149;
 const RAW_DATE_COMMENT_PROPERTY_ID = 164;
 const RAW_DATE_TARGET_COMMENT = 'Создана автоматически по формату работы';
-const RAW_DATE_DEFAULT_DATE_FROM = '01.06.2026';
-const RAW_DATE_DEFAULT_DATE_TO = '31.07.2026';
+const RAW_DATE_DEFAULT_DATE_FROM = '18.06.2026';
+const RAW_DATE_DEFAULT_DATE_TO = '08.07.2026';
 
 function rawDateOption(string $name, ?string $default = null): ?string
 {
@@ -160,15 +160,22 @@ $connection = Application::getConnection();
 $sqlHelper = $connection->getSqlHelper();
 $table = 'b_iblock_element_property';
 $propertyIds = [RAW_DATE_START_PROPERTY_ID, RAW_DATE_FINISH_PROPERTY_ID];
-$whereIds = $ids === [] ? '' : ' AND IBLOCK_ELEMENT_ID IN (' . implode(',', array_map('intval', $ids)) . ')';
-$sql = 'SELECT ID, IBLOCK_ELEMENT_ID, IBLOCK_PROPERTY_ID, VALUE, VALUE_NUM, DESCRIPTION '
-    . 'FROM ' . $sqlHelper->quote($table) . ' '
-    . 'WHERE IBLOCK_PROPERTY_ID IN (' . implode(',', $propertyIds) . ') '
-    . "AND VALUE LIKE '% 00:00:00'" . $whereIds . ' '
-    . 'ORDER BY IBLOCK_ELEMENT_ID, IBLOCK_PROPERTY_ID, ID';
+$dateFromSql = $sqlHelper->forSql($dateFrom->format('Y-m-d'));
+$dateToSql = $sqlHelper->forSql($dateTo->modify('+1 day')->format('Y-m-d'));
+$whereIds = $ids === [] ? '' : ' AND p.IBLOCK_ELEMENT_ID IN (' . implode(',', array_map('intval', $ids)) . ')';
+$sql = 'SELECT p.ID, p.IBLOCK_ELEMENT_ID, p.IBLOCK_PROPERTY_ID, p.VALUE, p.VALUE_NUM, p.DESCRIPTION '
+    . 'FROM ' . $sqlHelper->quote($table) . ' p '
+    . 'WHERE p.IBLOCK_PROPERTY_ID IN (' . implode(',', $propertyIds) . ') '
+    . "AND p.VALUE LIKE '% 00:00:00'" . $whereIds . ' '
+    . 'AND p.IBLOCK_ELEMENT_ID IN ('
+    . 'SELECT sd.IBLOCK_ELEMENT_ID FROM ' . $sqlHelper->quote($table) . ' sd '
+    . 'WHERE sd.IBLOCK_PROPERTY_ID = ' . RAW_DATE_START_PROPERTY_ID . ' '
+    . "AND sd.VALUE >= '$dateFromSql' AND sd.VALUE < '$dateToSql'"
+    . ') '
+    . 'ORDER BY p.IBLOCK_ELEMENT_ID, p.IBLOCK_PROPERTY_ID, p.ID';
 
 rawDateOut('Режим: ' . ($run ? 'RUN' : 'DRY-RUN'));
-rawDateOut('Период START_DATE: ' . $dateFrom->format('d.m.Y') . ' - ' . $dateTo->format('d.m.Y'));
+rawDateOut('Период START_DATE: ' . $dateFrom->format('d.m.Y') . ' - ' . $dateTo->format('d.m.Y') . ' (предфильтр в SQL)');
 rawDateOut('Комментарий: ' . RAW_DATE_TARGET_COMMENT);
 if ($ids !== []) { rawDateOut('Ограничение по ID: ' . implode(', ', $ids)); }
 
