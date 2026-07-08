@@ -8,6 +8,9 @@
  * Дату START_DATE скрипт проверяет в PHP, а не в фильтре CIBlockElement::GetList:
  * для свойств типа date/datetime в списках Bitrix фильтрация по PROPERTY_148 может
  * зависеть от внутреннего формата хранения и не находить подходящие элементы.
+ * Права эталона перед применением пересобираются в новые ключи n0/n1/... без ID
+ * записей прав эталонного элемента, иначе SetRights может вернуть успех, но не
+ * заменить права целевого элемента.
  *
  * За эталон берутся права элемента 3619762. По умолчанию работает dry-run;
  * фактическое исправление выполняется только с ключом --run или GET-параметром run=Y.
@@ -121,17 +124,43 @@ function dateRangeBoundary(string $value, bool $endOfDay): \DateTimeImmutable
     return $endOfDay ? $dt->setTime(23, 59, 59) : $dt->setTime(0, 0, 0);
 }
 
+function normalizeRightsForElement(array $rights): array
+{
+    $normalized = [];
+
+    foreach ($rights as $right) {
+        if (!is_array($right)) {
+            continue;
+        }
+
+        $groupCode = isset($right['GROUP_CODE']) ? trim((string)$right['GROUP_CODE']) : '';
+        $taskId = isset($right['TASK_ID']) ? (int)$right['TASK_ID'] : 0;
+
+        if ($groupCode === '' || $taskId <= 0) {
+            continue;
+        }
+
+        $normalized[$groupCode . ':' . $taskId] = [
+            'GROUP_CODE' => $groupCode,
+            'TASK_ID' => $taskId,
+        ];
+    }
+
+    ksort($normalized);
+
+    $result = [];
+    $index = 0;
+    foreach ($normalized as $right) {
+        $result['n' . $index] = $right;
+        $index++;
+    }
+
+    return $result;
+}
+
 function rightsSignature(array $rights): string
 {
-    ksort($rights);
-    foreach ($rights as &$right) {
-        if (is_array($right)) {
-            ksort($right);
-        }
-    }
-    unset($right);
-
-    return md5(serialize($rights));
+    return md5(serialize(normalizeRightsForElement($rights)));
 }
 
 function out(string $message): void
@@ -165,11 +194,11 @@ if ($dateFromBoundary > $dateToBoundary) {
 }
 
 $referenceRightsObject = new \CIBlockElementRights(TARGET_IBLOCK_ID, REFERENCE_ELEMENT_ID);
-$referenceRights = $referenceRightsObject->GetRights();
+$referenceRights = normalizeRightsForElement($referenceRightsObject->GetRights());
 $referenceSignature = rightsSignature($referenceRights);
 
 if (empty($referenceRights)) {
-    out('Ошибка: не удалось получить права эталонного элемента ' . REFERENCE_ELEMENT_ID . '.');
+    out('Ошибка: не удалось получить применимые права эталонного элемента ' . REFERENCE_ELEMENT_ID . '.');
     exit(1);
 }
 
