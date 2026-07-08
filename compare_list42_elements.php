@@ -336,6 +336,23 @@ function loadRawPropertyStorageFields(int $iblockId, int $elementId): array
         $result['M_TABLE.ERROR'] = $exception->getMessage();
     }
 
+    $commonTable = 'b_iblock_element_property';
+    try {
+        if ($connection->isTableExists($commonTable)) {
+            $rows = $connection->query(
+                'SELECT * FROM ' . $sqlHelper->quote($commonTable) . ' WHERE IBLOCK_ELEMENT_ID = ' . $elementId . ' ORDER BY IBLOCK_PROPERTY_ID, ID'
+            );
+            while ($row = $rows->fetch()) {
+                $propertyId = (int)($row['IBLOCK_PROPERTY_ID'] ?? 0);
+                $key = 'COMMON_TABLE.PROPERTY_' . $propertyId;
+                if (!isset($result[$key])) { $result[$key] = []; }
+                $result[$key][] = normalizeDiagnosticValue($row);
+            }
+        }
+    } catch (\Throwable $exception) {
+        $result['COMMON_TABLE.ERROR'] = $exception->getMessage();
+    }
+
     ksort($result, SORT_NATURAL | SORT_FLAG_CASE);
     return $result;
 }
@@ -534,7 +551,7 @@ try {
 diagOut('Сравнение элементов списка ' . COMPARE_IBLOCK_ID . ': ' . $leftId . ' vs ' . $rightId);
 diagOut('Если права совпадают, ищите отличия в ACTIVE/BP_PUBLISHED/WF_STATUS_ID, разделах, свойствах START_DATE/пользователь/статус и пользовательских полях элемента/связанного пользователя.');
 diagOut('Чтобы вывести не только отличия, но и совпавшие значения, добавьте параметр all=Y.');
-diagOut('Сырые PROPERTY_* сравниваются отдельным блоком напрямую из таблиц b_iblock_element_prop_s/m42, без тяжелого SELECT PROPERTY_* в GetList.');
+diagOut('Сырые PROPERTY_* сравниваются отдельным блоком напрямую из таблиц b_iblock_element_prop_s/m42 и b_iblock_element_property, без тяжелого SELECT PROPERTY_* в GetList.');
 printDiagnosticFindings($left, $right, $leftId, $rightId);
 
 printDiffBlock('Поля элемента', $left['FIELDS'], $right['FIELDS'], $leftId, $rightId, $showEqual);
