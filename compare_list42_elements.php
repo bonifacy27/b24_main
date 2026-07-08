@@ -90,6 +90,135 @@ function shortValue($value): string
     return mb_strlen($text) > 500 ? mb_substr($text, 0, 500) . '…' : $text;
 }
 
+function userFieldEntityIds(int $iblockId): array
+{
+    return [
+        'IBLOCK_' . $iblockId . '_ELEMENT',
+        'IBLOCK_' . $iblockId . '_SECTION',
+        'IBLOCK_' . $iblockId,
+    ];
+}
+
+function userFieldLabel(array $field): string
+{
+    foreach (['EDIT_FORM_LABEL', 'LIST_COLUMN_LABEL', 'LIST_FILTER_LABEL'] as $labelKey) {
+        if (is_array($field[$labelKey] ?? null)) {
+            $label = trim((string)($field[$labelKey][LANGUAGE_ID] ?? reset($field[$labelKey]) ?: ''));
+            if ($label !== '') { return $label; }
+        } else {
+            $label = trim((string)($field[$labelKey] ?? ''));
+            if ($label !== '') { return $label; }
+        }
+    }
+
+    return '';
+}
+
+function loadUserFieldsForEntity(string $entityId, int $valueId): array
+{
+    global $USER_FIELD_MANAGER;
+
+    if (!is_object($USER_FIELD_MANAGER) || !method_exists($USER_FIELD_MANAGER, 'GetUserFields')) {
+        return [];
+    }
+
+    $rows = $USER_FIELD_MANAGER->GetUserFields($entityId, $valueId, defined('LANGUAGE_ID') ? LANGUAGE_ID : false);
+    if (!is_array($rows)) {
+        return [];
+    }
+
+    $fields = [];
+    foreach ($rows as $name => $field) {
+        if (strpos((string)$name, 'UF_') !== 0 || !is_array($field)) { continue; }
+        $fields[$name] = [
+            'ENTITY_ID' => $entityId,
+            'ID' => (int)($field['ID'] ?? 0),
+            'NAME' => userFieldLabel($field),
+            'USER_TYPE_ID' => (string)($field['USER_TYPE_ID'] ?? ''),
+            'VALUE' => normalizeDiagnosticValue($field['VALUE'] ?? ''),
+        ];
+    }
+
+    ksort($fields, SORT_NATURAL | SORT_FLAG_CASE);
+    return $fields;
+}
+
+function loadElementUserFields(int $iblockId, int $elementId): array
+{
+    $result = [];
+    foreach (userFieldEntityIds($iblockId) as $entityId) {
+        $fields = loadUserFieldsForEntity($entityId, $elementId);
+        if ($fields === []) { continue; }
+        foreach ($fields as $name => $field) {
+            $result[$entityId . ':' . $name] = $field;
+        }
+    }
+
+    ksort($result, SORT_NATURAL | SORT_FLAG_CASE);
+    return $result;
+}
+
+function collectLinkedUserIds(array $properties): array
+{
+    $ids = [];
+    foreach ($properties as $property) {
+        $userType = mb_strtolower((string)($property['USER_TYPE'] ?? ''));
+        $code = mb_strtolower((string)($property['CODE'] ?? ''));
+        if (!in_array($userType, ['userid', 'user', 'employee'], true) && strpos($code, 'user') === false && strpos($code, 'sotr') === false) {
+            continue;
+        }
+        foreach ((array)($property['VALUE'] ?? []) as $value) {
+            if (is_array($value)) { continue; }
+            $id = (int)$value;
+            if ($id > 0) { $ids[$id] = true; }
+        }
+    }
+
+    $ids = array_keys($ids);
+    sort($ids, SORT_NUMERIC);
+    return $ids;
+}
+
+function userUfFieldNames(): array
+{
+    $names = [];
+    $rows = \CUserTypeEntity::GetList(['FIELD_NAME' => 'ASC'], ['ENTITY_ID' => 'USER']);
+    while ($row = $rows->Fetch()) {
+        $fieldName = trim((string)($row['FIELD_NAME'] ?? ''));
+        if (strpos($fieldName, 'UF_') === 0) { $names[] = $fieldName; }
+    }
+
+    return array_values(array_unique($names));
+}
+
+function loadLinkedUsers(array $userIds): array
+{
+    if ($userIds === []) { return []; }
+
+    $ufNames = userUfFieldNames();
+    $fields = ['ID', 'ACTIVE', 'LOGIN', 'EMAIL', 'NAME', 'LAST_NAME', 'SECOND_NAME'];
+    $result = [];
+    $rows = \CUser::GetList(
+        $by = 'id',
+        $order = 'asc',
+        ['ID' => implode('|', $userIds)],
+        ['FIELDS' => $fields, 'SELECT' => $ufNames]
+    );
+    while ($user = $rows->Fetch()) {
+        $userId = (int)$user['ID'];
+        $snapshot = [];
+        foreach (array_merge($fields, $ufNames) as $fieldName) {
+            if (array_key_exists($fieldName, $user)) {
+                $snapshot[$fieldName] = normalizeDiagnosticValue($user[$fieldName]);
+            }
+        }
+        $result[(string)$userId] = $snapshot;
+    }
+
+    ksort($result, SORT_NUMERIC);
+    return $result;
+}
+
 function rightsForCompare(int $iblockId, int $elementId): array
 {
     $rightsObject = new \CIBlockElementRights($iblockId, $elementId);
@@ -177,6 +306,8 @@ function loadElementSnapshot(int $elementId): array
         'FIELDS' => $fields,
         'SECTIONS' => $sections,
         'PROPERTIES' => $properties,
+        'ELEMENT_USER_FIELDS' => loadElementUserFields(COMPARE_IBLOCK_ID, $elementId),
+        'LINKED_USERS' => loadLinkedUsers(collectLinkedUserIds($properties)),
         'RIGHTS' => rightsForCompare(COMPARE_IBLOCK_ID, $elementId),
     ];
 }
@@ -229,9 +360,11 @@ try {
 }
 
 diagOut('Сравнение элементов списка ' . COMPARE_IBLOCK_ID . ': ' . $leftId . ' vs ' . $rightId);
-diagOut('Если права совпадают, ищите отличия в ACTIVE/BP_PUBLISHED/WF_STATUS_ID, разделах и свойствах START_DATE/пользователь/статус.');
+diagOut('Если права совпадают, ищите отличия в ACTIVE/BP_PUBLISHED/WF_STATUS_ID, разделах, свойствах START_DATE/пользователь/статус и пользовательских полях элемента/связанного пользователя.');
 
 printDiffBlock('Поля элемента', $left['FIELDS'], $right['FIELDS'], $leftId, $rightId);
 printDiffBlock('Разделы', $left['SECTIONS'], $right['SECTIONS'], $leftId, $rightId);
 printDiffBlock('Свойства', $left['PROPERTIES'], $right['PROPERTIES'], $leftId, $rightId);
+printDiffBlock('Пользовательские поля элемента', $left['ELEMENT_USER_FIELDS'], $right['ELEMENT_USER_FIELDS'], $leftId, $rightId);
+printDiffBlock('Пользовательские поля связанных пользователей', $left['LINKED_USERS'], $right['LINKED_USERS'], $leftId, $rightId);
 printDiffBlock('Права', $left['RIGHTS'], $right['RIGHTS'], $leftId, $rightId);
