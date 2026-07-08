@@ -3,7 +3,8 @@
  * fix_list42_raw_date_values.php
  *
  * Нормализует сырые VALUE свойств START_DATE (148) и FINISH_DATE (149)
- * в b_iblock_element_property для заявок списка 42: YYYY-MM-DD 00:00:00 -> YYYY-MM-DD.
+ * в b_iblock_element_property для заявок списка 42 под рабочий формат:
+ * YYYY-MM-DD -> YYYY-MM-DD 00:00:00 и VALUE_NUM -> YYYY.0000.
  * По умолчанию dry-run, запись только с --run / run=Y.
  *
  * Примеры:
@@ -80,14 +81,17 @@ function rawDateParseDate(?string $value, bool $endOfDay = false): ?\DateTimeImm
     return $endOfDay ? $date->setTime(23, 59, 59) : $date->setTime(0, 0, 0);
 }
 
-function rawDateNormalizeValue(string $value): ?string
+function rawDateNormalizeValue(string $value): ?array
 {
     $value = trim($value);
-    if (preg_match('/^(\d{4}-\d{2}-\d{2})(?:\s+00:00:00)?$/', $value, $matches)) {
-        return $matches[1];
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:\s+00:00:00)?$/', $value, $matches)) {
+        return null;
     }
 
-    return null;
+    return [
+        'VALUE' => $matches[1] . '-' . $matches[2] . '-' . $matches[3] . ' 00:00:00',
+        'VALUE_NUM' => $matches[1] . '.0000',
+    ];
 }
 
 function rawDateHtmlToText($value): string
@@ -166,7 +170,7 @@ $whereIds = $ids === [] ? '' : ' AND p.IBLOCK_ELEMENT_ID IN (' . implode(',', ar
 $sql = 'SELECT p.ID, p.IBLOCK_ELEMENT_ID, p.IBLOCK_PROPERTY_ID, p.VALUE, p.VALUE_NUM, p.DESCRIPTION '
     . 'FROM ' . $sqlHelper->quote($table) . ' p '
     . 'WHERE p.IBLOCK_PROPERTY_ID IN (' . implode(',', $propertyIds) . ') '
-    . "AND p.VALUE LIKE '% 00:00:00'" . $whereIds . ' '
+    . "AND p.VALUE >= '$dateFromSql' AND p.VALUE < '$dateToSql'" . $whereIds . ' '
     . 'AND p.IBLOCK_ELEMENT_ID IN ('
     . 'SELECT sd.IBLOCK_ELEMENT_ID FROM ' . $sqlHelper->quote($table) . ' sd '
     . 'WHERE sd.IBLOCK_PROPERTY_ID = ' . RAW_DATE_START_PROPERTY_ID . ' '
@@ -197,18 +201,22 @@ while ($row = $rows->fetch()) {
     }
     if (!$seenElements[$elementId]) { $skipped++; continue; }
 
-    $newValue = rawDateNormalizeValue((string)$row['VALUE']);
-    if ($newValue === null || $newValue === (string)$row['VALUE']) { $skipped++; continue; }
+    $normalized = rawDateNormalizeValue((string)$row['VALUE']);
+    if ($normalized === null) { $skipped++; continue; }
+    if ($normalized['VALUE'] === (string)$row['VALUE'] && $normalized['VALUE_NUM'] === (string)$row['VALUE_NUM']) {
+        $skipped++;
+        continue;
+    }
 
     $matched++;
     $propertyName = (int)$row['IBLOCK_PROPERTY_ID'] === RAW_DATE_START_PROPERTY_ID ? 'START_DATE' : 'FINISH_DATE';
-    rawDateOut(($run ? 'FIX' : 'WOULD FIX') . ' element=' . $elementId . ' property=' . $propertyName . ' row=' . $row['ID'] . ' value=' . $row['VALUE'] . ' -> ' . $newValue . ', VALUE_NUM -> NULL');
+    rawDateOut(($run ? 'FIX' : 'WOULD FIX') . ' element=' . $elementId . ' property=' . $propertyName . ' row=' . $row['ID'] . ' value=' . $row['VALUE'] . ' -> ' . $normalized['VALUE'] . ', VALUE_NUM=' . (string)$row['VALUE_NUM'] . ' -> ' . $normalized['VALUE_NUM']);
 
     if (!$run) { continue; }
 
     $connection->queryExecute(
         'UPDATE ' . $sqlHelper->quote($table)
-        . " SET VALUE = '" . $sqlHelper->forSql($newValue) . "', VALUE_NUM = NULL"
+        . " SET VALUE = '" . $sqlHelper->forSql($normalized['VALUE']) . "', VALUE_NUM = '" . $sqlHelper->forSql($normalized['VALUE_NUM']) . "'"
         . ' WHERE ID = ' . (int)$row['ID']
     );
     $updated++;
