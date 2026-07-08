@@ -296,18 +296,48 @@ function rightsForCompare(int $iblockId, int $elementId): array
     return $rights;
 }
 
-function listPropertySelectFields(int $iblockId): array
+function loadRawPropertyStorageFields(int $iblockId, int $elementId): array
 {
-    $select = [];
-    $rows = \CIBlockProperty::GetList(['SORT' => 'ASC', 'ID' => 'ASC'], ['IBLOCK_ID' => $iblockId]);
-    while ($property = $rows->Fetch()) {
-        $id = (int)($property['ID'] ?? 0);
-        $code = trim((string)($property['CODE'] ?? ''));
-        if ($id > 0) { $select[] = 'PROPERTY_' . $id; }
-        if ($code !== '') { $select[] = 'PROPERTY_' . $code; }
+    $connection = \Bitrix\Main\Application::getConnection();
+    $sqlHelper = $connection->getSqlHelper();
+    $result = [];
+
+    $singleTable = 'b_iblock_element_prop_s' . $iblockId;
+    try {
+        if ($connection->isTableExists($singleTable)) {
+            $row = $connection->query(
+                'SELECT * FROM ' . $sqlHelper->quote($singleTable) . ' WHERE IBLOCK_ELEMENT_ID = ' . $elementId
+            )->fetch();
+            if (is_array($row)) {
+                foreach ($row as $column => $value) {
+                    if (strpos((string)$column, 'PROPERTY_') !== 0) { continue; }
+                    $result['S_TABLE.' . $column] = normalizeDiagnosticValue($value);
+                }
+            }
+        }
+    } catch (\Throwable $exception) {
+        $result['S_TABLE.ERROR'] = $exception->getMessage();
     }
 
-    return array_values(array_unique($select));
+    $multiTable = 'b_iblock_element_prop_m' . $iblockId;
+    try {
+        if ($connection->isTableExists($multiTable)) {
+            $rows = $connection->query(
+                'SELECT * FROM ' . $sqlHelper->quote($multiTable) . ' WHERE IBLOCK_ELEMENT_ID = ' . $elementId . ' ORDER BY IBLOCK_PROPERTY_ID, ID'
+            );
+            while ($row = $rows->fetch()) {
+                $propertyId = (int)($row['IBLOCK_PROPERTY_ID'] ?? 0);
+                $key = 'M_TABLE.PROPERTY_' . $propertyId;
+                if (!isset($result[$key])) { $result[$key] = []; }
+                $result[$key][] = normalizeDiagnosticValue($row);
+            }
+        }
+    } catch (\Throwable $exception) {
+        $result['M_TABLE.ERROR'] = $exception->getMessage();
+    }
+
+    ksort($result, SORT_NATURAL | SORT_FLAG_CASE);
+    return $result;
 }
 
 function loadElementSnapshot(int $elementId): array
@@ -317,7 +347,7 @@ function loadElementSnapshot(int $elementId): array
         ['IBLOCK_ID' => COMPARE_IBLOCK_ID, 'ID' => $elementId],
         false,
         false,
-        array_merge(['*'], listPropertySelectFields(COMPARE_IBLOCK_ID))
+        ['*']
     )->Fetch();
 
     if (!$element) {
@@ -337,12 +367,7 @@ function loadElementSnapshot(int $elementId): array
         }
     }
 
-    $rawPropertyFields = [];
-    foreach ($element as $fieldName => $fieldValue) {
-        if (strpos((string)$fieldName, 'PROPERTY_') !== 0) { continue; }
-        $rawPropertyFields[(string)$fieldName] = normalizeDiagnosticValue($fieldValue);
-    }
-    ksort($rawPropertyFields, SORT_NATURAL | SORT_FLAG_CASE);
+    $rawPropertyFields = loadRawPropertyStorageFields(COMPARE_IBLOCK_ID, $elementId);
 
     $sections = [];
     $sectionRows = \CIBlockElement::GetElementGroups($elementId, true, ['ID', 'NAME', 'IBLOCK_SECTION_ID']);
@@ -509,12 +534,12 @@ try {
 diagOut('Сравнение элементов списка ' . COMPARE_IBLOCK_ID . ': ' . $leftId . ' vs ' . $rightId);
 diagOut('Если права совпадают, ищите отличия в ACTIVE/BP_PUBLISHED/WF_STATUS_ID, разделах, свойствах START_DATE/пользователь/статус и пользовательских полях элемента/связанного пользователя.');
 diagOut('Чтобы вывести не только отличия, но и совпавшие значения, добавьте параметр all=Y.');
-diagOut('Сырые поля PROPERTY_* сравниваются отдельным блоком из CIBlockElement::GetList с явным SELECT всех свойств списка.');
+diagOut('Сырые PROPERTY_* сравниваются отдельным блоком напрямую из таблиц b_iblock_element_prop_s/m42, без тяжелого SELECT PROPERTY_* в GetList.');
 printDiagnosticFindings($left, $right, $leftId, $rightId);
 
 printDiffBlock('Поля элемента', $left['FIELDS'], $right['FIELDS'], $leftId, $rightId, $showEqual);
 printDiffBlock('Разделы', $left['SECTIONS'], $right['SECTIONS'], $leftId, $rightId, $showEqual);
-printDiffBlock('Сырые поля PROPERTY_* из CIBlockElement::GetList', $left['RAW_PROPERTY_FIELDS'], $right['RAW_PROPERTY_FIELDS'], $leftId, $rightId, $showEqual);
+printDiffBlock('Сырые PROPERTY_* из таблиц свойств инфоблока', $left['RAW_PROPERTY_FIELDS'], $right['RAW_PROPERTY_FIELDS'], $leftId, $rightId, $showEqual);
 printDiffBlock('Свойства', $left['PROPERTIES'], $right['PROPERTIES'], $leftId, $rightId, $showEqual);
 printDiffBlock('Пользовательские поля элемента', $left['ELEMENT_USER_FIELDS'], $right['ELEMENT_USER_FIELDS'], $leftId, $rightId, $showEqual);
 printDiffBlock('Пользовательские свойства списка с привязкой к пользователям', $left['USER_PROPERTIES'], $right['USER_PROPERTIES'], $leftId, $rightId, $showEqual);
