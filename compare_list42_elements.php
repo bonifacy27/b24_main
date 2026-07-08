@@ -372,6 +372,69 @@ function loadElementSnapshot(int $elementId): array
     ];
 }
 
+
+function propertyValueString(array $properties, string $code, string $field): string
+{
+    if (!isset($properties[$code]) || !array_key_exists($field, $properties[$code])) {
+        return '';
+    }
+
+    return valueToString($properties[$code][$field]);
+}
+
+function printDiagnosticFindings(array $left, array $right, int $leftId, int $rightId): void
+{
+    diagOut('');
+    diagOut('== Предварительный вывод ==');
+
+    $notes = [];
+    $leftXmlId = valueToString($left['FIELDS']['XML_ID'] ?? '');
+    $rightXmlId = valueToString($right['FIELDS']['XML_ID'] ?? '');
+    if ($leftXmlId !== $rightXmlId) {
+        $notes[] = 'XML_ID отличается: у ' . $leftId . ' «' . $leftXmlId . '», у ' . $rightId . ' «' . $rightXmlId . '». Если модуль исключает элементы с заполненным внешним кодом, это может быть причиной.';
+    }
+
+    $dateCodes = ['CREATED_DATE', 'START_DATE', 'FINISH_DATE'];
+    foreach ($dateCodes as $code) {
+        $leftValue = propertyValueString($left['PROPERTIES'], $code, 'VALUE');
+        $rightValue = propertyValueString($right['PROPERTIES'], $code, 'VALUE');
+        if ($leftValue !== '' && $rightValue !== '' && $leftValue !== $rightValue) {
+            $notes[] = $code . ' отличается: ' . $leftId . ' = ' . $leftValue . ', ' . $rightId . ' = ' . $rightValue . '. Проверьте, попадает ли неработающий элемент в период отчета/обработки.';
+        }
+    }
+
+    $descriptionOnly = [];
+    foreach ($left['PROPERTIES'] as $code => $leftProperty) {
+        if (!isset($right['PROPERTIES'][$code])) { continue; }
+        $rightProperty = $right['PROPERTIES'][$code];
+        if (valueToString($leftProperty['VALUE'] ?? []) !== valueToString($rightProperty['VALUE'] ?? [])) { continue; }
+        if (valueToString($leftProperty['DESCRIPTION'] ?? []) === valueToString($rightProperty['DESCRIPTION'] ?? [])) { continue; }
+        $descriptionOnly[] = (string)$code;
+    }
+    if ($descriptionOnly !== []) {
+        $notes[] = 'У свойств совпадают значения, но отличаются DESCRIPTION: ' . implode(', ', $descriptionOnly) . '. У рабочего элемента виден маркер «OASIS DATA-GEN», у второго DESCRIPTION пустой; если модуль/агент отбирает автозаявки по DESCRIPTION, второй элемент будет пропущен.';
+    }
+
+    if (valueToString($left['RIGHTS'] ?? []) === valueToString($right['RIGHTS'] ?? [])) {
+        $notes[] = 'Права совпадают, поэтому причина не в правах элемента.';
+    }
+    if (valueToString($left['USER_PROPERTIES'] ?? []) === valueToString($right['USER_PROPERTIES'] ?? [])) {
+        $notes[] = 'Пользовательские свойства с привязкой к пользователям совпадают.';
+    }
+    if (valueToString($left['LINKED_USERS'] ?? []) === valueToString($right['LINKED_USERS'] ?? [])) {
+        $notes[] = 'Пользовательские поля связанных пользователей совпадают.';
+    }
+
+    if ($notes === []) {
+        diagOut('Существенных подсказок по найденным отличиям нет; смотрите полные блоки сравнения выше.');
+        return;
+    }
+
+    foreach ($notes as $index => $note) {
+        diagOut(($index + 1) . '. ' . $note);
+    }
+}
+
 function printDiffBlock(string $title, array $left, array $right, int $leftId, int $rightId, bool $showEqual = false): void
 {
     diagOut('');
@@ -424,6 +487,7 @@ try {
 diagOut('Сравнение элементов списка ' . COMPARE_IBLOCK_ID . ': ' . $leftId . ' vs ' . $rightId);
 diagOut('Если права совпадают, ищите отличия в ACTIVE/BP_PUBLISHED/WF_STATUS_ID, разделах, свойствах START_DATE/пользователь/статус и пользовательских полях элемента/связанного пользователя.');
 diagOut('Чтобы вывести не только отличия, но и совпавшие значения, добавьте параметр all=Y.');
+printDiagnosticFindings($left, $right, $leftId, $rightId);
 
 printDiffBlock('Поля элемента', $left['FIELDS'], $right['FIELDS'], $leftId, $rightId, $showEqual);
 printDiffBlock('Разделы', $left['SECTIONS'], $right['SECTIONS'], $leftId, $rightId, $showEqual);
