@@ -599,6 +599,7 @@ foreach ($departments as $departmentId => $department) {
 
 $headsMap = [];
 $headOrgSummaryMap = [];
+$headOrgNodeIdsMap = [];
 $headIds = [];
 foreach ($departments as $department) {
     if ((int)$department['UF_HEAD'] > 0) { $headIds[(int)$department['UF_HEAD']] = true; }
@@ -610,6 +611,7 @@ if (!empty($headIds)) {
         $fio = trim($head['LAST_NAME'] . ' ' . $head['NAME'] . ' ' . $head['SECOND_NAME']);
         $headsMap[$headId] = $fio !== '' ? $fio : (string)$head['LOGIN'];
         $headOrgSummaryMap[$headId] = $resolveUserOrgUnit($head['UF_1C_ORG_NODE']);
+        $headOrgNodeIdsMap[$headId] = $normalizeOrgNodeIds($head['UF_1C_ORG_NODE']);
     }
 }
 
@@ -1005,9 +1007,11 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         }
 
         if ($hasCabinetFilter && !isset($cabinetFilterNorms[$unknownCabinetNorm])) { continue; }
+        if ($ceo1FilterRaw !== '' || !empty($departmentFilterValues)) { continue; }
         $employeeName = trim((string)$reverseUser['FIO']);
         if ($employeeName === '') { $employeeName = 'Пропуск ' . $passId; }
         if ($isTemporaryOrGuestPass($employeeName)) {
+            if ($ceo1FilterRaw !== '' || !empty($departmentFilterValues)) { continue; }
             $temporaryGuestVisits[] = [
                 'NAME' => $employeeName,
                 'DATE' => $dateKey,
@@ -1076,6 +1080,20 @@ sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
 $availableOffices = array_keys($availableOfficesMap);
 sort($availableOffices, SORT_NATURAL | SORT_FLAG_CASE);
 
+
+$orgUnitMatchesCeo1Filter = static function (int $headUserId, array $departmentSummary) use ($ceo1FilterRaw, $headOrgNodeIdsMap, $getOrgNodeChain): bool {
+    if ($ceo1FilterRaw === '') { return true; }
+    if ((string)($departmentSummary['CEO1'] ?? '') === $ceo1FilterRaw) { return true; }
+
+    foreach ($headOrgNodeIdsMap[$headUserId] ?? [] as $orgNodeId) {
+        foreach ($getOrgNodeChain((int)$orgNodeId) as $orgNode) {
+            if ((string)($orgNode['NAME'] ?? '') === $ceo1FilterRaw) { return true; }
+        }
+    }
+
+    return false;
+};
+
 $availableCeo1 = [];
 $availableDepartmentsByCeo1 = [];
 foreach ($departments as $departmentId => $department) {
@@ -1100,16 +1118,71 @@ $selectedDepartmentFilterMap = array_fill_keys($departmentFilterValues, true);
 $availableCeo1 = array_keys($availableCeo1);
 sort($availableCeo1, SORT_NATURAL | SORT_FLAG_CASE);
 
+$selectedCeo1OrgStructureDepartmentIds = [];
+if ($ceo1FilterRaw !== '' && empty($selectedDepartmentFilterMap)) {
+    $addDepartmentWithChildren = static function (int $departmentId) use (&$addDepartmentWithChildren, &$selectedCeo1OrgStructureDepartmentIds, $departmentChildren): void {
+        $selectedCeo1OrgStructureDepartmentIds[$departmentId] = true;
+        foreach ($departmentChildren[$departmentId] ?? [] as $childDepartmentId) {
+            $addDepartmentWithChildren((int)$childDepartmentId);
+        }
+    };
+
+    foreach ($departments as $departmentId => $department) {
+        $headUserId = (int)$department['UF_HEAD'];
+        if ($headUserId <= 0) { continue; }
+        $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+        if ((string)($departmentSummary['CEO1'] ?? '') === $ceo1FilterRaw || (string)($departmentSummary['DEPARTMENT'] ?? '') === $ceo1FilterRaw) {
+            $addDepartmentWithChildren((int)$departmentId);
+        }
+    }
+}
+
+$departmentMatchesOrgUnitFilter = static function (int $departmentId, int $headUserId, array $departmentSummary) use ($orgUnitMatchesCeo1Filter, $selectedCeo1OrgStructureDepartmentIds, $selectedDepartmentFilterMap): bool {
+    if (!empty($selectedDepartmentFilterMap)) {
+        return $orgUnitMatchesCeo1Filter($headUserId, $departmentSummary)
+            && isset($selectedDepartmentFilterMap[(string)($departmentSummary['DEPARTMENT'] ?? '')]);
+    }
+
+    return $orgUnitMatchesCeo1Filter($headUserId, $departmentSummary)
+        || isset($selectedCeo1OrgStructureDepartmentIds[$departmentId]);
+};
+
 $selectedHeadDepartmentIds = [];
 foreach ($departments as $departmentId => $department) {
     if ((int)$department['UF_HEAD'] <= 0) { continue; }
     $headUserId = (int)$department['UF_HEAD'];
     $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-    if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
-    if (!empty($selectedDepartmentFilterMap) && !isset($selectedDepartmentFilterMap[(string)$departmentSummary['DEPARTMENT']])) { continue; }
+    if (!$departmentMatchesOrgUnitFilter((int)$departmentId, $headUserId, $departmentSummary)) { continue; }
     $selectedHeadDepartmentIds[$departmentId] = true;
 }
 $hasOrgUnitFilter = $ceo1FilterRaw !== '' || !empty($selectedDepartmentFilterMap);
+if ($hasOrgUnitFilter) {
+    $availableCabinetMap = [];
+    $availableCabinetNorms = [];
+    foreach ($userCabinetMap as $userId => $cabName) {
+        if (empty(array_intersect($userDepartmentsMap[(int)$userId] ?? [], array_keys($selectedHeadDepartmentIds)))) { continue; }
+        $cabNorm = $normalizeCabinet((string)$cabName);
+        if ($cabNorm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$cabNorm]))) { continue; }
+        $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : (string)$cabName;
+        if ($cabTitle !== '') { $availableCabinetMap[$cabTitle] = true; }
+        $availableCabinetNorms[$cabNorm] = true;
+    }
+    $cabinetFilterValues = array_values(array_filter($cabinetFilterValues, static function (string $cabinetFilterValue) use ($normalizeCabinet, $normalizeDirectoryCabinet, $availableCabinetNorms): bool {
+        $cabinetNorm = $normalizeCabinet($cabinetFilterValue);
+        if ($cabinetNorm === '') { $cabinetNorm = $normalizeDirectoryCabinet($cabinetFilterValue); }
+        return $cabinetNorm !== '' && isset($availableCabinetNorms[$cabinetNorm]);
+    }));
+    $cabinetFilterRaw = !empty($cabinetFilterValues) ? (string)reset($cabinetFilterValues) : '';
+    $cabinetFilterNorms = array_intersect_key($cabinetFilterNorms, $availableCabinetNorms);
+    $cabinetFilterNorm = !empty($cabinetFilterNorms) ? (string)array_key_first($cabinetFilterNorms) : '';
+    $hasCabinetFilter = !empty($cabinetFilterNorms);
+    $availableCabinets = array_keys($availableCabinetMap);
+    sort($availableCabinets, SORT_NATURAL | SORT_FLAG_CASE);
+}
+$showVisitorTabs = !$hasOrgUnitFilter;
+if (!$showVisitorTabs && in_array($activeTab, ['unknown', 'temporary'], true)) {
+    $activeTab = 'employees';
+}
 $summaryCabinets = [];
 foreach ($cabinetDirectory as $cabNorm => $cabData) {
     if ($hasOrgUnitFilter) { continue; }
@@ -1523,8 +1596,10 @@ header('Content-Type: text/html; charset=UTF-8');
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
     <button type="button" class="tab-button<?= $activeTab === 'dashboard' ? ' is-active' : '' ?>" data-tab-target="dashboard" role="tab" aria-selected="<?= $activeTab === 'dashboard' ? 'true' : 'false' ?>">Дашборд загрузки</button>
     <button type="button" class="tab-button<?= $activeTab === 'employees' ? ' is-active' : '' ?>" data-tab-target="employees" role="tab" aria-selected="<?= $activeTab === 'employees' ? 'true' : 'false' ?>">Сотрудники</button>
-    <button type="button" class="tab-button<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" data-tab-target="unknown" role="tab" aria-selected="<?= $activeTab === 'unknown' ? 'true' : 'false' ?>">Прочие посетители</button>
-    <button type="button" class="tab-button<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" data-tab-target="temporary" role="tab" aria-selected="<?= $activeTab === 'temporary' ? 'true' : 'false' ?>">Посещения по временным и гостевым пропускам</button>
+    <?php if ($showVisitorTabs): ?>
+        <button type="button" class="tab-button<?= $activeTab === 'unknown' ? ' is-active' : '' ?>" data-tab-target="unknown" role="tab" aria-selected="<?= $activeTab === 'unknown' ? 'true' : 'false' ?>">Прочие посетители</button>
+        <button type="button" class="tab-button<?= $activeTab === 'temporary' ? ' is-active' : '' ?>" data-tab-target="temporary" role="tab" aria-selected="<?= $activeTab === 'temporary' ? 'true' : 'false' ?>">Посещения по временным и гостевым пропускам</button>
+    <?php endif; ?>
     <button type="button" class="tab-button<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" data-tab-target="cabinet-summary" role="tab" aria-selected="<?= $activeTab === 'cabinet-summary' ? 'true' : 'false' ?>">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
 </div>
@@ -1606,7 +1681,8 @@ header('Content-Type: text/html; charset=UTF-8');
 </div>
 
 <div class="dashboard-section">
-    <h3>Загруженные кабинеты с загрузкой выше 90%</h3>
+    <h3>Кабинеты с загрузкой более 90%</h3>
+    <p class="dashboard-muted">В выборке учитываются кабинеты с количеством рабочих мест более 3.</p>
     <?php if (empty($dashboardOverloadedCabinets)): ?>
         <p class="dashboard-muted">За выбранный период нет кабинетов с загрузкой выше 90%.</p>
     <?php else: ?>
@@ -1670,14 +1746,16 @@ header('Content-Type: text/html; charset=UTF-8');
                 'OFFICE_BY_CABINET' => [],
             ],
         ];
+        foreach ($summaryCabinets as $summaryCabNorm => $summaryCabData) {
+            $employeeRowsByDate[$dateKey]['TOTALS']['WORKPLACES_BY_CABINET'][$summaryCabNorm] = (int)$summaryCabData['WORKPLACES'];
+        }
 
         foreach ($departments as $departmentId => $department) {
             if ((int)$department['UF_HEAD'] <= 0) { continue; }
             $headUserId = (int)$department['UF_HEAD'];
             $headName = isset($headsMap[$headUserId]) ? $headsMap[$headUserId] : 'Не назначен';
             $departmentSummary = isset($headOrgSummaryMap[$headUserId]) ? $headOrgSummaryMap[$headUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
-            if ($ceo1FilterRaw !== '' && (string)$departmentSummary['CEO1'] !== $ceo1FilterRaw) { continue; }
-            if (!empty($selectedDepartmentFilterMap) && !isset($selectedDepartmentFilterMap[(string)$departmentSummary['DEPARTMENT']])) { continue; }
+            if (!$departmentMatchesOrgUnitFilter((int)$departmentId, $headUserId, $departmentSummary)) { continue; }
 
             $departmentCabinets = [];
             foreach ($userCabinetMap as $userId => $cabName) {
@@ -1692,7 +1770,7 @@ header('Content-Type: text/html; charset=UTF-8');
 
                 $cabTitle = isset($cabinetDirectory[$cabNorm]) ? (string)$cabinetDirectory[$cabNorm]['TITLE'] : $cabNorm;
                 $workplaces = isset($cabinetDirectory[$cabNorm]) ? (int)$cabinetDirectory[$cabNorm]['WORKPLACES'] : 0;
-                $assignedCount = isset($cabinetAssignedTotal[$cabNorm]) ? (int)$cabinetAssignedTotal[$cabNorm] : 0;
+                $assignedCount = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? count($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) : 0;
                 $dayData = isset($cabinetDailyOffice[$dateKey][$cabNorm]) ? $cabinetDailyOffice[$dateKey][$cabNorm] : ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => []];
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
@@ -1758,12 +1836,28 @@ header('Content-Type: text/html; charset=UTF-8');
                     'CABINET_EMPLOYEES_JSON' => $cabinetAssignedEmployeesJson,
                 ];
                 $employeeRowsByDate[$dateKey]['TOTALS']['WORKPLACES_BY_CABINET'][$cabNorm] = $workplaces;
-                $employeeRowsByDate[$dateKey]['TOTALS']['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
+                $employeeRowsByDate[$dateKey]['TOTALS']['ASSIGNED_BY_CABINET'][$departmentId . '|' . $cabNorm] = $assignedCount;
                 $employeeRowsByDate[$dateKey]['TOTALS']['SHORT_OFFICE_BY_CABINET'][$cabNorm] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
                 $employeeRowsByDate[$dateKey]['TOTALS']['OFFICE_BY_CABINET'][$cabNorm] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
             }
         }
     }
+    foreach ($employeeRowsByDate as &$employeeDateGroup) {
+        usort($employeeDateGroup['ROWS'], static function (array $left, array $right): int {
+            $leftHasOrgSummary = trim((string)$left['CEO1']) !== '' || trim((string)$left['DEPARTMENT']) !== '';
+            $rightHasOrgSummary = trim((string)$right['CEO1']) !== '' || trim((string)$right['DEPARTMENT']) !== '';
+            if ($leftHasOrgSummary !== $rightHasOrgSummary) { return $leftHasOrgSummary ? -1 : 1; }
+
+            $departmentCompare = strnatcasecmp((string)$left['DEPARTMENT'], (string)$right['DEPARTMENT']);
+            if ($departmentCompare !== 0) { return $departmentCompare; }
+
+            $headCompare = strnatcasecmp((string)$left['HEAD'], (string)$right['HEAD']);
+            if ($headCompare !== 0) { return $headCompare; }
+
+            return strnatcasecmp((string)$left['CABINET'], (string)$right['CABINET']);
+        });
+    }
+    unset($employeeDateGroup);
     ?>
     <?php foreach ($employeeRowsByDate as $dateKey => $dateGroup): ?>
         <?php
@@ -1802,7 +1896,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </section>
 <?php endif; ?>
 
-<?php if ($activeTab === 'unknown'): ?>
+<?php if ($showVisitorTabs && $activeTab === 'unknown'): ?>
 <section class="tab-pane is-active" id="tab-unknown" role="tabpanel">
 <h2>Прочие посетители</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
@@ -1843,7 +1937,7 @@ header('Content-Type: text/html; charset=UTF-8');
 </section>
 <?php endif; ?>
 
-<?php if ($activeTab === 'temporary'): ?>
+<?php if ($showVisitorTabs && $activeTab === 'temporary'): ?>
 <section class="tab-pane is-active" id="tab-temporary" role="tabpanel">
 <h2>Посещения по временным и гостевым пропускам</h2>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="temporary-report-table" data-export-name="temporary_guest_visits">Экспорт в Excel</button></div>
@@ -1964,7 +2058,7 @@ header('Content-Type: text/html; charset=UTF-8');
         <th>Дата</th>
         <th>ЮЛ</th>
         <th class="col-narrow">Кол-во рабочих мест в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?></th>
-        <th class="col-narrow">Кол-во привязанных РМ в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> к ЮЛ</th>
+        <th class="col-narrow">Кол-во привязанных сотрудников к кабинетам</th>
         <th class="col-narrow">Кол-во сотрудников в <?=htmlspecialcharsbx($legalEntitySummaryScopeTitle)?> (&gt;4 ч)</th>
         <th class="col-narrow">Кол-во свободных рм</th>
         <th>% загрузки офиса</th>

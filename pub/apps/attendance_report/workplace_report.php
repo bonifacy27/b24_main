@@ -1030,6 +1030,9 @@ header('Content-Type: text/html; charset=UTF-8');
         .export-button { border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
         .management-link { display: inline-block; margin: 0 0 10px; border: 1px solid #8bb6e8; background: #eaf4ff; color: #0f4f93; padding: 7px 12px; border-radius: 4px; text-decoration: none; }
         .head-modal-trigger { padding: 0; border: 0; background: none; color: #1d5fbf; cursor: pointer; text-decoration: underline; font: inherit; text-align: left; }
+        .other-visitors-modal-trigger { cursor: pointer; }
+        .other-visitors-modal-trigger:hover td { background: #f0f7ff; }
+        .other-visitors-modal-trigger .other-visitors-link { color: #1d5fbf; text-decoration: underline; font-weight: 700; }
         .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.35); align-items: center; justify-content: center; padding: 24px; }
         .modal-backdrop.is-open { display: flex; }
         .modal-window { width: min(560px, 100%); max-height: 80vh; overflow: auto; background: #fff; border-radius: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.28); padding: 18px 20px; }
@@ -1302,8 +1305,15 @@ header('Content-Type: text/html; charset=UTF-8');
                 'LEGAL_ENTITY' => $legalEntityTitle,
                 'SHORT' => 0,
                 'FULL' => 0,
+                'VISITORS' => [],
             ];
         }
+        $otherVisitorsRows[$rowKey]['VISITORS'][] = [
+            'LEGAL_ENTITY' => $legalEntityTitle,
+            'NAME' => (string)($employee['EMPLOYEE'] ?? ''),
+            'DATE' => (new \DateTime($dateKey))->format('d.m.Y'),
+            'IN_OFFICE' => !empty($employee['IS_SHORT']) ? 'Да (<4ч)' : 'Да (>4ч)',
+        ];
         if (!empty($employee['IS_SHORT'])) {
             $otherVisitorsRows[$rowKey]['SHORT']++;
         } else {
@@ -1329,12 +1339,13 @@ header('Content-Type: text/html; charset=UTF-8');
         $mainTableTotals['ASSIGNED_BY_CABINET'][$cabNorm] = $assignedCount;
         $mainTableTotals['SHORT_OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['SHORT_TOTAL']) ? (int)$dayData['SHORT_TOTAL'] : 0;
         $mainTableTotals['OFFICE_BY_CABINET_DATE'][$cabinetDateTotalKey] = isset($dayData['TOTAL']) ? (int)$dayData['TOTAL'] : 0;
+        $otherVisitorsJson = htmlspecialcharsbx(json_encode($visitorRow['VISITORS'], JSON_UNESCAPED_UNICODE));
         ?>
-        <tr>
+        <tr class="other-visitors-modal-trigger" data-cabinet="<?=htmlspecialcharsbx($cabTitle)?>" data-date="<?=htmlspecialcharsbx((new \DateTime($dateKey))->format('d.m.Y'))?>" data-employees="<?=$otherVisitorsJson?>">
             <td><?=htmlspecialcharsbx((string)$visitorRow['LEGAL_ENTITY'])?></td>
             <td></td>
-            <td>Прочие посетители</td>
-            <td>Прочие посетители</td>
+            <td><span class="other-visitors-link">Прочие посетители</span></td>
+            <td><span class="other-visitors-link">Прочие посетители</span></td>
             <td><?=htmlspecialcharsbx($cabTitle)?></td>
             <td><?= $workplaces ?></td>
             <td><?= $assignedCount ?></td>
@@ -1801,6 +1812,54 @@ $legalEntitySummaryScopeTitle = $cabinetFilterRaw !== '' ? $cabinetFilterRaw : '
         table.appendChild(tbody);
         body.appendChild(table);
     }
+
+    function renderOtherVisitors(visitors) {
+        body.innerHTML = '';
+        if (!visitors.length) {
+            var empty = document.createElement('p');
+            empty.className = 'modal-empty';
+            empty.textContent = 'Нет прочих посетителей для этой строки.';
+            body.appendChild(empty);
+            return;
+        }
+        var table = document.createElement('table');
+        table.className = 'modal-table';
+        var thead = document.createElement('thead');
+        var headerRow = document.createElement('tr');
+        ['ЮЛ', 'ФИО', 'Дата', 'В офисе'].forEach(function (title) {
+            var th = document.createElement('th');
+            th.textContent = title;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        visitors.forEach(function (visitor) {
+            var row = document.createElement('tr');
+            ['LEGAL_ENTITY', 'NAME', 'DATE', 'IN_OFFICE'].forEach(function (field) {
+                var cell = document.createElement('td');
+                cell.textContent = visitor[field] || '';
+                row.appendChild(cell);
+            });
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+    }
+
+    document.querySelectorAll('.other-visitors-modal-trigger').forEach(function (row) {
+        row.addEventListener('click', function () {
+            var visitors = [];
+            try { visitors = JSON.parse(row.getAttribute('data-employees') || '[]'); } catch (error) { visitors = []; }
+            if (!Array.isArray(visitors)) { visitors = []; }
+            document.getElementById('departmentCabinetModalTitle').textContent = 'Прочие посетители';
+            subtitle.textContent = 'Кабинет: ' + (row.getAttribute('data-cabinet') || '') + '. Дата: ' + (row.getAttribute('data-date') || '') + '.';
+            renderOtherVisitors(visitors);
+            modal.classList.add('is-open');
+            modal.setAttribute('aria-hidden', 'false');
+            closeButton.focus();
+        });
+    });
 
     document.querySelectorAll('.head-modal-trigger').forEach(function (button) {
         button.addEventListener('click', function () {
