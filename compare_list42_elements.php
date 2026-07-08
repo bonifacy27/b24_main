@@ -437,6 +437,52 @@ function loadElementSnapshot(int $elementId): array
 }
 
 
+
+function rawPropertyComparableRows($value): array
+{
+    $rows = is_array($value) ? $value : [$value];
+    $result = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) { $result[] = normalizeDiagnosticValue($row); continue; }
+        $filtered = [];
+        foreach (['DESCRIPTION', 'VALUE', 'VALUE_ENUM', 'VALUE_NUM', 'VALUE_TYPE'] as $fieldName) {
+            if (array_key_exists($fieldName, $row)) {
+                $filtered[$fieldName] = normalizeDiagnosticValue($row[$fieldName]);
+            }
+        }
+        $result[] = $filtered;
+    }
+
+    return normalizeDiagnosticValue($result);
+}
+
+function rawPropertyDiffSummary(array $leftRaw, array $rightRaw): array
+{
+    $summaries = [];
+    $keys = array_unique(array_merge(array_keys($leftRaw), array_keys($rightRaw)));
+    sort($keys, SORT_NATURAL | SORT_FLAG_CASE);
+    foreach ($keys as $key) {
+        $leftRows = rawPropertyComparableRows($leftRaw[$key] ?? []);
+        $rightRows = rawPropertyComparableRows($rightRaw[$key] ?? []);
+        if (valueToString($leftRows) === valueToString($rightRows)) { continue; }
+
+        $changedFields = [];
+        $leftFirst = $leftRows[0] ?? [];
+        $rightFirst = $rightRows[0] ?? [];
+        if (is_array($leftFirst) && is_array($rightFirst)) {
+            foreach (['DESCRIPTION', 'VALUE', 'VALUE_ENUM', 'VALUE_NUM', 'VALUE_TYPE'] as $fieldName) {
+                if (valueToString($leftFirst[$fieldName] ?? '') !== valueToString($rightFirst[$fieldName] ?? '')) {
+                    $changedFields[] = $fieldName;
+                }
+            }
+        }
+
+        $summaries[] = $key . ($changedFields === [] ? '' : ' (' . implode(', ', $changedFields) . ')');
+    }
+
+    return $summaries;
+}
+
 function propertyValueString(array $properties, string $code, string $field): string
 {
     if (!isset($properties[$code]) || !array_key_exists($field, $properties[$code])) {
@@ -477,6 +523,11 @@ function printDiagnosticFindings(array $left, array $right, int $leftId, int $ri
     }
     if ($descriptionOnly !== []) {
         $notes[] = 'У свойств совпадают значения, но отличаются DESCRIPTION: ' . implode(', ', $descriptionOnly) . '. У рабочего элемента виден маркер «OASIS DATA-GEN», у второго DESCRIPTION пустой; если модуль/агент отбирает автозаявки по DESCRIPTION, второй элемент будет пропущен.';
+    }
+
+    $rawDiffs = rawPropertyDiffSummary($left['RAW_PROPERTY_FIELDS'] ?? [], $right['RAW_PROPERTY_FIELDS'] ?? []);
+    if ($rawDiffs !== []) {
+        $notes[] = 'В сыром хранении свойств отличаются поля: ' . implode('; ', array_slice($rawDiffs, 0, 12)) . (count($rawDiffs) > 12 ? '; ...' : '') . '. Это важно, если модуль читает b_iblock_element_property напрямую или фильтрует по VALUE_NUM/VALUE_ENUM/точному VALUE.';
     }
 
     if (valueToString($left['RIGHTS'] ?? []) === valueToString($right['RIGHTS'] ?? [])) {
