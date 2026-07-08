@@ -158,19 +158,54 @@ function loadElementUserFields(int $iblockId, int $elementId): array
     return $result;
 }
 
+function extractUserIdsFromPropertyValue($value): array
+{
+    $ids = [];
+    foreach ((array)$value as $item) {
+        if (is_array($item)) { continue; }
+        if (preg_match_all('/(?:user_)?(\d+)/i', (string)$item, $matches)) {
+            foreach ($matches[1] as $match) {
+                $id = (int)$match;
+                if ($id > 0) { $ids[$id] = true; }
+            }
+        }
+    }
+
+    $ids = array_keys($ids);
+    sort($ids, SORT_NUMERIC);
+    return $ids;
+}
+
+function isUserLikeProperty(array $property): bool
+{
+    $userType = mb_strtolower((string)($property['USER_TYPE'] ?? ''));
+    $type = mb_strtolower((string)($property['TYPE'] ?? ''));
+    $code = mb_strtolower((string)($property['CODE'] ?? ''));
+    $name = mb_strtolower((string)($property['NAME'] ?? ''));
+    $haystack = $code . ' ' . $name;
+
+    if (in_array($userType, ['userid', 'user', 'employee', 'employee_auto'], true)) {
+        return true;
+    }
+
+    if ($userType !== '' && (strpos($userType, 'user') !== false || strpos($userType, 'employee') !== false)) {
+        return true;
+    }
+
+    if ($type === 's' && preg_match('/(user|employee|польз|сотруд|работник|инициатор|заявител)/u', $haystack)) {
+        return true;
+    }
+
+    return false;
+}
+
 function collectLinkedUserIds(array $properties): array
 {
     $ids = [];
     foreach ($properties as $property) {
-        $userType = mb_strtolower((string)($property['USER_TYPE'] ?? ''));
-        $code = mb_strtolower((string)($property['CODE'] ?? ''));
-        if (!in_array($userType, ['userid', 'user', 'employee'], true) && strpos($code, 'user') === false && strpos($code, 'sotr') === false) {
-            continue;
-        }
-        foreach ((array)($property['VALUE'] ?? []) as $value) {
-            if (is_array($value)) { continue; }
-            $id = (int)$value;
-            if ($id > 0) { $ids[$id] = true; }
+        if (!isUserLikeProperty($property)) { continue; }
+        foreach (extractUserIdsFromPropertyValue($property['VALUE'] ?? []) as $id) {
+            $ids[$id] = true;
         }
     }
 
@@ -216,6 +251,28 @@ function loadLinkedUsers(array $userIds): array
     }
 
     ksort($result, SORT_NUMERIC);
+    return $result;
+}
+
+function loadUserPropertySnapshots(array $properties): array
+{
+    $result = [];
+    foreach ($properties as $key => $property) {
+        if (!isUserLikeProperty($property)) { continue; }
+        $userIds = extractUserIdsFromPropertyValue($property['VALUE'] ?? []);
+        $result[$key] = [
+            'ID' => (int)($property['ID'] ?? 0),
+            'CODE' => (string)($property['CODE'] ?? ''),
+            'NAME' => (string)($property['NAME'] ?? ''),
+            'TYPE' => (string)($property['TYPE'] ?? ''),
+            'USER_TYPE' => (string)($property['USER_TYPE'] ?? ''),
+            'RAW_VALUE' => normalizeDiagnosticValue($property['VALUE'] ?? []),
+            'USER_IDS' => $userIds,
+            'USERS' => loadLinkedUsers($userIds),
+        ];
+    }
+
+    ksort($result, SORT_NATURAL | SORT_FLAG_CASE);
     return $result;
 }
 
@@ -288,6 +345,8 @@ function loadElementSnapshot(int $elementId): array
                 'TYPE' => (string)$property['PROPERTY_TYPE'],
                 'USER_TYPE' => (string)$property['USER_TYPE'],
                 'MULTIPLE' => (string)$property['MULTIPLE'],
+                'LINK_IBLOCK_ID' => (int)($property['LINK_IBLOCK_ID'] ?? 0),
+                'USER_TYPE_SETTINGS' => normalizeDiagnosticValue($property['USER_TYPE_SETTINGS'] ?? []),
                 'VALUE' => [],
                 'DESCRIPTION' => [],
             ];
@@ -307,12 +366,13 @@ function loadElementSnapshot(int $elementId): array
         'SECTIONS' => $sections,
         'PROPERTIES' => $properties,
         'ELEMENT_USER_FIELDS' => loadElementUserFields(COMPARE_IBLOCK_ID, $elementId),
+        'USER_PROPERTIES' => loadUserPropertySnapshots($properties),
         'LINKED_USERS' => loadLinkedUsers(collectLinkedUserIds($properties)),
         'RIGHTS' => rightsForCompare(COMPARE_IBLOCK_ID, $elementId),
     ];
 }
 
-function printDiffBlock(string $title, array $left, array $right, int $leftId, int $rightId): void
+function printDiffBlock(string $title, array $left, array $right, int $leftId, int $rightId, bool $showEqual = false): void
 {
     diagOut('');
     diagOut('== ' . $title . ' ==');
@@ -326,18 +386,19 @@ function printDiffBlock(string $title, array $left, array $right, int $leftId, i
         $rightExists = array_key_exists($key, $right);
         $leftValue = $leftExists ? normalizeDiagnosticValue($left[$key]) : null;
         $rightValue = $rightExists ? normalizeDiagnosticValue($right[$key]) : null;
-        if ($leftExists && $rightExists && valueToString($leftValue) === valueToString($rightValue)) {
+        $isEqual = $leftExists && $rightExists && valueToString($leftValue) === valueToString($rightValue);
+        if ($isEqual && !$showEqual) {
             continue;
         }
 
-        $diffCount++;
-        diagOut('[' . $key . ']');
+        if (!$isEqual) { $diffCount++; }
+        diagOut(($isEqual ? '[= ' : '[') . $key . ']');
         diagOut('  ' . $leftId . ': ' . ($leftExists ? shortValue($leftValue) : '<нет>'));
         diagOut('  ' . $rightId . ': ' . ($rightExists ? shortValue($rightValue) : '<нет>'));
     }
 
     if ($diffCount === 0) {
-        diagOut('Отличий не найдено.');
+        diagOut('Отличий не найдено. Проверено значений: ' . count($keys) . '.');
     }
 }
 
@@ -350,6 +411,7 @@ if (!Loader::includeModule('iblock')) {
 
 $leftId = max(1, (int)diagOption('left', (string)DEFAULT_LEFT_ELEMENT_ID));
 $rightId = max(1, (int)diagOption('right', (string)DEFAULT_RIGHT_ELEMENT_ID));
+$showEqual = strtoupper((string)diagOption('all', 'N')) === 'Y';
 
 try {
     $left = loadElementSnapshot($leftId);
@@ -361,10 +423,12 @@ try {
 
 diagOut('Сравнение элементов списка ' . COMPARE_IBLOCK_ID . ': ' . $leftId . ' vs ' . $rightId);
 diagOut('Если права совпадают, ищите отличия в ACTIVE/BP_PUBLISHED/WF_STATUS_ID, разделах, свойствах START_DATE/пользователь/статус и пользовательских полях элемента/связанного пользователя.');
+diagOut('Чтобы вывести не только отличия, но и совпавшие значения, добавьте параметр all=Y.');
 
-printDiffBlock('Поля элемента', $left['FIELDS'], $right['FIELDS'], $leftId, $rightId);
-printDiffBlock('Разделы', $left['SECTIONS'], $right['SECTIONS'], $leftId, $rightId);
-printDiffBlock('Свойства', $left['PROPERTIES'], $right['PROPERTIES'], $leftId, $rightId);
-printDiffBlock('Пользовательские поля элемента', $left['ELEMENT_USER_FIELDS'], $right['ELEMENT_USER_FIELDS'], $leftId, $rightId);
-printDiffBlock('Пользовательские поля связанных пользователей', $left['LINKED_USERS'], $right['LINKED_USERS'], $leftId, $rightId);
-printDiffBlock('Права', $left['RIGHTS'], $right['RIGHTS'], $leftId, $rightId);
+printDiffBlock('Поля элемента', $left['FIELDS'], $right['FIELDS'], $leftId, $rightId, $showEqual);
+printDiffBlock('Разделы', $left['SECTIONS'], $right['SECTIONS'], $leftId, $rightId, $showEqual);
+printDiffBlock('Свойства', $left['PROPERTIES'], $right['PROPERTIES'], $leftId, $rightId, $showEqual);
+printDiffBlock('Пользовательские поля элемента', $left['ELEMENT_USER_FIELDS'], $right['ELEMENT_USER_FIELDS'], $leftId, $rightId, $showEqual);
+printDiffBlock('Пользовательские свойства списка с привязкой к пользователям', $left['USER_PROPERTIES'], $right['USER_PROPERTIES'], $leftId, $rightId, $showEqual);
+printDiffBlock('Пользовательские поля связанных пользователей', $left['LINKED_USERS'], $right['LINKED_USERS'], $leftId, $rightId, $showEqual);
+printDiffBlock('Права', $left['RIGHTS'], $right['RIGHTS'], $leftId, $rightId, $showEqual);
