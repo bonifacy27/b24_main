@@ -67,13 +67,28 @@ $taskIds = array_map(static function (array $task): int {
 
 $taskStages = [];
 if (!empty($taskIds) && !empty($stageIds)) {
-    $taskStageRows = $connection->query(sprintf(
-        'SELECT TASK_ID, STAGE_ID FROM b_tasks_task_stage WHERE TASK_ID IN (%s) AND STAGE_ID IN (%s)',
+    $taskRows = $connection->query(sprintf(
+        'SELECT ID, STAGE_ID FROM b_tasks WHERE ID IN (%s) AND GROUP_ID = %d AND STAGE_ID IN (%s)',
         implode(',', array_map('intval', $taskIds)),
+        $groupId,
         implode(',', array_map('intval', $stageIds))
     ))->fetchAll();
-    foreach ($taskStageRows as $taskStage) {
-        $taskStages[(int)$taskStage['TASK_ID']] = (int)$taskStage['STAGE_ID'];
+    foreach ($taskRows as $taskRow) {
+        $taskStages[(int)$taskRow['ID']] = (int)$taskRow['STAGE_ID'];
+    }
+
+    if (count($taskStages) < count($taskIds)) {
+        $taskStageRows = $connection->query(sprintf(
+            'SELECT TASK_ID, STAGE_ID FROM b_tasks_task_stage WHERE TASK_ID IN (%s) AND STAGE_ID IN (%s)',
+            implode(',', array_map('intval', $taskIds)),
+            implode(',', array_map('intval', $stageIds))
+        ))->fetchAll();
+        foreach ($taskStageRows as $taskStage) {
+            $taskId = (int)$taskStage['TASK_ID'];
+            if (!isset($taskStages[$taskId])) {
+                $taskStages[$taskId] = (int)$taskStage['STAGE_ID'];
+            }
+        }
     }
 }
 
