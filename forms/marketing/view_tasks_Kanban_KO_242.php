@@ -6,7 +6,7 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Tasks\Internals\TaskTable;
 
-$APPLICATION->SetTitle('Канбан: задачи группы 242');
+$APPLICATION->SetTitle('Канбан: задачи группы 242 по стадиям');
 
 if (!Loader::includeModule('tasks')) {
     echo '<div style="color:#b00020;font-weight:600;">Модуль tasks не установлен.</div>';
@@ -155,7 +155,7 @@ foreach ($rows as $task) {
         continue;
     }
     if (!isset($columns[$unassignedColumnId])) {
-        $columns[$unassignedColumnId] = ['title' => 'Без статуса', 'tasks' => []];
+        $columns[$unassignedColumnId] = ['title' => 'Без стадии', 'tasks' => []];
     }
     $columns[$unassignedColumnId]['tasks'][] = $task;
 }
@@ -177,7 +177,7 @@ $formatDeadline = static function (?int $deadlineTs) use ($nowTs): array {
 </style>
 <div class="ko-kanban">
     <div class="ko-toolbar">
-        <a href="<?= htmlspecialcharsbx($groupUrl) ?>" target="_blank">Группа #<?= (int)$groupId ?></a>: все задачи, распределенные по статусам канбана группы.
+        <a href="<?= htmlspecialcharsbx($groupUrl) ?>" target="_blank">Группа #<?= (int)$groupId ?></a>: все задачи, распределенные по стадиям канбан-доски задач группы.
         <span class="ko-legend">Исключены задачи с фразами «КОвнутр» и «КО внутр».</span>
     </div>
     <?php if (empty($rows)): ?>
