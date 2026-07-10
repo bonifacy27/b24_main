@@ -92,12 +92,13 @@ if (!empty($taskIds) && !empty($stageIds)) {
     }
 }
 
+$defaultStageId = $stageIds[0] ?? null;
 $unassignedColumnId = 'unassigned';
 $userIds = [];
 foreach ($rows as &$task) {
     $task['DEADLINE_TS'] = $task['DEADLINE'] instanceof DateTime ? $task['DEADLINE']->getTimestamp() : null;
     $task['CREATED_TS'] = $task['CREATED_DATE'] instanceof DateTime ? $task['CREATED_DATE']->getTimestamp() : null;
-    $task['KANBAN_STAGE_ID'] = $taskStages[(int)$task['ID']] ?? null;
+    $task['KANBAN_STAGE_ID'] = $taskStages[(int)$task['ID']] ?? $defaultStageId;
     $userIds[(int)$task['CREATED_BY']] = true;
     $userIds[(int)$task['RESPONSIBLE_ID']] = true;
 }
