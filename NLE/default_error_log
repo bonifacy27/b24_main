@@ -1,0 +1,224 @@
+[Tue Jul 14 03:49:38.099256 2026] [authn_core:error] [pid 1721] [client 192.168.184.51:57607] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:00:29.006410 2026] [authn_core:error] [pid 1716] [client 172.31.5.9:51924] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:13:19.535780 2026] [authn_core:error] [pid 1716] [client 192.168.71.4:49686] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:14:08.124934 2026] [authn_core:error] [pid 1705] [client 192.168.20.66:58702] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:14:44.825714 2026] [authn_core:error] [pid 1740] [client 172.31.1.58:52965] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:19:53.175670 2026] [authn_core:error] [pid 1744] [client 192.168.184.51:64012] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:30:30.949437 2026] [authn_core:error] [pid 1727] [client 172.31.5.9:51985] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:43:24.224386 2026] [authn_core:error] [pid 1716] [client 192.168.71.4:62556] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:44:10.112821 2026] [authn_core:error] [pid 1705] [client 192.168.20.66:59116] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:44:45.995847 2026] [authn_core:error] [pid 1748] [client 172.31.1.58:53142] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 04:49:59.482459 2026] [authn_core:error] [pid 1719] [client 192.168.184.51:63930] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:00:31.966437 2026] [authn_core:error] [pid 1722] [client 172.31.5.9:52104] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:13:58.444816 2026] [authn_core:error] [pid 1711] [client 192.168.71.4:61068] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:14:12.107160 2026] [authn_core:error] [pid 1705] [client 192.168.20.66:59382] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:14:48.004754 2026] [authn_core:error] [pid 1695] [client 172.31.1.58:53289] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:20:07.931370 2026] [authn_core:error] [pid 1743] [client 192.168.184.51:64429] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:30:33.979537 2026] [authn_core:error] [pid 1723] [client 172.31.5.9:52187] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:44:14.151709 2026] [authn_core:error] [pid 1752] [client 192.168.20.66:59661] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:44:30.145568 2026] [authn_core:error] [pid 1725] [client 192.168.71.4:61378] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:44:49.039539 2026] [authn_core:error] [pid 1715] [client 172.31.1.58:53495] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 05:50:13.051144 2026] [authn_core:error] [pid 1742] [client 192.168.184.51:61600] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:00:36.039653 2026] [authn_core:error] [pid 1727] [client 172.31.5.9:52272] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:14:16.190809 2026] [authn_core:error] [pid 1711] [client 192.168.20.66:60091] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:14:51.080429 2026] [authn_core:error] [pid 1712] [client 172.31.1.58:53682] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:14:55.232988 2026] [authn_core:error] [pid 1715] [client 192.168.71.4:55187] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:20:27.850257 2026] [authn_core:error] [pid 1742] [client 192.168.184.51:61013] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:30:37.981974 2026] [authn_core:error] [pid 1750] [client 172.31.5.9:52350] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:44:18.219043 2026] [authn_core:error] [pid 1754] [client 192.168.20.66:60375] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:44:52.666711 2026] [authn_core:error] [pid 1695] [client 172.31.1.58:53881] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:45:10.890704 2026] [authn_core:error] [pid 1694] [client 192.168.71.4:53443] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 06:50:43.628640 2026] [authn_core:error] [pid 1694] [client 192.168.184.51:64491] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:00:39.511420 2026] [authn_core:error] [pid 1748] [client 172.31.5.9:52393] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:14:20.208127 2026] [authn_core:error] [pid 1690] [client 192.168.20.66:60627] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:14:54.108685 2026] [authn_core:error] [pid 1715] [client 172.31.1.58:54016] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:15:21.158173 2026] [authn_core:error] [pid 1747] [client 192.168.71.4:62432] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:20:59.471324 2026] [authn_core:error] [pid 1727] [client 192.168.184.51:59492] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:30:40.921943 2026] [authn_core:error] [pid 1729] [client 172.31.5.9:52492] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:44:22.272174 2026] [authn_core:error] [pid 1730] [client 192.168.20.66:60989] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:44:55.880282 2026] [authn_core:error] [pid 1716] [client 172.31.1.58:54233] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:45:46.242024 2026] [authn_core:error] [pid 1720] [client 192.168.71.4:53974] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 07:51:13.856283 2026] [authn_core:error] [pid 1714] [client 192.168.184.51:52413] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:00:41.919537 2026] [authn_core:error] [pid 1726] [client 172.31.5.9:52550] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:09:01.256572 2026] [authn_core:error] [pid 1726] [client 192.168.240.9:52674] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:14:24.269869 2026] [authn_core:error] [pid 1718] [client 192.168.20.66:61316] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:14:57.081073 2026] [authn_core:error] [pid 1751] [client 172.31.1.58:54392] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:16:02.204134 2026] [authn_core:error] [pid 1709] [client 192.168.71.4:54693] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:21:20.996504 2026] [authn_core:error] [pid 1733] [client 192.168.184.51:56837] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:30:43.897622 2026] [authn_core:error] [pid 1717] [client 172.31.5.9:52657] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:44:26.279535 2026] [authn_core:error] [pid 1700] [client 192.168.20.66:61599] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:44:59.014955 2026] [authn_core:error] [pid 1704] [client 172.31.1.58:54558] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:46:17.743259 2026] [authn_core:error] [pid 1755] [client 192.168.71.4:62496] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 08:51:26.991244 2026] [authn_core:error] [pid 1706] [client 192.168.184.51:55794] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:00:45.888608 2026] [authn_core:error] [pid 1738] [client 172.31.5.9:52769] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:12:59.842885 2026] [php:error] [pid 1726] [client 192.168.184.38:59305] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 200
+[Tue Jul 14 09:15:00.687083 2026] [authn_core:error] [pid 1708] [client 172.31.1.58:54778] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:15:04.296691 2026] [authn_core:error] [pid 1720] [client 192.168.20.66:61929] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:16:23.340092 2026] [authn_core:error] [pid 1713] [client 192.168.71.4:56510] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:18:48.028922 2026] [php:error] [pid 1722] [client 172.16.112.9:58834] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/type/collection.php on line 192, referer: https://ourtricolortv.nsc.ru/
+[Tue Jul 14 09:21:32.825131 2026] [authn_core:error] [pid 1691] [client 192.168.184.51:49176] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:30:48.325478 2026] [authn_core:error] [pid 1710] [client 172.31.5.9:52920] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:45:12.953493 2026] [authn_core:error] [pid 1748] [client 172.31.1.58:55185] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:46:01.258121 2026] [authn_core:error] [pid 1715] [client 192.168.20.66:62332] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:46:28.429798 2026] [authn_core:error] [pid 1690] [client 192.168.71.4:51538] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 09:51:33.054897 2026] [authn_core:error] [pid 1719] [client 192.168.184.51:52375] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:01:01.537252 2026] [authn_core:error] [pid 1736] [client 172.31.5.9:53080] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:15:25.402784 2026] [authn_core:error] [pid 1724] [client 172.31.1.58:55612] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:16:24.581878 2026] [authn_core:error] [pid 1750] [client 192.168.20.66:62689] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:16:32.961758 2026] [authn_core:error] [pid 1696] [client 192.168.71.4:49885] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:21:42.279815 2026] [authn_core:error] [pid 1747] [client 192.168.184.51:52779] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:31:06.905127 2026] [authn_core:error] [pid 1708] [client 172.31.5.9:53188] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:45:40.949144 2026] [authn_core:error] [pid 1729] [client 172.31.1.58:56139] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:46:58.057209 2026] [authn_core:error] [pid 1691] [client 192.168.71.4:49930] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:47:01.495121 2026] [authn_core:error] [pid 1743] [client 192.168.20.66:62971] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:51:46.362683 2026] [authn_core:error] [pid 1744] [client 192.168.184.51:55403] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 10:57:34.755908 2026] [php:error] [pid 1690] [client 172.22.74.11:60739] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 2377
+[Tue Jul 14 10:58:28.906708 2026] [php:error] [pid 1749] [client 172.22.74.11:61027] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/local/modules/tricolor.schedules/lib/model/Planning/PlanningCollection.php on line 275
+[Tue Jul 14 11:01:22.435942 2026] [authn_core:error] [pid 1719] [client 172.31.5.9:53248] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:02:53.423777 2026] [authn_core:error] [pid 1694] [client 172.16.114.23:60357] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:11:20.792900 2026] [php:error] [pid 1706] [client 192.168.240.133:63661] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/type/date.php on line 122
+[Tue Jul 14 11:12:10.136937 2026] [php:error] [pid 1731] [client 192.168.240.133:64005] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 873
+[Tue Jul 14 11:15:53.359864 2026] [authn_core:error] [pid 1723] [client 172.31.1.58:56456] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:17:15.572900 2026] [php:error] [pid 1738] [client 192.168.240.133:64357] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/collection.php on line 988
+[Tue Jul 14 11:17:21.906464 2026] [authn_core:error] [pid 1705] [client 192.168.20.66:63317] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:17:23.110739 2026] [authn_core:error] [pid 1722] [client 192.168.71.4:55783] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:21:50.246823 2026] [authn_core:error] [pid 1710] [client 192.168.184.51:55206] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:24:03.203979 2026] [php:error] [pid 1728] [client 172.22.74.11:50361] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/collection.php on line 1007
+[Tue Jul 14 11:26:11.094078 2026] [authn_core:error] [pid 1755] [client 192.168.133.11:58299] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:29:12.946893 2026] [php:error] [pid 1705] [client 172.22.74.11:51709] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 188
+[Tue Jul 14 11:31:32.843406 2026] [authn_core:error] [pid 1729] [client 172.31.5.9:53360] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:33:11.332708 2026] [authn_core:error] [pid 1722] [client 172.16.114.23:54071] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:34:19.380967 2026] [php:error] [pid 1703] [client 172.22.74.11:53089] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/collection.php on line 988
+[Tue Jul 14 11:39:49.363244 2026] [php:error] [pid 1706] [client 172.22.74.11:55013] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/entity.php on line 725, referer: https://ourtricolortv.nsc.ru:8891/?back_url=%2Findex.php
+[Tue Jul 14 11:44:56.095915 2026] [php:error] [pid 1739] [client 172.22.74.11:55111] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 190, referer: https://ourtricolortv.nsc.ru:8891/?back_url=%2Findex.php
+[Tue Jul 14 11:46:05.557003 2026] [authn_core:error] [pid 1736] [client 172.31.1.58:56683] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:48:01.535401 2026] [authn_core:error] [pid 1710] [client 192.168.20.66:63653] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:48:04.866241 2026] [authn_core:error] [pid 1718] [client 192.168.71.4:56683] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:49:05.597862 2026] [php:error] [pid 1705] [client 172.22.74.11:56920] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 1381
+[Tue Jul 14 11:50:26.694971 2026] [php:error] [pid 1742] [client 172.22.74.11:55112] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 687, referer: https://ourtricolortv.nsc.ru:8891/?back_url=%2Findex.php
+[Tue Jul 14 11:52:03.491407 2026] [authn_core:error] [pid 25116] [client 192.168.184.51:57412] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 11:54:34.727988 2026] [php:error] [pid 25044] [client 172.22.74.11:58164] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/type/collection.php on line 192
+[Tue Jul 14 11:54:46.291903 2026] [php:error] [pid 1744] [client 172.22.74.11:58165] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/local/modules/tricolor.schedules/lib/model/Planning/PlanningCollection.php on line 275
+[Tue Jul 14 11:56:08.486963 2026] [php:error] [pid 1708] [client 172.22.74.11:55114] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/fields/scalarfield.php on line 67, referer: https://ourtricolortv.nsc.ru:8891/?back_url=%2Findex.php
+[Tue Jul 14 11:56:54.544309 2026] [authn_core:error] [pid 1732] [client 192.168.133.11:58657] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:01:38.889904 2026] [authn_core:error] [pid 1737] [client 172.31.5.9:53481] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:03:35.395707 2026] [authn_core:error] [pid 1694] [client 172.16.114.23:62570] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:16:08.909115 2026] [authn_core:error] [pid 1696] [client 172.31.1.58:56888] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:18:43.365140 2026] [authn_core:error] [pid 1737] [client 192.168.20.66:63925] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:18:54.793288 2026] [authn_core:error] [pid 1735] [client 192.168.71.4:52781] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:22:03.523211 2026] [authn_core:error] [pid 1704] [client 192.168.184.51:50995] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:27:33.135204 2026] [authn_core:error] [pid 1696] [client 192.168.133.11:49807] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:30:36.703211 2026] [authn_core:error] [pid 1729] [client 192.168.184.57:54020] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:31:42.542523 2026] [authn_core:error] [pid 1694] [client 172.31.5.9:53570] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:32:39.811963 2026] [php:error] [pid 1713] [client 192.168.184.108:58874] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/local/modules/tricolor.schedules/lib/model/Planning/PlanningCollection.php on line 42, referer: https://ourtricolortv.nsc.ru:8891/stream/?back_url=%2Fcompany%2Fpersonal%2Fuser%2F5253%2Ftasks%2Ftask%2Fview%2F232803%2Findex.php
+[Tue Jul 14 12:33:40.353474 2026] [authn_core:error] [pid 1718] [client 172.16.114.23:64280] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:37:51.336935 2026] [php:error] [pid 1709] [client 192.168.184.108:52176] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/type/collection.php on line 192, referer: https://ourtricolortv.nsc.ru:8891/stream/?back_url=%2Fcompany%2Fpersonal%2Fuser%2F5253%2Ftasks%2Ftask%2Fview%2F232803%2Findex.php
+[Tue Jul 14 12:43:06.812963 2026] [php:error] [pid 1719] [client 192.168.184.108:49852] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 200, referer: https://ourtricolortv.nsc.ru:8891/stream/?back_url=%2Fcompany%2Fpersonal%2Fuser%2F5253%2Ftasks%2Ftask%2Fview%2F232803%2Findex.php
+[Tue Jul 14 12:46:21.469348 2026] [authn_core:error] [pid 1742] [client 172.31.1.58:57117] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:49:02.146955 2026] [authn_core:error] [pid 1691] [client 192.168.20.66:64296] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:49:22.084843 2026] [authn_core:error] [pid 1719] [client 192.168.71.4:64394] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:52:09.233721 2026] [authn_core:error] [pid 1713] [client 192.168.184.51:61870] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 12:57:56.903904 2026] [authn_core:error] [pid 1727] [client 192.168.133.11:55305] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:01:46.279668 2026] [authn_core:error] [pid 1723] [client 172.31.5.9:53623] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:03:53.460850 2026] [authn_core:error] [pid 1737] [client 172.16.114.23:60081] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:16:23.721916 2026] [authn_core:error] [pid 1714] [client 172.31.1.58:57260] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:19:27.158118 2026] [authn_core:error] [pid 1715] [client 192.168.71.4:65156] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:19:31.770605 2026] [authn_core:error] [pid 1712] [client 192.168.20.66:64597] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:22:10.363240 2026] [authn_core:error] [pid 1703] [client 192.168.184.51:59510] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:27:57.247495 2026] [authn_core:error] [pid 1751] [client 192.168.133.11:50413] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:31:49.864763 2026] [authn_core:error] [pid 1709] [client 172.31.5.9:53770] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:34:05.797629 2026] [authn_core:error] [pid 25041] [client 172.16.114.23:60864] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:46:26.187803 2026] [authn_core:error] [pid 1753] [client 172.31.1.58:58030] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:49:32.221752 2026] [authn_core:error] [pid 1742] [client 192.168.71.4:63552] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:50:14.757910 2026] [authn_core:error] [pid 1748] [client 192.168.20.66:64966] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:52:25.730746 2026] [authn_core:error] [pid 1714] [client 192.168.184.51:50985] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 13:55:21.597938 2026] [php:error] [pid 25366] [client 172.22.74.11:52008] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 873
+[Tue Jul 14 13:58:29.738416 2026] [authn_core:error] [pid 1728] [client 192.168.133.11:58137] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:02:04.134580 2026] [authn_core:error] [pid 1738] [client 172.31.5.9:53840] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:04:12.465394 2026] [authn_core:error] [pid 1744] [client 172.16.114.23:61471] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:16:38.525293 2026] [authn_core:error] [pid 25041] [client 172.31.1.58:58328] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:19:53.472114 2026] [authn_core:error] [pid 1755] [client 192.168.71.4:52725] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:21:12.313107 2026] [authn_core:error] [pid 1754] [client 192.168.20.66:65362] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:22:29.562938 2026] [authn_core:error] [pid 1754] [client 192.168.184.51:57089] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:28:55.609822 2026] [authn_core:error] [pid 1740] [client 192.168.133.11:59562] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:32:17.180730 2026] [authn_core:error] [pid 1749] [client 172.31.5.9:53899] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:33:16.339129 2026] [authn_core:error] [pid 1739] [client 192.168.184.71:56317] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:33:24.656626 2026] [authn_core:error] [pid 1700] [client 192.168.184.71:52425] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:34:18.428144 2026] [authn_core:error] [pid 1695] [client 172.16.114.23:59138] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:35:51.675269 2026] [authn_core:error] [pid 1714] [client 172.31.1.112:53531] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:41:58.693421 2026] [php:error] [pid 1736] [client 192.168.133.20:58060] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 206, referer: https://ourtricolortv.nsc.ru/
+[Tue Jul 14 14:42:15.368951 2026] [php:error] [pid 1719] [client 192.168.133.20:55886] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/text/stringhelper.php on line 27, referer: https://ourtricolortv.nsc.ru/
+[Tue Jul 14 14:45:13.390824 2026] [php:error] [pid 1718] [client 192.168.133.20:59947] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/local/modules/tricolor.schedules/lib/model/Planning/PlanningCollection.php on line 275, referer: https://ourtricolortv.nsc.ru/
+[Tue Jul 14 14:46:41.008241 2026] [authn_core:error] [pid 25116] [client 172.31.1.58:58857] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:50:00.583799 2026] [authn_core:error] [pid 1744] [client 192.168.71.4:60478] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:51:45.640669 2026] [authn_core:error] [pid 1736] [client 192.168.20.66:49286] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:52:37.090334 2026] [authn_core:error] [pid 1747] [client 192.168.184.51:60014] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:59:16.640458 2026] [authn_core:error] [pid 25044] [client 192.168.133.11:58323] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 14:59:45.461904 2026] [authn_core:error] [pid 1748] [client 172.31.1.112:53861] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:02:25.982422 2026] [authn_core:error] [pid 1709] [client 172.31.5.9:54087] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:04:23.380058 2026] [authn_core:error] [pid 1734] [client 172.16.114.23:61859] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:16:53.455903 2026] [authn_core:error] [pid 1735] [client 172.31.1.58:59313] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:20:25.661229 2026] [authn_core:error] [pid 1735] [client 192.168.71.4:56398] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:22:35.271601 2026] [authn_core:error] [pid 1713] [client 192.168.20.66:49634] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:22:43.620151 2026] [authn_core:error] [pid 29147] [client 192.168.184.51:58619] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:27:11.540455 2026] [authn_core:error] [pid 1749] [client 192.168.240.254:63685] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:29:48.272716 2026] [authn_core:error] [pid 1746] [client 192.168.133.11:63251] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:32:34.306072 2026] [authn_core:error] [pid 1724] [client 172.31.5.9:54158] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:34:27.824956 2026] [authn_core:error] [pid 1746] [client 172.16.114.23:62699] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:47:05.880401 2026] [authn_core:error] [pid 1735] [client 172.31.1.58:59751] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:51:00.740327 2026] [authn_core:error] [pid 1706] [client 192.168.71.4:61814] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:52:46.254247 2026] [authn_core:error] [pid 1715] [client 192.168.184.51:62986] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:53:06.045640 2026] [authn_core:error] [pid 1735] [client 192.168.20.66:49937] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 15:59:48.437110 2026] [authn_core:error] [pid 1739] [client 192.168.133.11:62567] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:02:37.766265 2026] [authn_core:error] [pid 1735] [client 172.31.5.9:54267] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:04:28.782933 2026] [authn_core:error] [pid 1710] [client 172.16.114.23:61812] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:17:18.346597 2026] [authn_core:error] [pid 1715] [client 172.31.1.58:60191] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:21:25.800228 2026] [authn_core:error] [pid 1740] [client 192.168.71.4:59244] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:22:46.325107 2026] [authn_core:error] [pid 25032] [client 192.168.184.51:59812] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:23:46.592121 2026] [authn_core:error] [pid 1704] [client 192.168.20.66:50289] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:29:48.667119 2026] [authn_core:error] [pid 1714] [client 192.168.133.11:58963] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:32:41.152698 2026] [authn_core:error] [pid 1704] [client 172.31.5.9:54396] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:34:28.942353 2026] [authn_core:error] [pid 1721] [client 172.16.114.23:53060] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:47:27.709102 2026] [authn_core:error] [pid 1725] [client 172.31.1.58:60704] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:52:05.238817 2026] [authn_core:error] [pid 1755] [client 192.168.71.4:52942] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:53:02.926171 2026] [authn_core:error] [pid 1753] [client 192.168.184.51:62225] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:54:42.382152 2026] [authn_core:error] [pid 1708] [client 192.168.20.66:50561] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 16:59:48.857189 2026] [authn_core:error] [pid 1724] [client 192.168.133.11:60072] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:02:44.720369 2026] [authn_core:error] [pid 1719] [client 172.31.5.9:54456] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:04:32.943348 2026] [authn_core:error] [pid 1742] [client 172.16.114.23:62751] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:17:43.015588 2026] [authn_core:error] [pid 1720] [client 172.31.1.58:61231] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:22:49.194139 2026] [authn_core:error] [pid 1728] [client 192.168.71.4:52122] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:23:07.926370 2026] [authn_core:error] [pid 1748] [client 192.168.184.51:52459] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:25:06.166092 2026] [authn_core:error] [pid 1703] [client 192.168.20.66:50928] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:30:06.600572 2026] [authn_core:error] [pid 25032] [client 192.168.133.11:59256] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:32:45.252977 2026] [authn_core:error] [pid 1742] [client 172.31.5.9:54524] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:34:37.506276 2026] [authn_core:error] [pid 25366] [client 172.16.114.23:49678] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:47:45.418299 2026] [authn_core:error] [pid 1721] [client 172.31.1.58:61719] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:53:11.982248 2026] [authn_core:error] [pid 1744] [client 192.168.184.51:62521] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:53:22.252598 2026] [authn_core:error] [pid 1731] [client 192.168.71.4:63058] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 17:55:56.657375 2026] [authn_core:error] [pid 1706] [client 192.168.20.66:51291] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:00:35.968712 2026] [authn_core:error] [pid 1725] [client 192.168.133.11:61609] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:02:47.247111 2026] [authn_core:error] [pid 1725] [client 172.31.5.9:54672] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:04:38.103536 2026] [authn_core:error] [pid 1704] [client 172.16.114.23:64728] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:17:47.765599 2026] [authn_core:error] [pid 1744] [client 172.31.1.58:62021] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:23:17.273717 2026] [authn_core:error] [pid 1723] [client 192.168.184.51:65524] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:23:53.232426 2026] [authn_core:error] [pid 1709] [client 192.168.71.4:50931] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:26:43.217424 2026] [authn_core:error] [pid 1733] [client 192.168.20.66:51582] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:30:57.457184 2026] [authn_core:error] [pid 1742] [client 192.168.133.11:53079] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:32:49.243179 2026] [authn_core:error] [pid 1715] [client 172.31.5.9:54728] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:47:52.751212 2026] [php:error] [pid 1729] [client 172.16.104.110:56702] PHP Fatal error:  Maximum execution time of 300 seconds exceeded in /home/bitrix/www/bitrix/modules/main/lib/orm/objectify/entityobject.php on line 190, referer: https://kms.tricolor.ru/
+[Tue Jul 14 18:48:00.195966 2026] [authn_core:error] [pid 1753] [client 172.31.1.58:62386] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:53:22.265913 2026] [authn_core:error] [pid 1751] [client 192.168.184.51:49693] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:54:19.225577 2026] [authn_core:error] [pid 1733] [client 192.168.71.4:64453] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 18:57:23.817385 2026] [authn_core:error] [pid 1693] [client 192.168.20.66:51930] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:01:30.192001 2026] [authn_core:error] [pid 1721] [client 192.168.133.11:50730] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:02:50.260953 2026] [authn_core:error] [pid 1755] [client 172.31.5.9:54775] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:18:02.737166 2026] [authn_core:error] [pid 1752] [client 172.31.1.58:62598] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:23:22.553551 2026] [authn_core:error] [pid 1731] [client 192.168.184.51:56507] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:24:54.284085 2026] [authn_core:error] [pid 1742] [client 192.168.71.4:53435] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:28:06.855370 2026] [authn_core:error] [pid 1693] [client 192.168.20.66:52303] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:32:06.436860 2026] [authn_core:error] [pid 1748] [client 192.168.133.11:64447] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:32:51.251051 2026] [authn_core:error] [pid 1742] [client 172.31.5.9:54877] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:48:05.231028 2026] [authn_core:error] [pid 25116] [client 172.31.1.58:62875] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:53:32.280015 2026] [authn_core:error] [pid 1746] [client 192.168.184.51:64632] AH01796: AuthType NTLM configured without corresponding module
+[Tue Jul 14 19:55:29.375481 2026] [authn_core:error] [pid 1712] [client 192.168.71.4:50874] AH01796: AuthType NTLM configured without corresponding module
