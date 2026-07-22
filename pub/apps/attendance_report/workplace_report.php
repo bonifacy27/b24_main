@@ -57,6 +57,16 @@ $dateTo->setTime(0, 0, 0);
 $defaultOfficeFilter = 'Московский пр., 139/1';
 $cabinetFilterRaw = isset($_GET['cabinet_filter']) ? trim((string)$_GET['cabinet_filter']) : '';
 $officeFilterRaw = isset($_GET['office_filter']) ? trim((string)$_GET['office_filter']) : $defaultOfficeFilter;
+$resolveOfficeByReverseAp = static function ($reverseAp): string {
+    if (is_array($reverseAp)) {
+        $reverseAp = isset($reverseAp['VALUE']) ? $reverseAp['VALUE'] : (isset($reverseAp['ID']) ? $reverseAp['ID'] : reset($reverseAp));
+    }
+
+    $turnstileId = (int)trim((string)$reverseAp);
+    if ($turnstileId >= 1 && $turnstileId <= 15) { return 'Московский пр., 139/1'; }
+    if ($turnstileId >= 16 && $turnstileId <= 17) { return 'ул. Рентгена, 5А'; }
+    return '';
+};
 
 $undefinedLegalEntity = 'Не определено';
 $normalizeLegalEntity = static function ($value): string {
@@ -654,7 +664,7 @@ if ($reverseHl) {
     $dateTimeFrom = (clone $dateFrom)->setTime(0, 0, 0);
     $dateTimeTo = (clone $dateTo)->setTime(23, 59, 59);
     $rows = $reverseClass::getList([
-        'select' => ['UF_DATETIME', 'UF_USER_ID', 'UF_IDREVERSE', 'UF_EVENT'],
+        'select' => ['UF_DATETIME', 'UF_USER_ID', 'UF_IDREVERSE', 'UF_EVENT', 'UF_REVERSE_AP'],
         'filter' => ['>=UF_DATETIME' => BitrixDateTime::createFromPhp($dateTimeFrom), '<=UF_DATETIME' => BitrixDateTime::createFromPhp($dateTimeTo)],
         'order' => ['UF_DATETIME' => 'ASC'],
     ]);
@@ -673,10 +683,14 @@ if ($reverseHl) {
 
         if (!isset($reverseEventsByDayAndPass[$dateKey])) { $reverseEventsByDayAndPass[$dateKey] = []; }
         if (!isset($reverseEventsByDayAndPass[$dateKey][$passId])) { $reverseEventsByDayAndPass[$dateKey][$passId] = []; }
+        $eventOffice = $resolveOfficeByReverseAp($row['UF_REVERSE_AP'] ?? '');
+        if ($officeFilterRaw !== '' && $eventOffice !== '' && $eventOffice !== $officeFilterRaw) { continue; }
+
         $reverseEventsByDayAndPass[$dateKey][$passId][] = [
             'TIME' => $eventDateTime,
             'EVENT' => $eventType,
             'USER_ID' => (int)$row['UF_USER_ID'],
+            'OFFICE' => $eventOffice,
         ];
     }
 }
@@ -692,8 +706,10 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $portalUserId = 0;
         $inputEventsCount = 0;
         $outputEventsCount = 0;
+        $visitOffice = '';
         foreach ($events as $event) {
             if ((int)$event['USER_ID'] > 0) { $portalUserId = (int)$event['USER_ID']; }
+            if ($visitOffice === '' && (string)($event['OFFICE'] ?? '') !== '') { $visitOffice = (string)$event['OFFICE']; }
             if ($event['EVENT'] === 'in') {
                 $inputEventsCount++;
                 if ($openEntry === null) { $openEntry = $event['TIME']; }
@@ -713,6 +729,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $hasSingleInputWithoutOutput = $inputEventsCount === 1 && $outputEventsCount === 0;
         if ($workedSeconds <= 0 || (!$hasSingleInputWithoutOutput && $workedSeconds === $fourHoursSeconds)) { continue; }
         $isShortOfficePresence = $hasSingleInputWithoutOutput || $workedSeconds < $fourHoursSeconds;
+        if ($officeFilterRaw !== '' && $visitOffice !== '' && $visitOffice !== $officeFilterRaw) { continue; }
 
         $reverseUser = isset($reverseUsersByPass[$passId]) ? $reverseUsersByPass[$passId] : ['FIO' => '', 'LEGAL_ENTITY' => '', 'CABINET' => '', 'CABINET_NORM' => '', 'CABINET_SOURCE' => ''];
         $reverseUserName = trim((string)$reverseUser['FIO']);
@@ -742,8 +759,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
         $countedInCabinetDailyOffice = false;
 
-        if ($userCabinetNorm !== '' && !empty($userDepartmentIds)) {
-            if ($officeFilterRaw !== '' && !isset($cabinetDirectory[$userCabinetNorm])) { continue; }
+        if ($userCabinetNorm !== '' && !empty($userDepartmentIds) && ($officeFilterRaw === '' || isset($cabinetDirectory[$userCabinetNorm]))) {
             if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm])) {
                 $cabinetDailyOffice[$dateKey][$userCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
             }
@@ -776,7 +792,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
 
         $reverseCabinetNorm = isset($reverseUser['CABINET_NORM']) ? (string)$reverseUser['CABINET_NORM'] : '';
         $reverseCabinetTitle = isset($reverseUser['CABINET']) ? (string)$reverseUser['CABINET'] : '';
-        if ($reverseCabinetNorm !== '') {
+        if ($reverseCabinetNorm !== '' && ($officeFilterRaw === '' || isset($cabinetDirectory[$reverseCabinetNorm]))) {
             if (!isset($cabinetDailyOffice[$dateKey][$reverseCabinetNorm])) {
                 $cabinetDailyOffice[$dateKey][$reverseCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
             }
@@ -799,6 +815,11 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $unknownCabinetNorm = $reverseCabinetNorm !== '' ? $reverseCabinetNorm : $userCabinetNorm;
         $unknownCabinetTitle = $reverseCabinetTitle !== '' ? $reverseCabinetTitle : $userCabinetTitle;
         $unknownCabinetSource = $reverseCabinetTitle !== '' ? (string)($reverseUser['CABINET_SOURCE'] ?? 'Другой источник') : $userCabinetSource;
+        if ($officeFilterRaw !== '' && $visitOffice === $officeFilterRaw && $unknownCabinetNorm !== '' && !isset($cabinetDirectory[$unknownCabinetNorm])) {
+            $unknownCabinetNorm = '';
+            $unknownCabinetTitle = 'Офис: ' . $officeFilterRaw;
+            $unknownCabinetSource = 'По турникету входа/выхода';
+        }
         if ($unknownCabinetNorm !== '' && !$countedInCabinetDailyOffice && ($officeFilterRaw === '' || isset($cabinetDirectory[$unknownCabinetNorm]))) {
             if (!isset($cabinetDailyOffice[$dateKey][$unknownCabinetNorm])) {
                 $cabinetDailyOffice[$dateKey][$unknownCabinetNorm] = ['TOTAL' => 0, 'SHORT_TOTAL' => 0, 'BY_DEPARTMENT' => [], 'SHORT_BY_DEPARTMENT' => [], 'BY_LEGAL_ENTITY' => [], 'SHORT_BY_LEGAL_ENTITY' => []];
@@ -865,6 +886,8 @@ usort($temporaryGuestVisits, static function (array $left, array $right): int {
 
 $unknownEmployees = array_values(array_filter($unknownEmployees, static function (array $employee) use ($managerCabinetScopeIds, $cabinetDirectory, $officeFilterRaw): bool {
     $cabNorm = (string)($employee['CABINET_NORM'] ?? '');
+    $isTurnstileOfficeVisitor = (string)($employee['CABINET_SOURCE'] ?? '') === 'По турникету входа/выхода';
+    if ($isTurnstileOfficeVisitor) { return true; }
     if ($cabNorm === '' || !isset($managerCabinetScopeIds[$cabNorm])) { return false; }
     return $officeFilterRaw === '' || isset($cabinetDirectory[$cabNorm]);
 }));
