@@ -817,7 +817,7 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
         $unknownCabinetSource = $reverseCabinetTitle !== '' ? (string)($reverseUser['CABINET_SOURCE'] ?? 'Другой источник') : $userCabinetSource;
         if ($officeFilterRaw !== '' && $visitOffice === $officeFilterRaw && $unknownCabinetNorm !== '' && !isset($cabinetDirectory[$unknownCabinetNorm])) {
             $unknownCabinetNorm = '';
-            $unknownCabinetTitle = 'Офис: ' . $officeFilterRaw;
+            $unknownCabinetTitle = $userCabinetTitle !== '' ? $userCabinetTitle : ('Офис: ' . $officeFilterRaw);
             $unknownCabinetSource = 'По турникету входа/выхода';
         }
         if ($unknownCabinetNorm !== '' && !$countedInCabinetDailyOffice && ($officeFilterRaw === '' || isset($cabinetDirectory[$unknownCabinetNorm]))) {
