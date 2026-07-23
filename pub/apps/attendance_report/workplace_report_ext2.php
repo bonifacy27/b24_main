@@ -228,8 +228,12 @@ $dateToRaw = isset($_GET['date_to']) ? (string)$_GET['date_to'] : $dateFromRaw;
 $dateFrom = \DateTime::createFromFormat('Y-m-d', $dateFromRaw) ?: new \DateTime();
 $dateTo = \DateTime::createFromFormat('Y-m-d', $dateToRaw) ?: clone $dateFrom;
 if ($dateFrom > $dateTo) { [$dateFrom, $dateTo] = [$dateTo, $dateFrom]; }
+$today = (new \DateTime())->setTime(0, 0, 0);
 $dateFrom->setTime(0, 0, 0);
 $dateTo->setTime(0, 0, 0);
+if ($dateFrom > $today) { $dateFrom = clone $today; }
+if ($dateTo > $today) { $dateTo = clone $today; }
+$maxReportDate = $today->format('Y-m-d');
 
 $defaultOfficeFilter = 'Московский пр., 139/1';
 $normalizeFilterValues = static function ($rawValue): array {
@@ -1587,8 +1591,8 @@ header('Content-Type: text/html; charset=UTF-8');
     <input type="hidden" name="active_tab" id="active-tab-input" value="<?=htmlspecialcharsbx($activeTab)?>">
     <input type="hidden" name="dashboard_chart_mode" value="<?=htmlspecialcharsbx($dashboardChartMode)?>">
     <div class="filters-row">
-        <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>"></label>
-        <label>По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>"></label>
+        <label>С даты: <input type="date" name="date_from" value="<?=htmlspecialcharsbx($dateFrom->format('Y-m-d'))?>" max="<?=htmlspecialcharsbx($maxReportDate)?>"></label>
+        <label>По дату: <input type="date" name="date_to" value="<?=htmlspecialcharsbx($dateTo->format('Y-m-d'))?>" max="<?=htmlspecialcharsbx($maxReportDate)?>"></label>
         <label>Офис: <select name="office_filter"><option value="">Все</option><?php foreach ($availableOffices as $officeOpt): ?><option value="<?=htmlspecialcharsbx($officeOpt)?>" <?= $officeFilterRaw === $officeOpt ? 'selected' : '' ?>><?=htmlspecialcharsbx($officeOpt)?></option><?php endforeach; ?></select></label>
         <label>Кабинет:
             <span class="token-multiselect" id="cabinet-filter-control" data-input-name="cabinet_filter[]" data-selected="<?=htmlspecialcharsbx(json_encode($cabinetFilterValues, JSON_UNESCAPED_UNICODE))?>">
