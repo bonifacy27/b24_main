@@ -1129,8 +1129,7 @@ header('Content-Type: text/html; charset=UTF-8');
 
 <div class="tabs" role="tablist" aria-label="Разделы отчета">
     <button type="button" class="tab-button is-active" data-tab-target="dashboard" role="tab" aria-selected="true">Дашборд загрузки</button>
-    <button type="button" class="tab-button" data-tab-target="employees" role="tab" aria-selected="false">Сотрудники</button>
-    <button type="button" class="tab-button" data-tab-target="unknown" role="tab" aria-selected="false">Прочие посетители</button>
+    <button type="button" class="tab-button" data-tab-target="employees" role="tab" aria-selected="false">Таблица загрузки кабинетов</button>
     <button type="button" class="tab-button" data-tab-target="cabinet-summary" role="tab" aria-selected="false">Сводная таблица по кабинетам</button>
 </div>
 
@@ -1410,37 +1409,6 @@ header('Content-Type: text/html; charset=UTF-8');
             <td><?= (int)$mainTotalOffice ?></td>
         </tr>
     <?php endforeach; ?>
-    </tbody>
-</table>
-</section>
-
-<section class="tab-pane" id="tab-unknown" role="tabpanel">
-<h2>Прочие посетители</h2>
-<div class="report-toolbar"><button type="button" class="export-button" data-export-table="unknown-report-table" data-export-name="unknown_visitors">Экспорт в Excel</button></div>
-<table id="unknown-report-table">
-    <thead>
-    <tr>
-        <th>ЮЛ</th>
-        <th>Сотрудник</th>
-        <th>Кабинет</th>
-        <th>Дата</th>
-    </tr>
-    </thead>
-    <tbody>
-    <?php if (empty($unknownEmployees)): ?>
-        <tr>
-            <td colspan="4">Нет прочих посетителей без определенной структуры или кабинета.</td>
-        </tr>
-    <?php else: ?>
-        <?php foreach ($unknownEmployees as $employee): ?>
-            <tr>
-                <td><?=htmlspecialcharsbx((string)($employee['LEGAL_ENTITY'] !== '' ? $employee['LEGAL_ENTITY'] : $undefinedLegalEntity))?></td>
-                <td title="<?=htmlspecialcharsbx((string)($employee['REASON'] ?? ''))?>"><?=htmlspecialcharsbx((string)$employee['EMPLOYEE'])?></td>
-                <td title="<?=htmlspecialcharsbx((string)($employee['CABINET_SOURCE'] ?? 'Другой источник'))?>"><?=htmlspecialcharsbx((string)$employee['CABINET'])?></td>
-                <td><?=htmlspecialcharsbx((new \DateTime((string)$employee['DATE']))->format('d.m.Y'))?></td>
-            </tr>
-        <?php endforeach; ?>
-    <?php endif; ?>
     </tbody>
 </table>
 </section>
