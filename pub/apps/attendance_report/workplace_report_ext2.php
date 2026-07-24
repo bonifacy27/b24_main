@@ -317,9 +317,14 @@ $companyLegalEntityMap = [
     'ТТ' => 'ТТ',
     '28' => 'КЦ',
     'КЦ' => 'КЦ',
+    '2600' => 'ЦМТ',
+    'ЦМТ' => 'ЦМТ',
 ];
 
 $resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
+    $companyRaw = $normalizeLegalEntity($user['UF_COMPANY'] ?? '');
+    if (isset($companyLegalEntityMap[$companyRaw])) { return $companyLegalEntityMap[$companyRaw]; }
+
     $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
     if (isset($companyLegalEntityMap[$company])) { return $companyLegalEntityMap[$company]; }
 
@@ -364,11 +369,16 @@ $isTemporaryOrGuestPass = static function (string $name): bool {
 };
 
 $companyLegalEntityMap = [
+    '26' => 'НСК',
     'НСК' => 'НСК',
     'УК ТМ' => 'ТМХ',
     'ТМ' => 'ТМХ',
     'ТМХ' => 'ТМХ',
+    '27' => 'ТТ',
     'ТТ' => 'ТТ',
+    '1723' => 'ТМХ',
+    '2600' => 'ЦМТ',
+    'ЦМТ' => 'ЦМТ',
     'НЛЕ' => 'НЛЕ',
     'СМ' => 'СМ',
 ];
@@ -376,6 +386,9 @@ $companyLegalEntityMap = [
 $resolveLegalEntityByUser = static function (array $user, array $companyLegalEntityMap, array $companyEnumValueMap, array $userOfficeEnumValueMap) use ($resolveListDisplayValue, $normalizeLegalEntity): string {
     $office = $resolveListDisplayValue($user['UF_OFFICE'] ?? '', $userOfficeEnumValueMap);
     if (isset($companyLegalEntityMap[$office])) { return $companyLegalEntityMap[$office]; }
+
+    $companyRaw = $normalizeLegalEntity($user['UF_COMPANY'] ?? '');
+    if (isset($companyLegalEntityMap[$companyRaw])) { return $companyLegalEntityMap[$companyRaw]; }
 
     $company = $resolveListDisplayValue($user['UF_COMPANY'] ?? '', $companyEnumValueMap);
     if (isset($companyLegalEntityMap[$company])) { return $companyLegalEntityMap[$company]; }
