@@ -472,7 +472,9 @@ if (!empty($headIds)) {
 
 $departmentUsers = [];
 $userDepartmentsMap = [];
+$userEventDepartmentsMap = [];
 $userCabinetMap = [];
+$userEventCabinetMap = [];
 $userLegalEntityMap = [];
 $userLegalEntityByName = [];
 $portalUserInfoById = [];
@@ -501,8 +503,6 @@ while ($user = $rsUsers->Fetch()) {
             $userLegalEntityByName[$userName] = '';
         }
     }
-    if ((string)$user['ACTIVE'] !== 'Y') { continue; }
-
     $userDepartments = is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']];
     $hasManagerScopeDepartment = false;
     foreach ($userDepartments as $departmentId) {
@@ -522,6 +522,12 @@ while ($user = $rsUsers->Fetch()) {
     }
     $portalUserInfoById[$userId]['HEAD_DEPARTMENTS'] = array_keys($headDepartments);
     if (empty($headDepartments)) { continue; }
+
+    $userEventDepartmentsMap[$userId] = array_keys($headDepartments);
+    $eventCabinet = trim((string)$user['UF_CABINET']);
+    $userEventCabinetMap[$userId] = $eventCabinet !== '' ? $eventCabinet : 'Не указан';
+
+    if ((string)$user['ACTIVE'] !== 'Y') { continue; }
 
     $userDepartmentsMap[$userId] = array_keys($headDepartments);
     foreach ($userDepartmentsMap[$userId] as $headDepId) {
@@ -770,14 +776,14 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             $officePresenceKeys[$dateKey][$employeeKey] = true;
         }
 
-        $userCabinetRaw = $portalUserId > 0 && isset($userCabinetMap[$portalUserId]) ? (string)$userCabinetMap[$portalUserId] : '';
+        $userCabinetRaw = $portalUserId > 0 && isset($userEventCabinetMap[$portalUserId]) ? (string)$userEventCabinetMap[$portalUserId] : '';
         if ($userCabinetRaw === '' && $portalUserId > 0 && isset($portalUserInfoById[$portalUserId])) {
             $userCabinetRaw = (string)$portalUserInfoById[$portalUserId]['CABINET'];
         }
         $userCabinetNorm = $userCabinetRaw !== '' ? $normalizeCabinet($userCabinetRaw) : '';
         $userCabinetTitle = $userCabinetRaw !== '' ? $userCabinetRaw : '';
         $userCabinetSource = $userCabinetRaw !== '' ? 'Из поля UF_OFFICE (на основании данных AD)' : '';
-        $userDepartmentIds = $portalUserId > 0 && isset($userDepartmentsMap[$portalUserId]) ? $userDepartmentsMap[$portalUserId] : [];
+        $userDepartmentIds = $portalUserId > 0 && isset($userEventDepartmentsMap[$portalUserId]) ? $userEventDepartmentsMap[$portalUserId] : [];
         $countedInCabinetDailyOffice = false;
 
         if ($userCabinetNorm !== '' && !empty($userDepartmentIds) && ($officeFilterRaw === '' || isset($cabinetDirectory[$userCabinetNorm]))) {
