@@ -657,6 +657,7 @@ $portalUserInfoById = [];
 $cabinetAssignedTotal = [];
 $departmentCabinetAssignedUsers = [];
 $departmentCabinetLegalEntities = [];
+$inactiveEventAssignedUsers = [];
 $companyEnumValueMap = $getEnumValueMap('USER', 'UF_COMPANY');
 $userOfficeEnumValueMap = $getEnumValueMap('USER', 'UF_OFFICE');
 
@@ -668,6 +669,7 @@ while ($user = $rsUsers->Fetch()) {
     $userLegalEntityMap[$userId] = $resolveLegalEntityByUser($user, $companyLegalEntityMap, $companyEnumValueMap, $userOfficeEnumValueMap);
     $portalUserInfoById[$userId] = [
         'ACTIVE' => (string)$user['ACTIVE'],
+        'NAME' => $userName,
         'CABINET' => trim((string)$user['UF_CABINET']),
         'DEPARTMENTS_RAW' => is_array($user['UF_DEPARTMENT']) ? $user['UF_DEPARTMENT'] : [(int)$user['UF_DEPARTMENT']],
         'LEGAL_ENTITY' => $userLegalEntityMap[$userId],
@@ -982,6 +984,17 @@ foreach ($reverseEventsByDayAndPass as $dateKey => $passes) {
             foreach (['SHORT_TOTAL', 'BY_DEPARTMENT', 'SHORT_BY_DEPARTMENT', 'BY_LEGAL_ENTITY', 'SHORT_BY_LEGAL_ENTITY'] as $officeKey) {
                 if (!isset($cabinetDailyOffice[$dateKey][$userCabinetNorm][$officeKey])) {
                     $cabinetDailyOffice[$dateKey][$userCabinetNorm][$officeKey] = in_array($officeKey, ['SHORT_TOTAL'], true) ? 0 : [];
+                }
+            }
+
+            if ($portalUserId > 0 && isset($portalUserInfoById[$portalUserId]) && (string)$portalUserInfoById[$portalUserId]['ACTIVE'] !== 'Y') {
+                foreach ($userDepartmentIds as $inactiveDepartmentId) {
+                    $inactiveDepartmentId = (int)$inactiveDepartmentId;
+                    if ($inactiveDepartmentId <= 0) { continue; }
+                    if (!isset($inactiveEventAssignedUsers[$dateKey])) { $inactiveEventAssignedUsers[$dateKey] = []; }
+                    if (!isset($inactiveEventAssignedUsers[$dateKey][$inactiveDepartmentId])) { $inactiveEventAssignedUsers[$dateKey][$inactiveDepartmentId] = []; }
+                    if (!isset($inactiveEventAssignedUsers[$dateKey][$inactiveDepartmentId][$userCabinetNorm])) { $inactiveEventAssignedUsers[$dateKey][$inactiveDepartmentId][$userCabinetNorm] = []; }
+                    $inactiveEventAssignedUsers[$dateKey][$inactiveDepartmentId][$userCabinetNorm][$portalUserId] = (string)($portalUserInfoById[$portalUserId]['NAME'] ?? ('ID ' . $portalUserId));
                 }
             }
 
@@ -1812,6 +1825,11 @@ header('Content-Type: text/html; charset=UTF-8');
                 if ($norm === '' || ($officeFilterRaw !== '' && !isset($cabinetDirectory[$norm]))) { continue; }
                 $departmentCabinets[$norm] = true;
             }
+            if (!empty($inactiveEventAssignedUsers[$dateKey][$departmentId])) {
+                foreach ($inactiveEventAssignedUsers[$dateKey][$departmentId] as $inactiveCabNorm => $_inactiveUsers) {
+                    if ($inactiveCabNorm !== '' && ($officeFilterRaw === '' || isset($cabinetDirectory[$inactiveCabNorm]))) { $departmentCabinets[$inactiveCabNorm] = true; }
+                }
+            }
 
             foreach (array_keys($departmentCabinets) as $cabNorm) {
                 if ($hasCabinetFilter && !isset($cabinetFilterNorms[$cabNorm])) { continue; }
@@ -1823,12 +1841,17 @@ header('Content-Type: text/html; charset=UTF-8');
                 $departmentLegalCounts = isset($dayData['BY_DEPARTMENT'][$departmentId]) && is_array($dayData['BY_DEPARTMENT'][$departmentId]) ? $dayData['BY_DEPARTMENT'][$departmentId] : [];
                 $shortDepartmentLegalCounts = isset($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) && is_array($dayData['SHORT_BY_DEPARTMENT'][$departmentId]) ? $dayData['SHORT_BY_DEPARTMENT'][$departmentId] : [];
                 $departmentLegalEntityNames = isset($departmentCabinetLegalEntities[$departmentId][$cabNorm]) ? array_keys($departmentCabinetLegalEntities[$departmentId][$cabNorm]) : [];
+                $departmentLegalEntityNames = array_values(array_unique(array_merge($departmentLegalEntityNames, array_keys($departmentLegalCounts), array_keys($shortDepartmentLegalCounts))));
                 sort($departmentLegalEntityNames, SORT_NATURAL | SORT_FLAG_CASE);
                 $departmentLegalEntitiesTitle = !empty($departmentLegalEntityNames) ? implode(', ', $departmentLegalEntityNames) : $undefinedLegalEntity;
                 $officeCount = array_sum($departmentLegalCounts);
                 $shortOfficeCount = array_sum($shortDepartmentLegalCounts);
 
                 $departmentAssignedUsersRaw = isset($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) && is_array($departmentCabinetAssignedUsers[$departmentId][$cabNorm]) ? $departmentCabinetAssignedUsers[$departmentId][$cabNorm] : [];
+                if (isset($inactiveEventAssignedUsers[$dateKey][$departmentId][$cabNorm])) {
+                    $departmentAssignedUsersRaw += $inactiveEventAssignedUsers[$dateKey][$departmentId][$cabNorm];
+                }
+                $assignedCount = count($departmentAssignedUsersRaw);
                 $departmentAssignedUsers = [];
                 foreach ($departmentAssignedUsersRaw as $assignedUserId => $assignedUserName) {
                     $assignedUserName = trim((string)$assignedUserName);
@@ -1859,6 +1882,23 @@ header('Content-Type: text/html; charset=UTF-8');
                             'DEPARTMENT' => (string)$assignedDepartmentSummary['DEPARTMENT'],
                             'HEAD' => $assignedHeadName,
                             'EMPLOYEE' => $assignedUserName,
+                        ];
+                    }
+                }
+                foreach (($inactiveEventAssignedUsers[$dateKey] ?? []) as $inactiveDepartmentId => $inactiveCabinets) {
+                    if (!isset($inactiveCabinets[$cabNorm]) || !isset($departments[$inactiveDepartmentId])) { continue; }
+                    $inactiveHeadUserId = (int)$departments[$inactiveDepartmentId]['UF_HEAD'];
+                    $inactiveHeadName = isset($headsMap[$inactiveHeadUserId]) ? $headsMap[$inactiveHeadUserId] : 'Не назначен';
+                    $inactiveDepartmentSummary = isset($headOrgSummaryMap[$inactiveHeadUserId]) ? $headOrgSummaryMap[$inactiveHeadUserId] : ['CEO1' => '', 'DEPARTMENT' => ''];
+                    foreach ($inactiveCabinets[$cabNorm] as $inactiveUserId => $inactiveUserName) {
+                        $inactiveUserName = trim((string)$inactiveUserName);
+                        if ($inactiveUserName === '') { continue; }
+                        $cabinetAssignedEmployees[] = [
+                            'LEGAL_ENTITY' => isset($userLegalEntityMap[(int)$inactiveUserId]) && $userLegalEntityMap[(int)$inactiveUserId] !== '' ? $userLegalEntityMap[(int)$inactiveUserId] : $undefinedLegalEntity,
+                            'CEO1' => (string)$inactiveDepartmentSummary['CEO1'],
+                            'DEPARTMENT' => (string)$inactiveDepartmentSummary['DEPARTMENT'],
+                            'HEAD' => $inactiveHeadName,
+                            'EMPLOYEE' => $inactiveUserName,
                         ];
                     }
                 }
