@@ -64,7 +64,8 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 
 const DSA_SCHEDULE_HLBLOCK_ID = 13;
-const DSA_WORK_SCHEDULE_ID = 'b380491a-a5da-11ec-810e-00505690fbe1';
+const DSA_GROUP_SCHEDULE_HLBLOCK_ID = 2;
+const DSA_WORK_SCHEDULE_ID = '6c24d01d-bff8-11e6-826d-001cc060580d';
 const DSA_WORK_SCHEDULE_GROUP_ID = 46;
 const DSA_VACATION_GROUP_ID = 44;
 
@@ -171,6 +172,36 @@ function dsaActiveSchedules(string $staffGuid): array
     return $result;
 }
 
+/**
+ * Возвращает записи HL-блока 2 для сотрудника строго на текущий день.
+ * Этот источник используется только для определения членства в группе 46.
+ */
+function dsaTodayGroupSchedules(string $staffGuid): array
+{
+    if (!Loader::includeModule('highloadblock')) {
+        throw new RuntimeException('Модуль highloadblock недоступен.');
+    }
+    $block = HighloadBlockTable::getById(DSA_GROUP_SCHEDULE_HLBLOCK_ID)->fetch();
+    if (!$block) {
+        throw new RuntimeException('HL-блок ID=' . DSA_GROUP_SCHEDULE_HLBLOCK_ID . ' не найден.');
+    }
+
+    $dataClass = HighloadBlockTable::compileEntity($block)->getDataClass();
+    $today = date('Y-m-d');
+    $rows = $dataClass::getList([
+        'filter' => ['=UF_STAFF_ID' => $staffGuid],
+        'order' => ['UF_DATE' => 'DESC', 'ID' => 'DESC'],
+    ]);
+    $result = [];
+    while ($row = $rows->fetch()) {
+        if (dsaDate($row['UF_DATE'] ?? '') === $today) {
+            $result[] = $row;
+        }
+    }
+
+    return $result;
+}
+
 function dsaHasGroup(array $groups, int $groupId): bool
 {
     return in_array($groupId, array_map('intval', $groups), true);
@@ -268,13 +299,14 @@ try {
     $staff = $staffRows[0];
     $guid = dsaValue($staff['Staff_ID']);
     $activeSchedules = dsaActiveSchedules($guid);
+    $todayGroupSchedules = dsaTodayGroupSchedules($guid);
     $schedule = $activeSchedules[0] ?? null;
     $birthDate = dsaDate($staff['Staff_Birthdate'] ?? '');
     $hiringDate = dsaDate($staff['Staff_HiringDate'] ?? '');
     $workFormat = $schedule ? dsaValue($schedule['UF_WORK_FORMAT'] ?? '') : '';
     $needsScheduleGroup = false;
-    foreach ($activeSchedules as $activeSchedule) {
-        if (strcasecmp(dsaValue($activeSchedule['UF_SCHEDULE_ID'] ?? ''), DSA_WORK_SCHEDULE_ID) === 0) {
+    foreach ($todayGroupSchedules as $todayGroupSchedule) {
+        if (strcasecmp(dsaValue($todayGroupSchedule['UF_SCHED_ID'] ?? ''), DSA_WORK_SCHEDULE_ID) === 0) {
             $needsScheduleGroup = true;
             break;
         }
@@ -317,8 +349,19 @@ try {
             'UF_FORMAT_END_DATE' => dsaDate($activeSchedule['UF_FORMAT_END_DATE'] ?? ''),
         ]);
     }
-    dsaLine('Условие группы 46: UF_SCHEDULE_ID=' . DSA_WORK_SCHEDULE_ID .
-        '; период включает ' . date('Y-m-d') . '; результат=' . ($needsScheduleGroup ? 'Y' : 'N'));
+    if (!$todayGroupSchedules) {
+        dsaLine('Записи HL-блока 2 на текущий день: <не найдены>');
+    }
+    foreach ($todayGroupSchedules as $index => $todayGroupSchedule) {
+        dsaDumpSource('Запись HL-блока 2 на текущий день #' . ($index + 1), [
+            'ID' => $todayGroupSchedule['ID'] ?? '',
+            'UF_STAFF_ID' => $todayGroupSchedule['UF_STAFF_ID'] ?? '',
+            'UF_SCHED_ID' => $todayGroupSchedule['UF_SCHED_ID'] ?? '',
+            'UF_DATE' => dsaDate($todayGroupSchedule['UF_DATE'] ?? ''),
+        ]);
+    }
+    dsaLine('Условие группы 46 по HL-блоку 2: UF_SCHED_ID=' . DSA_WORK_SCHEDULE_ID .
+        '; UF_DATE=' . date('Y-m-d') . '; результат=' . ($needsScheduleGroup ? 'Y' : 'N'));
 
     $updates = [];
     $hasMismatch = false;
