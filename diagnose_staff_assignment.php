@@ -64,7 +64,7 @@ use Bitrix\Main\Application;
 use Bitrix\Main\Loader;
 
 const DSA_SCHEDULE_HLBLOCK_ID = 13;
-const DSA_WORK_SCHEDULE_ID = '6c24d01d-bff8-11e6-826d-001cc060580d';
+const DSA_WORK_SCHEDULE_ID = 'b380491a-a5da-11ec-810e-00505690fbe1';
 const DSA_WORK_SCHEDULE_GROUP_ID = 46;
 const DSA_VACATION_GROUP_ID = 44;
 
@@ -145,7 +145,7 @@ function dsaStaffByName(\Bitrix\Main\DB\Connection $connection, array $user): ar
     return $rows;
 }
 
-function dsaActiveSchedule(string $staffGuid): ?array
+function dsaActiveSchedules(string $staffGuid): array
 {
     if (!Loader::includeModule('highloadblock')) {
         throw new RuntimeException('Модуль highloadblock недоступен.');
@@ -160,14 +160,15 @@ function dsaActiveSchedule(string $staffGuid): ?array
         'filter' => ['=UF_STAFF_ID' => $staffGuid],
         'order' => ['UF_FORMAT_START_DATE' => 'DESC', 'ID' => 'DESC'],
     ]);
+    $result = [];
     while ($row = $rows->fetch()) {
         $start = dsaDate($row['UF_FORMAT_START_DATE'] ?? '');
         $end = dsaDate($row['UF_FORMAT_END_DATE'] ?? '');
         if (($start === '' || $start <= $today) && ($end === '' || $end >= $today)) {
-            return $row;
+            $result[] = $row;
         }
     }
-    return null;
+    return $result;
 }
 
 function dsaHasGroup(array $groups, int $groupId): bool
@@ -191,6 +192,41 @@ function dsaCheck(string $name, string $actual, string $expected): bool
     $ok = $actual === $expected;
     dsaLine(sprintf('[%s] %s: current=%s; expected=%s', $ok ? 'OK' : 'MISMATCH', $name, $actual ?: '<empty>', $expected ?: '<empty>'));
     return $ok;
+}
+
+/**
+ * Возвращает значения списка пользовательского поля в двух представлениях:
+ * ID => название и название => ID.
+ */
+function dsaUserFieldEnum(string $fieldName): array
+{
+    $field = \CUserTypeEntity::GetList([], [
+        'ENTITY_ID' => 'USER',
+        'FIELD_NAME' => $fieldName,
+    ])->Fetch();
+    if (!$field) {
+        throw new RuntimeException('Пользовательское поле ' . $fieldName . ' не найдено.');
+    }
+
+    $byId = [];
+    $byValue = [];
+    $rows = \CUserFieldEnum::GetList(['SORT' => 'ASC'], ['USER_FIELD_ID' => (int)$field['ID']]);
+    while ($row = $rows->Fetch()) {
+        $id = (int)$row['ID'];
+        $value = dsaValue($row['VALUE']);
+        $byId[$id] = $value;
+        $byValue[$value] = $id;
+    }
+
+    return ['by_id' => $byId, 'by_value' => $byValue];
+}
+
+function dsaDumpSource(string $source, array $values): void
+{
+    dsaLine($source . ':');
+    foreach ($values as $name => $value) {
+        dsaLine('  ' . $name . '=' . (dsaValue($value) !== '' ? dsaValue($value) : '<empty>'));
+    }
 }
 
 $arguments = dsaArguments();
@@ -231,32 +267,89 @@ try {
     }
     $staff = $staffRows[0];
     $guid = dsaValue($staff['Staff_ID']);
-    $schedule = dsaActiveSchedule($guid);
+    $activeSchedules = dsaActiveSchedules($guid);
+    $schedule = $activeSchedules[0] ?? null;
     $birthDate = dsaDate($staff['Staff_Birthdate'] ?? '');
     $hiringDate = dsaDate($staff['Staff_HiringDate'] ?? '');
     $workFormat = $schedule ? dsaValue($schedule['UF_WORK_FORMAT'] ?? '') : '';
-    $scheduleGuid = $schedule ? dsaValue($schedule['UF_SCHEDULE_ID'] ?? '') : '';
-    $needsScheduleGroup = strcasecmp($scheduleGuid, DSA_WORK_SCHEDULE_ID) === 0;
+    $needsScheduleGroup = false;
+    foreach ($activeSchedules as $activeSchedule) {
+        if (strcasecmp(dsaValue($activeSchedule['UF_SCHEDULE_ID'] ?? ''), DSA_WORK_SCHEDULE_ID) === 0) {
+            $needsScheduleGroup = true;
+            break;
+        }
+    }
     $subdivision = dsaValue($staff['Staff_Subdivision'] ?? '');
     $notes = dsaValue($staff['Staff_Notes'] ?? '');
     $needsVacationGroup = in_array($subdivision, ['Сотрудники НСК', 'Сотрудники НСК (бывшие КЦ)'], true) || mb_stripos($notes, 'ПЛОТПУСК') !== false;
     $groups = \CUser::GetUserGroup((int)$user['ID']);
 
+    $workFormatEnums = dsaUserFieldEnum('UF_WORK_FORMAT');
+    $currentWorkFormatId = (int)dsaValue($user['UF_WORK_FORMAT'] ?? 0);
+    $currentWorkFormatName = $workFormatEnums['by_id'][$currentWorkFormatId] ?? '';
+    $targetWorkFormatId = $workFormatEnums['by_value'][$workFormat] ?? 0;
+
+    dsaDumpSource('Поля пользователя', [
+        'UF_1C_GUID' => $user['UF_1C_GUID'] ?? '',
+        'PERSONAL_BIRTHDAY' => dsaDate($user['PERSONAL_BIRTHDAY'] ?? ''),
+        'UF_WEBSLON_ABSENCE_DATE_OF_HIRING' => dsaDate($user['UF_WEBSLON_ABSENCE_DATE_OF_HIRING'] ?? ''),
+        'UF_WORK_FORMAT_ID' => $currentWorkFormatId,
+        'UF_WORK_FORMAT_NAME' => $currentWorkFormatName,
+        'GROUPS' => implode(',', array_map('intval', $groups)),
+    ]);
+    dsaDumpSource('SQL GateDB.dbo.Staff_1CZUP', [
+        'Staff_ID' => $guid,
+        'Staff_Birthdate' => $birthDate,
+        'Staff_HiringDate' => $hiringDate,
+        'Staff_Subdivision' => $subdivision,
+        'Staff_Notes' => $notes,
+    ]);
+    if (!$activeSchedules) {
+        dsaLine('Действующие записи HL-блока 13: <не найдены>');
+    }
+    foreach ($activeSchedules as $index => $activeSchedule) {
+        dsaDumpSource('Действующая запись HL-блока 13 #' . ($index + 1), [
+            'ID' => $activeSchedule['ID'] ?? '',
+            'UF_STAFF_ID' => $activeSchedule['UF_STAFF_ID'] ?? '',
+            'UF_SCHEDULE_ID' => $activeSchedule['UF_SCHEDULE_ID'] ?? '',
+            'UF_WORK_FORMAT' => $activeSchedule['UF_WORK_FORMAT'] ?? '',
+            'UF_FORMAT_START_DATE' => dsaDate($activeSchedule['UF_FORMAT_START_DATE'] ?? ''),
+            'UF_FORMAT_END_DATE' => dsaDate($activeSchedule['UF_FORMAT_END_DATE'] ?? ''),
+        ]);
+    }
+    dsaLine('Условие группы 46: UF_SCHEDULE_ID=' . DSA_WORK_SCHEDULE_ID .
+        '; период включает ' . date('Y-m-d') . '; результат=' . ($needsScheduleGroup ? 'Y' : 'N'));
+
     $updates = [];
+    $hasMismatch = false;
     if (!dsaCheck('UF_1C_GUID', dsaValue($user['UF_1C_GUID'] ?? ''), $guid)) {
+        $hasMismatch = true;
         $updates['UF_1C_GUID'] = $guid;
     }
     if (!dsaCheck('PERSONAL_BIRTHDAY', dsaDate($user['PERSONAL_BIRTHDAY'] ?? ''), $birthDate)) {
+        $hasMismatch = true;
         $updates['PERSONAL_BIRTHDAY'] = dsaBitrixDate($birthDate);
     }
     if (!dsaCheck('UF_WEBSLON_ABSENCE_DATE_OF_HIRING', dsaDate($user['UF_WEBSLON_ABSENCE_DATE_OF_HIRING'] ?? ''), $hiringDate)) {
+        $hasMismatch = true;
         $updates['UF_WEBSLON_ABSENCE_DATE_OF_HIRING'] = dsaBitrixDate($hiringDate);
     }
-    if (!dsaCheck('UF_WORK_FORMAT', dsaValue($user['UF_WORK_FORMAT'] ?? ''), $workFormat)) {
-        $updates['UF_WORK_FORMAT'] = $workFormat;
+    if (!dsaCheck('UF_WORK_FORMAT (название)', $currentWorkFormatName, $workFormat)) {
+        $hasMismatch = true;
+        if ($workFormat === '') {
+            $updates['UF_WORK_FORMAT'] = '';
+        } elseif ($targetWorkFormatId <= 0) {
+            dsaLine('[ERROR] В списке UF_WORK_FORMAT не найдено значение с названием «' . $workFormat . '».');
+        } else {
+            $updates['UF_WORK_FORMAT'] = $targetWorkFormatId;
+        }
     }
-    dsaCheck('Группа 46 «Графики работы»', dsaHasGroup($groups, DSA_WORK_SCHEDULE_GROUP_ID) ? 'Y' : 'N', $needsScheduleGroup ? 'Y' : 'N');
-    dsaCheck('Группа 44 «Планирование отпуска»', dsaHasGroup($groups, DSA_VACATION_GROUP_ID) ? 'Y' : 'N', $needsVacationGroup ? 'Y' : 'N');
+    if (!dsaCheck('Группа 46 «Графики работы»', dsaHasGroup($groups, DSA_WORK_SCHEDULE_GROUP_ID) ? 'Y' : 'N', $needsScheduleGroup ? 'Y' : 'N')) {
+        $hasMismatch = true;
+    }
+    if (!dsaCheck('Группа 44 «Планирование отпуска»', dsaHasGroup($groups, DSA_VACATION_GROUP_ID) ? 'Y' : 'N', $needsVacationGroup ? 'Y' : 'N')) {
+        $hasMismatch = true;
+    }
 
     $newGroups = $groups;
     dsaSetGroup($newGroups, DSA_WORK_SCHEDULE_GROUP_ID, $needsScheduleGroup);
@@ -266,7 +359,7 @@ try {
     sort($oldGroups);
     $groupsChanged = $oldGroups !== $newGroups;
 
-    if (!$updates && !$groupsChanged) {
+    if (!$hasMismatch) {
         dsaLine('Результат: все проверяемые значения актуальны.');
     } elseif (!$arguments['run']) {
         dsaLine('Результат: найдены расхождения. Для исправления повторите запуск с --run (или run=Y).');
