@@ -100,7 +100,22 @@ function dsaArguments(): array
 
 function dsaLine(string $message): void
 {
-    echo dsaCli() ? $message . PHP_EOL : htmlspecialcharsbx($message) . '<br>' . PHP_EOL;
+    if (dsaCli()) {
+        echo $message . PHP_EOL;
+        return;
+    }
+
+    $class = 'dsa-line';
+    if (strpos($message, '[OK]') === 0 || strpos($message, 'UPDATED:') === 0) {
+        $class .= ' dsa-success';
+    } elseif (strpos($message, '[MISMATCH]') === 0) {
+        $class .= ' dsa-warning';
+    } elseif (strpos($message, '[ERROR]') === 0 || strpos($message, 'Ошибка:') === 0) {
+        $class .= ' dsa-error';
+    } elseif (substr($message, -1) === ':') {
+        $class .= ' dsa-heading';
+    }
+    echo '<div class="' . $class . '">' . htmlspecialcharsbx($message) . '</div>' . PHP_EOL;
 }
 
 function dsaValue($value): string
@@ -254,20 +269,62 @@ function dsaUserFieldEnum(string $fieldName): array
 
 function dsaDumpSource(string $source, array $values): void
 {
+    if (!dsaCli()) {
+        echo '<section class="dsa-card"><h2>' . htmlspecialcharsbx($source) . '</h2><dl>';
+        foreach ($values as $name => $value) {
+            $displayValue = dsaValue($value) !== '' ? dsaValue($value) : '<empty>';
+            echo '<div><dt>' . htmlspecialcharsbx((string)$name) . '</dt><dd>' .
+                htmlspecialcharsbx($displayValue) . '</dd></div>';
+        }
+        echo '</dl></section>';
+        return;
+    }
+
     dsaLine($source . ':');
     foreach ($values as $name => $value) {
         dsaLine('  ' . $name . '=' . (dsaValue($value) !== '' ? dsaValue($value) : '<empty>'));
     }
 }
 
-$arguments = dsaArguments();
-if ($arguments['user_id'] <= 0) {
-    dsaLine('Ошибка: укажите пользователя: --user-id=123 или ?user_id=123');
-    exit(1);
+function dsaRenderWebPageStart(int $selectedUserId): void
+{
+    header('Content-Type: text/html; charset=UTF-8');
+    echo '<!doctype html><html lang="ru"><head><meta charset="utf-8">';
+    echo '<meta name="viewport" content="width=device-width,initial-scale=1">';
+    echo '<title>Диагностика кадровых данных</title><style>
+        :root{color-scheme:light;--bg:#f3f6fb;--surface:#fff;--text:#172033;--muted:#65708a;--line:#dfe5ef;--primary:#315efb;--ok:#16835b;--ok-bg:#eaf8f2;--warn:#a15c00;--warn-bg:#fff5df;--err:#c13232;--err-bg:#ffeded}
+        *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.dsa-shell{max-width:1180px;margin:0 auto;padding:36px 24px 60px}.dsa-hero{margin-bottom:24px}.dsa-hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.02em}.dsa-hero p{margin:0;color:var(--muted)}.dsa-toolbar,.dsa-results{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 8px 28px rgba(29,45,75,.07)}.dsa-toolbar{padding:20px;margin-bottom:22px}.dsa-form{display:grid;grid-template-columns:minmax(220px,1fr) minmax(320px,2fr) auto;gap:12px;align-items:end}.dsa-field label{display:block;margin:0 0 6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.dsa-field input,.dsa-field select{width:100%;height:44px;border:1px solid #cbd4e3;border-radius:9px;background:#fff;padding:0 12px;font:inherit;color:var(--text)}.dsa-button{height:44px;border:0;border-radius:9px;padding:0 22px;background:var(--primary);color:#fff;font-weight:700;cursor:pointer}.dsa-results{padding:22px}.dsa-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}.dsa-card{border:1px solid var(--line);border-radius:12px;padding:17px;background:#fbfcfe}.dsa-card h2{font-size:16px;margin:0 0 12px}.dsa-card dl{margin:0}.dsa-card dl div{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(0,1.2fr);gap:12px;padding:7px 0;border-top:1px solid #edf0f5}.dsa-card dt{color:var(--muted)}.dsa-card dd{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.dsa-line{padding:9px 12px;margin:7px 0;border-radius:8px;background:#f5f7fa;overflow-wrap:anywhere}.dsa-success{color:var(--ok);background:var(--ok-bg);border-left:4px solid var(--ok)}.dsa-warning{color:var(--warn);background:var(--warn-bg);border-left:4px solid #e49a20}.dsa-error{color:var(--err);background:var(--err-bg);border-left:4px solid var(--err)}.dsa-heading{margin-top:18px;font-weight:700;background:transparent;padding-left:0}.dsa-empty{padding:34px;text-align:center;color:var(--muted)}@media(max-width:760px){.dsa-shell{padding:22px 14px}.dsa-form{grid-template-columns:1fr}.dsa-grid{grid-template-columns:1fr}.dsa-card dl div{grid-template-columns:1fr;gap:2px}}
+    </style></head><body><main class="dsa-shell"><header class="dsa-hero"><h1>Диагностика кадровых данных</h1><p>Проверка полей пользователя, SQL и кадровых расписаний HL-блоков</p></header>';
+    echo '<section class="dsa-toolbar"><form class="dsa-form" method="get"><div class="dsa-field"><label for="user-search">Поиск</label><input id="user-search" type="search" placeholder="ФИО или логин"></div><div class="dsa-field"><label for="user-id">Пользователь</label><select id="user-id" name="user_id" required><option value="">Выберите пользователя</option>';
+    $by = 'last_name';
+    $order = 'asc';
+    $users = \CUser::GetList($by, $order, ['ACTIVE' => 'Y'], ['FIELDS' => ['ID', 'LOGIN', 'NAME', 'LAST_NAME', 'SECOND_NAME']]);
+    while ($item = $users->Fetch()) {
+        $id = (int)$item['ID'];
+        $label = trim(dsaValue($item['LAST_NAME']) . ' ' . dsaValue($item['NAME']) . ' ' . dsaValue($item['SECOND_NAME'])) . ' (' . dsaValue($item['LOGIN']) . ')';
+        echo '<option value="' . $id . '"' . ($id === $selectedUserId ? ' selected' : '') . '>' . htmlspecialcharsbx($label) . '</option>';
+    }
+    echo '</select></div><button class="dsa-button" type="submit">Проверить</button></form></section><section class="dsa-results">';
+    echo '<script>const q=document.getElementById("user-search"),s=document.getElementById("user-id");q.addEventListener("input",()=>{const v=q.value.toLocaleLowerCase("ru");for(const o of s.options){o.hidden=o.value!==""&&!o.text.toLocaleLowerCase("ru").includes(v)}});</script>';
 }
 
+function dsaRenderWebPageEnd(): void
+{
+    echo '</section></main></body></html>';
+}
+
+$arguments = dsaArguments();
 if (!dsaCli()) {
-    echo '<pre style="white-space:pre-wrap">';
+    dsaRenderWebPageStart((int)$arguments['user_id']);
+}
+if ($arguments['user_id'] <= 0) {
+    if (!dsaCli()) {
+        echo '<div class="dsa-empty">Выберите сотрудника, чтобы запустить диагностику.</div>';
+        dsaRenderWebPageEnd();
+        exit;
+    }
+    dsaLine('Ошибка: укажите пользователя: --user-id=123 или ?user_id=123');
+    exit(1);
 }
 
 $by = 'id';
@@ -426,5 +483,5 @@ try {
 }
 
 if (!dsaCli()) {
-    echo '</pre>';
+    dsaRenderWebPageEnd();
 }
