@@ -98,7 +98,9 @@ php -f diagnose_staff_assignment.php -- --user-id=123
 php -f diagnose_staff_assignment.php -- --user-id=123 --run
 ```
 
-В браузере используйте `?user_id=123`; для исправления добавьте `&run=Y`.
+В браузере используйте `/pub/apps/tools/diagnose_staff_assignment.php?user_id=123`;
+для исправления добавьте `&run=Y`. Скрипт автоматически находит корень сайта,
+даже когда размещён во вложенном каталоге `/pub/apps/tools`.
 Диагностика является режимом по умолчанию и ничего не изменяет.
 
 ---

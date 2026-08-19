@@ -13,14 +13,50 @@
  * исправление полей и состава групп.
  */
 
-$_SERVER['DOCUMENT_ROOT'] = realpath(__DIR__);
-$DOCUMENT_ROOT = $_SERVER['DOCUMENT_ROOT'];
-
 define('NO_KEEP_STATISTIC', true);
 define('NO_AGENT_STATISTIC', true);
 define('NO_AGENT_CHECK', true);
 define('NOT_CHECK_PERMISSIONS', true);
 
+/**
+ * Находит корень сайта и при запуске из вложенного каталога, и из CLI.
+ * Нельзя использовать __DIR__ как DOCUMENT_ROOT: в production скрипт лежит в
+ * /pub/apps/tools, а каталог bitrix расположен в корне сайта.
+ */
+function dsaFindDocumentRoot(string $scriptDirectory): string
+{
+    $candidates = [];
+    if (!empty($_SERVER['DOCUMENT_ROOT'])) {
+        $candidates[] = (string)$_SERVER['DOCUMENT_ROOT'];
+    }
+
+    $directory = $scriptDirectory;
+    while ($directory !== '' && $directory !== dirname($directory)) {
+        $candidates[] = $directory;
+        $directory = dirname($directory);
+    }
+    $candidates[] = $directory;
+
+    foreach (array_unique($candidates) as $candidate) {
+        $root = realpath($candidate);
+        if ($root !== false && is_file($root . '/bitrix/modules/main/include/prolog_before.php')) {
+            return $root;
+        }
+    }
+
+    throw new RuntimeException(
+        'Не найден корень сайта Bitrix: отсутствует bitrix/modules/main/include/prolog_before.php.'
+    );
+}
+
+try {
+    $DOCUMENT_ROOT = dsaFindDocumentRoot(__DIR__);
+} catch (RuntimeException $exception) {
+    http_response_code(500);
+    die($exception->getMessage());
+}
+
+$_SERVER['DOCUMENT_ROOT'] = $DOCUMENT_ROOT;
 require_once $DOCUMENT_ROOT . '/bitrix/modules/main/include/prolog_before.php';
 
 use Bitrix\Highloadblock\HighloadBlockTable;
