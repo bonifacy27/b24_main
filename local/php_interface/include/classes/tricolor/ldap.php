@@ -817,6 +817,48 @@ class Ldap extends CLdapServer
                 return $arManagers;
         }
 
+        /**
+         * Updates an LDAP user without changing a manually assigned department when
+         * company structure import is disabled for the LDAP server.
+         *
+         * CLdapServer::SetUser() treats the missing LDAP department as an empty
+         * UF_DEPARTMENT value during authentication. As a result, an existing user
+         * becomes a visitor. Restore the value saved before authentication, while
+         * leaving newly created users outside the company structure.
+         */
+        private static function setUserPreservingDepartment($ldapServer, array $ldapUser, $addUser = true)
+        {
+                $preserveDepartment = empty($ldapServer->arFields['IMPORT_STRUCT'])
+                        || $ldapServer->arFields['IMPORT_STRUCT'] !== 'Y';
+                $existingUser = false;
+
+                if ($preserveDepartment && !empty($ldapUser['LOGIN']))
+                {
+                        $dbUser = CUser::GetList(
+                                ($by = 'ID'),
+                                ($order = 'ASC'),
+                                array(
+                                        'LOGIN_EQUAL_EXACT' => $ldapUser['LOGIN'],
+                                        'EXTERNAL_AUTH_ID' => 'LDAP#'.$ldapServer->arFields['ID'],
+                                ),
+                                array('FIELDS' => array('ID'), 'SELECT' => array('UF_DEPARTMENT'))
+                        );
+                        $existingUser = $dbUser->Fetch();
+                }
+
+                $userId = $ldapServer->SetUser($ldapUser, $addUser);
+
+                if ($userId > 0 && $existingUser && (int)$existingUser['ID'] === (int)$userId)
+                {
+                        $user = new CUser();
+                        $user->Update($userId, array(
+                                'UF_DEPARTMENT' => (array)$existingUser['UF_DEPARTMENT'],
+                        ));
+                }
+
+                return $userId;
+        }
+
         // переопределенный метод класса Cldap,
         // перед SetUser установлена проверка менеджеров
         public static function OnFindExternalUser($login)
@@ -856,7 +898,7 @@ class Ldap extends CLdapServer
                                         $arLdapUser['UF_DEPARTMENT']['IS_HEAD'] = self::isOneUser($login);
                                         self::log('OnFindExternalUser', $login, ['arLdapUser' => $arLdapUser], 'before set user');
 
-                                        $id = $serv->SetUser($arLdapUser, (COption::GetOptionString("ldap", "add_user_when_auth", "Y") == "Y"));
+                                        $id = self::setUserPreservingDepartment($serv, $arLdapUser, (COption::GetOptionString("ldap", "add_user_when_auth", "Y") == "Y"));
                                         self::log('OnFindExternalUser', $login, ['id' => $id], 'after set user');
 
                                         if($id > 0)
@@ -974,7 +1016,7 @@ class Ldap extends CLdapServer
                                         $arLog['arLdapUser'] = $arLdapUser;
                                         self::log('OnUserLogin', $arArgs['LOGIN'], ['arLdapUser' => $arLdapUser], 'fefore set user');
 
-                                        $ID = $xLDAP->SetUser($arLdapUser, (COption::GetOptionString("ldap", "add_user_when_auth", "Y")=="Y"));
+                                        $ID = self::setUserPreservingDepartment($xLDAP, $arLdapUser, (COption::GetOptionString("ldap", "add_user_when_auth", "Y")=="Y"));
                                         self::log('OnUserLogin', $arArgs['LOGIN'], ['ID' => $ID], 'after set user');
 
                                         if($ID > 0)
@@ -1057,7 +1099,7 @@ class Ldap extends CLdapServer
 
                                                 self::log('NTLMAuth', ['arLdapUser' => $arLdapUser], $arLog, 'before set user');
 
-                                                $ID = $xLDAP->SetUser($arLdapUser, (COption::GetOptionString("ldap", "add_user_when_auth", "Y")=="Y"));
+                                                $ID = self::setUserPreservingDepartment($xLDAP, $arLdapUser, (COption::GetOptionString("ldap", "add_user_when_auth", "Y")=="Y"));
 
                                                 self::log('NTLMAuth', ['ID' => $ID], $arLog, 'after set user');
 
