@@ -8,6 +8,8 @@ final class TricolorNotificationCatalog
         return array(
             'TaskTitle' => 'Название задания',
             'TaskText' => 'Текст задания',
+            'FORM_NAME' => 'Название задания для формы',
+            'FORM_TEXT' => 'Текст задания для формы',
             'MailSubject' => 'Тема письма',
             'MailText' => 'Текст письма',
             'SiteText' => 'Текст уведомления на сайте',
@@ -16,7 +18,13 @@ final class TricolorNotificationCatalog
 
     public static function defaults()
     {
-        return array('TaskTitle'=>'NAME', 'TaskText'=>'DETAIL_TEXT', 'MailSubject'=>'', 'MailText'=>'', 'SiteText'=>'PREVIEW_TEXT');
+        return array('TaskTitle'=>'NAME', 'TaskText'=>'DETAIL_TEXT', 'FORM_NAME'=>'', 'FORM_TEXT'=>'', 'MailSubject'=>'', 'MailText'=>'', 'SiteText'=>'PREVIEW_TEXT');
+    }
+
+    public static function normalizeFieldMap(array $map)
+    {
+        // Existing saved workflows predate the optional form outputs.
+        return array_merge(array('FORM_NAME'=>'', 'FORM_TEXT'=>''), $map);
     }
 
     private static function module()
@@ -90,6 +98,7 @@ final class TricolorNotificationCatalog
 
     public static function texts($iblockId, $elementId, array $map, $checkPermissions = true)
     {
+        $map = self::normalizeFieldMap($map);
         self::validateFields($iblockId, $map, $checkPermissions);
         $rs = CIBlockElement::GetList(array(), array(
             'IBLOCK_ID'=>(int)$iblockId, 'ID'=>(int)$elementId, 'ACTIVE'=>'Y',
