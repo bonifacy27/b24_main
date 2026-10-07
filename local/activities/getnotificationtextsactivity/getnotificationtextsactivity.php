@@ -21,20 +21,27 @@ class CBPGetNotificationTextsActivity extends CBPActivity
 
     public function Execute()
     {
+        // Bitrix pullProperties() relocates settings to root read-only data before execution.
+        // Read raw values through the framework accessor, not the emptied arProperties array.
+        $fieldMap = $this->getRawProperty('FieldMap');
+        $bindings = $this->getRawProperty('Bindings');
+        $htmlOutputs = $this->getRawProperty('HtmlOutputs');
+        if (!is_array($fieldMap) || !is_array($bindings) || !is_array($htmlOutputs)) {
+            throw new RuntimeException('Настройки шаблона отсутствуют или повреждены. Откройте активити и сохраните соответствия заново.');
+        }
         // Read latest catalog contents as a workflow service; never impersonate the AJAX caller.
         $texts = TricolorNotificationCatalog::texts(
-            (int)$this->IblockId, (int)$this->TemplateId, $this->arProperties['FieldMap'], false
+            (int)$this->IblockId, (int)$this->TemplateId, $fieldMap, false
         );
         $values = array();
         foreach (TricolorNotificationTemplate::parameters($texts) as $key) {
-            $bindings = $this->arProperties['Bindings'];
             if (!array_key_exists($key, $bindings)) {
                 throw new RuntimeException('Шаблон #'.(int)$this->TemplateId.': не задано соответствие {{'.$key.'}}.');
             }
             // Only bindings are expressions. Catalog text and substituted values are never evaluated.
             $values[$key] = $this->ParseValue($bindings[$key], 'string');
         }
-        $results = TricolorNotificationTemplate::render($texts, $values, $this->arProperties['HtmlOutputs']);
+        $results = TricolorNotificationTemplate::render($texts, $values, $htmlOutputs);
         foreach ($results as $key => $value) {
             $this->arProperties[$key] = $value;
         }

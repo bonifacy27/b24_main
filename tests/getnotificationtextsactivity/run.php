@@ -8,9 +8,18 @@ define('B_PROLOG_INCLUDED', true);
 class CBPActivity {
     protected $arProperties = array();
     public $parsed = array();
+    private $readOnlyData = array();
     public function __construct($name) {}
     public function SetPropertiesTypes($types) {}
-    public function __get($name) { return $this->arProperties[$name]; }
+    protected function getRawProperty($name) {
+        return isset($this->arProperties[$name]) ? $this->arProperties[$name] : (isset($this->readOnlyData[$name]) ? $this->readOnlyData[$name] : null);
+    }
+    public function __get($name) { return $this->getRawProperty($name); }
+    public function pullProperties() {
+        $this->readOnlyData = $this->arProperties;
+        $this->arProperties = array_fill_keys(array_keys($this->arProperties), null);
+        return $this->readOnlyData;
+    }
     protected function ParseValue($value, $type = null) {
         $this->parsed[] = $value;
         $values = array('{=Variable:Number}'=>'42', '{=Constant:Days}'=>'3');
@@ -86,6 +95,17 @@ same('Ответьте за 3 дней', $a->TaskText, 'constant substituted');
 same('<p>42: 3</p>', $a->MailText, 'HTML property read');
 same('N', CIBlockElement::$lastFilter['CHECK_PERMISSIONS'], 'runtime service catalog read');
 same(array('{=Variable:Number}','{=Constant:Days}'), $a->parsed, 'only bindings evaluated');
+$relocated = new TestActivity('relocated'); $relocated->configure($properties);
+$relocated->pullProperties();
+same('closed', $relocated->Execute(), 'execution after Bitrix relocates properties');
+same('Договор 42', $relocated->TaskTitle, 'relocated field map read');
+same('<p>42: 3</p>', $relocated->MailText, 'relocated bindings read');
+same(array('{=Variable:Number}','{=Constant:Days}'), $relocated->parsed, 'relocated bindings evaluated once');
+$htmlProperties = $properties; $htmlProperties['Bindings']['number'] = '<42>'; $htmlProperties['HtmlOutputs'] = array('MailText');
+$htmlActivity = new TestActivity('html'); $htmlActivity->configure($htmlProperties); $htmlActivity->pullProperties();
+$htmlActivity->Execute(); same('<p>&lt;42&gt;: 3</p>', $htmlActivity->MailText, 'relocated HTML settings read');
+$broken = new TestActivity('broken'); $broken->configure(array('FieldMap'=>null));
+fails(function () use ($broken) { $broken->Execute(); }, 'Настройки шаблона', 'corrupt settings produce actionable error');
 CIBlockElement::$title = 'Новая редакция {{number}}';
 $a->Execute(); same('Новая редакция 42', $a->TaskTitle, 'latest catalog revision read');
 CIBlockElement::$title = 'Новая редакция {{number}} {{new_parameter}}';
