@@ -23,6 +23,12 @@ $eventType = 'MARKETING_KANBAN_KO_242_VISIT';
 $statsViewerUserIds = [3532];
 $skipLoggingUserIds = [3532];
 $currentUserId = (int)$USER->GetID();
+$canOpenTasks = false;
+if ($currentUserId > 0 && Loader::includeModule('socialnetwork')) {
+    $groupRole = CSocNetUserToGroup::GetUserRole($currentUserId, $groupId);
+    $canOpenTasks = in_array($groupRole, [SONET_ROLES_OWNER, SONET_ROLES_MODERATOR], true);
+}
+
 if ($currentUserId > 0 && !in_array($currentUserId, $skipLoggingUserIds, true)) {
     CEventLog::Add([
         'SEVERITY' => 'SECURITY',
@@ -55,11 +61,6 @@ $rows = TaskTable::getList([
     'filter' => ['=GROUP_ID' => $groupId],
     'order' => ['ID' => 'ASC'],
 ])->fetchAll();
-
-$rows = array_values(array_filter($rows, static function (array $task): bool {
-    $title = (string)($task['TITLE'] ?? '');
-    return mb_stripos($title, 'КОвнутр') === false && mb_stripos($title, 'КО внутр') === false;
-}));
 
 $taskIds = array_map(static function (array $task): int {
     return (int)$task['ID'];
@@ -188,13 +189,12 @@ $formatDeadline = static function (?int $deadlineTs) use ($nowTs): array {
 };
 ?>
 <style>
-.ko-kanban{font-family:Arial,sans-serif;font-size:14px;color:#1f2937}.ko-kanban-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(240px,1fr);gap:12px;align-items:start;overflow-x:auto;padding-bottom:12px}.ko-column{background:#eef3f6;border-radius:8px;min-height:70vh}.ko-column-header{position:sticky;top:0;z-index:2;padding:12px 14px;font-weight:700;border-radius:8px 8px 0 0;color:#111827}.ko-column:nth-child(1) .ko-column-header{background:#9bd800}.ko-column:nth-child(2) .ko-column-header{background:#30c0e4}.ko-column:nth-child(3) .ko-column-header{background:#55c8d3}.ko-column:nth-child(4) .ko-column-header{background:#aeb4bb}.ko-column:nth-child(5) .ko-column-header{background:#4a90e2;color:#fff}.ko-count{opacity:.75;font-weight:600}.ko-cards{padding:10px;display:flex;flex-direction:column;gap:8px}.ko-card{background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 2px rgba(15,23,42,.08);border-left:4px solid transparent}.ko-card.is-overdue-card{border-left-color:#ef4444}.ko-title{display:block;color:#1f2937;font-weight:700;line-height:1.35;text-decoration:none;margin-bottom:10px}.ko-title:hover{text-decoration:underline}.ko-preview-grid{display:grid;grid-template-columns:1fr;gap:6px;margin:8px 0 10px}.ko-preview{display:block;border-radius:6px;overflow:hidden;background:#f3f4f6}.ko-preview img{display:block;width:100%;height:120px;object-fit:cover}.ko-preview-more{font-size:12px;color:#6b7280}.ko-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}.ko-deadline{display:inline-flex;border-radius:16px;padding:4px 10px;background:#38bdf8;color:#fff;font-weight:600;font-size:12px}.ko-deadline.is-overdue{background:#f59e0b}.ko-deadline.is-empty{background:#fff;color:#6b7280;border:1px solid #cbd5e1}.ko-users{display:grid;grid-template-columns:1fr;gap:6px;margin-top:10px;color:#4b5563;font-size:12px}.ko-user{display:flex;align-items:center;gap:6px;min-width:0}.ko-avatar{width:22px;height:22px;border-radius:50%;background:#d1d5db;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;flex:0 0 auto;overflow:hidden}.ko-avatar img{width:100%;height:100%;object-fit:cover}.ko-user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ko-empty{padding:14px;color:#6b7280}.ko-toolbar{margin:8px 0 14px;color:#6b7280}.ko-toolbar a{color:#2563eb}.ko-legend{font-size:12px}
+.ko-kanban{font-family:Arial,sans-serif;font-size:14px;color:#1f2937}.ko-kanban-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(240px,1fr);gap:12px;align-items:start;overflow-x:auto;padding-bottom:12px}.ko-column{background:#eef3f6;border-radius:8px;min-height:70vh}.ko-column-header{position:sticky;top:0;z-index:2;padding:12px 14px;font-weight:700;border-radius:8px 8px 0 0;color:#111827}.ko-column:nth-child(1) .ko-column-header{background:#9bd800}.ko-column:nth-child(2) .ko-column-header{background:#30c0e4}.ko-column:nth-child(3) .ko-column-header{background:#55c8d3}.ko-column:nth-child(4) .ko-column-header{background:#aeb4bb}.ko-column:nth-child(5) .ko-column-header{background:#4a90e2;color:#fff}.ko-count{opacity:.75;font-weight:600}.ko-cards{padding:10px;display:flex;flex-direction:column;gap:8px}.ko-card{background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 2px rgba(15,23,42,.08);border-left:4px solid transparent}.ko-card.is-overdue-card{border-left-color:#ef4444}.ko-title{display:block;color:#1f2937;font-weight:700;line-height:1.35;text-decoration:none;margin-bottom:10px}a.ko-title:hover{text-decoration:underline}.ko-preview-grid{display:grid;grid-template-columns:1fr;gap:6px;margin:8px 0 10px}.ko-preview{display:block;border-radius:6px;overflow:hidden;background:#f3f4f6}.ko-preview img{display:block;width:100%;height:120px;object-fit:cover}.ko-preview-more{font-size:12px;color:#6b7280}.ko-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}.ko-deadline{display:inline-flex;border-radius:16px;padding:4px 10px;background:#38bdf8;color:#fff;font-weight:600;font-size:12px}.ko-deadline.is-overdue{background:#f59e0b}.ko-deadline.is-empty{background:#fff;color:#6b7280;border:1px solid #cbd5e1}.ko-users{display:grid;grid-template-columns:1fr;gap:6px;margin-top:10px;color:#4b5563;font-size:12px}.ko-user{display:flex;align-items:center;gap:6px;min-width:0}.ko-avatar{width:22px;height:22px;border-radius:50%;background:#d1d5db;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;flex:0 0 auto;overflow:hidden}.ko-avatar img{width:100%;height:100%;object-fit:cover}.ko-user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ko-empty{padding:14px;color:#6b7280}.ko-toolbar{margin:8px 0 14px;color:#6b7280}.ko-toolbar a{color:#2563eb}
 @media(max-width:1300px){.ko-kanban-board{grid-auto-columns:280px}}
 </style>
 <div class="ko-kanban">
     <div class="ko-toolbar">
         <a href="<?= htmlspecialcharsbx($groupUrl) ?>" target="_blank">Группа #<?= (int)$groupId ?></a>: все задачи, распределенные по стадиям канбан-доски задач группы.
-        <span class="ko-legend">Исключены задачи с фразами «КОвнутр» и «КО внутр».</span>
     </div>
     <?php if (empty($rows)): ?>
         <div>Задач в группе #<?= (int)$groupId ?> не найдено.</div>
@@ -211,10 +211,14 @@ $formatDeadline = static function (?int $deadlineTs) use ($nowTs): array {
                             $deadline = $formatDeadline($task['DEADLINE_TS']);
                             $creator = $getUser((int)$task['CREATED_BY']);
                             $responsible = $getUser((int)$task['RESPONSIBLE_ID']);
-                            $taskUrl = '/company/personal/user/' . (int)$task['RESPONSIBLE_ID'] . '/tasks/task/view/' . (int)$task['ID'] . '/';
+                            $taskUrl = $groupUrl . 'tasks/task/view/' . (int)$task['ID'] . '/';
                         ?>
                             <article class="ko-card<?= $deadline['class'] === 'is-overdue' ? ' is-overdue-card' : '' ?>">
-                                <a class="ko-title" href="<?= htmlspecialcharsbx($taskUrl) ?>" target="_blank"><?= htmlspecialcharsbx($task['TITLE']) ?></a>
+                                <?php if ($canOpenTasks): ?>
+                                    <a class="ko-title" href="<?= htmlspecialcharsbx($taskUrl) ?>" target="_blank" rel="noopener noreferrer"><?= htmlspecialcharsbx($task['TITLE']) ?></a>
+                                <?php else: ?>
+                                    <span class="ko-title"><?= htmlspecialcharsbx($task['TITLE']) ?></span>
+                                <?php endif; ?>
                                 <?php if (!empty($task['IMAGE_PREVIEWS'])): ?>
                                     <div class="ko-preview-grid">
                                         <?php foreach ($task['IMAGE_PREVIEWS'] as $preview): ?>
