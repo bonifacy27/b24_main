@@ -7,7 +7,7 @@ use Bitrix\Main\Type\DateTime;
 use Bitrix\Tasks\Internals\TaskTable;
 use Bitrix\Tasks\Helper\Filter as TaskFilter;
 
-$APPLICATION->SetTitle('Канбан: задачи группы 242 по стадиям');
+$APPLICATION->SetTitle('Задачи креативного отдела');
 
 if (!Loader::includeModule('tasks')) {
     echo '<div style="color:#b00020;font-weight:600;">Модуль tasks не установлен.</div>';
@@ -18,7 +18,6 @@ if (!Loader::includeModule('tasks')) {
 $diskAvailable = Loader::includeModule('disk');
 $groupId = 242;
 $groupUrl = '/workgroups/group/' . $groupId . '/';
-$groupTasksUrl = $groupUrl . 'tasks/?F_CANCEL=Y&F_STATE=sR';
 $nowTs = time();
 
 $eventType = 'MARKETING_KANBAN_KO_242_VISIT';
@@ -140,7 +139,7 @@ $users = [];
 if (!empty($userIds)) {
     $rsUsers = CUser::GetList(($by = 'last_name'), ($order = 'asc'), ['ID' => implode('|', array_keys($userIds))], ['FIELDS' => ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME', 'LOGIN', 'PERSONAL_PHOTO']]);
     while ($user = $rsUsers->Fetch()) {
-        $name = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME']);
+        $name = trim((string)$user['LAST_NAME'] . ' ' . (string)$user['NAME'] . ' ' . (string)$user['SECOND_NAME']);
         if ($name === '') {
             $name = (string)$user['LOGIN'];
         }
@@ -219,13 +218,36 @@ $formatDeadline = static function (?int $deadlineTs) use ($nowTs): array {
 };
 ?>
 <style>
-.ko-kanban{font-family:Arial,sans-serif;font-size:14px;color:#1f2937}.ko-kanban-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(240px,1fr);gap:12px;align-items:start;overflow-x:auto;padding-bottom:12px}.ko-column{background:#eef3f6;border-radius:8px;min-height:70vh}.ko-column-header{position:sticky;top:0;z-index:2;padding:12px 14px;font-weight:700;border-radius:8px 8px 0 0;color:#111827}.ko-column:nth-child(1) .ko-column-header{background:#9bd800}.ko-column:nth-child(2) .ko-column-header{background:#30c0e4}.ko-column:nth-child(3) .ko-column-header{background:#55c8d3}.ko-column:nth-child(4) .ko-column-header{background:#aeb4bb}.ko-column:nth-child(5) .ko-column-header{background:#4a90e2;color:#fff}.ko-count{opacity:.75;font-weight:600}.ko-cards{padding:10px;display:flex;flex-direction:column;gap:8px}.ko-card{background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 2px rgba(15,23,42,.08);border-left:4px solid transparent}.ko-card.is-overdue-card{border-left-color:#ef4444}.ko-title{display:block;color:#1f2937;font-weight:700;line-height:1.35;text-decoration:none;margin-bottom:10px}a.ko-title:hover{text-decoration:underline}.ko-preview-grid{display:grid;grid-template-columns:1fr;gap:6px;margin:8px 0 10px}.ko-preview{display:block;border-radius:6px;overflow:hidden;background:#f3f4f6}.ko-preview img{display:block;width:100%;height:120px;object-fit:cover}.ko-preview-more{font-size:12px;color:#6b7280}.ko-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}.ko-deadline{display:inline-flex;border-radius:16px;padding:4px 10px;background:#38bdf8;color:#fff;font-weight:600;font-size:12px}.ko-deadline.is-overdue{background:#f59e0b}.ko-deadline.is-empty{background:#fff;color:#6b7280;border:1px solid #cbd5e1}.ko-users{display:grid;grid-template-columns:1fr;gap:6px;margin-top:10px;color:#4b5563;font-size:12px}.ko-user{display:flex;align-items:center;gap:6px;min-width:0}.ko-avatar{width:22px;height:22px;border-radius:50%;background:#d1d5db;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;flex:0 0 auto;overflow:hidden}.ko-avatar img{width:100%;height:100%;object-fit:cover}.ko-user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ko-empty{padding:14px;color:#6b7280}.ko-toolbar{margin:8px 0 14px;color:#6b7280}.ko-toolbar a{color:#2563eb}
-@media(max-width:1300px){.ko-kanban-board{grid-auto-columns:280px}}
+.ko-kanban{font-family:Arial,sans-serif;font-size:13px;color:#1f2937}
+.ko-kanban-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(210px,1fr);gap:10px;align-items:start;overflow-x:auto;padding-bottom:10px}
+.ko-column{background:#eef3f6;border-radius:8px;min-height:70vh}
+.ko-column-header{position:sticky;top:0;z-index:2;padding:10px;font-size:12px;font-weight:700;line-height:1.3;overflow-wrap:anywhere;border-radius:8px 8px 0 0;color:#111827}
+.ko-column:nth-child(1) .ko-column-header{background:#9bd800}
+.ko-column:nth-child(2) .ko-column-header{background:#30c0e4}
+.ko-column:nth-child(3) .ko-column-header{background:#55c8d3}
+.ko-column:nth-child(4) .ko-column-header{background:#aeb4bb}
+.ko-column:nth-child(5) .ko-column-header{background:#4a90e2;color:#fff}
+.ko-count{opacity:.75;font-weight:600}
+.ko-cards{padding:8px;display:flex;flex-direction:column;gap:7px}
+.ko-card{min-width:0;background:#fff;border-radius:10px;padding:10px;box-shadow:0 1px 2px rgba(15,23,42,.08);border-left:3px solid transparent}
+.ko-card.is-overdue-card{border-left-color:#ef4444}
+.ko-title{display:block;color:#1f2937;font-size:13px;font-weight:700;line-height:1.3;overflow-wrap:anywhere;text-decoration:none;margin-bottom:8px}
+a.ko-title:hover{text-decoration:underline}
+.ko-preview-grid{display:grid;grid-template-columns:1fr;gap:5px;margin:6px 0 8px}
+.ko-preview{display:block;border-radius:6px;overflow:hidden;background:#f3f4f6}
+.ko-preview img{display:block;width:100%;height:100px;object-fit:cover}
+.ko-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.ko-deadline{display:inline-flex;border-radius:16px;padding:3px 8px;background:#38bdf8;color:#fff;font-weight:600;font-size:11px}
+.ko-deadline.is-overdue{background:#f59e0b}
+.ko-deadline.is-empty{background:#fff;color:#6b7280;border:1px solid #cbd5e1}
+.ko-users{display:flex;gap:7px;align-items:center;margin-top:8px;color:#4b5563}
+.ko-avatar{width:26px;height:26px;border-radius:50%;background:#d1d5db;display:inline-flex;align-items:center;justify-content:center;color:#374151;font-size:11px;flex:0 0 auto;overflow:hidden}
+.ko-avatar img{width:100%;height:100%;object-fit:cover}
+.ko-user-arrow{font-size:14px;color:#6b7280}
+.ko-empty{padding:10px;color:#6b7280}
+@media(max-width:1300px){.ko-kanban-board{grid-auto-columns:220px}}
 </style>
 <div class="ko-kanban">
-    <div class="ko-toolbar">
-        <a href="<?= htmlspecialcharsbx($groupTasksUrl) ?>" target="_blank" rel="noopener noreferrer">Группа #<?= (int)$groupId ?></a>: задачи по фильтру «В работе», в порядке штатной канбан-доски группы.
-    </div>
     <?php if (empty($rows)): ?>
         <div>Задач по фильтру «В работе» в группе #<?= (int)$groupId ?> не найдено.</div>
     <?php else: ?>
@@ -258,8 +280,17 @@ $formatDeadline = static function (?int $deadlineTs) use ($nowTs): array {
                                 <?php endif; ?>
                                 <div class="ko-meta"><span class="ko-deadline <?= htmlspecialcharsbx($deadline['class']) ?>"><?= htmlspecialcharsbx($deadline['text']) ?></span></div>
                                 <div class="ko-users">
-                                    <div class="ko-user"><span class="ko-avatar"><?php if ($creator['photo'] !== ''): ?><img src="<?= htmlspecialcharsbx($creator['photo']) ?>" alt=""><?php else: ?>П<?php endif; ?></span><span class="ko-user-name">Постановщик: <?= htmlspecialcharsbx($creator['name']) ?></span></div>
-                                    <div class="ko-user"><span class="ko-avatar"><?php if ($responsible['photo'] !== ''): ?><img src="<?= htmlspecialcharsbx($responsible['photo']) ?>" alt=""><?php else: ?>О<?php endif; ?></span><span class="ko-user-name">Ответственный: <?= htmlspecialcharsbx($responsible['name']) ?></span></div>
+                                    <span class="ko-avatar" title="<?= htmlspecialcharsbx('Постановщик: ' . $creator['name']) ?>" role="img" aria-label="<?= htmlspecialcharsbx('Постановщик: ' . $creator['name']) ?>">
+                                        <?php if ($creator['photo'] !== ''): ?>
+                                            <img src="<?= htmlspecialcharsbx($creator['photo']) ?>" alt="<?= htmlspecialcharsbx('Постановщик: ' . $creator['name']) ?>">
+                                        <?php else: ?>П<?php endif; ?>
+                                    </span>
+                                    <span class="ko-user-arrow" aria-hidden="true">&rarr;</span>
+                                    <span class="ko-avatar" title="<?= htmlspecialcharsbx('Ответственный: ' . $responsible['name']) ?>" role="img" aria-label="<?= htmlspecialcharsbx('Ответственный: ' . $responsible['name']) ?>">
+                                        <?php if ($responsible['photo'] !== ''): ?>
+                                            <img src="<?= htmlspecialcharsbx($responsible['photo']) ?>" alt="<?= htmlspecialcharsbx('Ответственный: ' . $responsible['name']) ?>">
+                                        <?php else: ?>О<?php endif; ?>
+                                    </span>
                                 </div>
                             </article>
                         <?php endforeach; ?>
