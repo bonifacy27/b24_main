@@ -29,13 +29,14 @@ while ($arWeekend = $resWeekend->Fetch()) {
     }
 }
 
-// Получаем всех сотрудников
+// Получаем сотрудников из учетных записей. Активность учетной записи используется
+// только для сотрудников, которых нет в списке доступов.
 $rsUsers = CUser::GetList(
     ($by = "UF_CABINET"),
     ($order = "ASC"),
     array('ACTIVE' => 'Y', '!ID' => $user_exclude),
     array(
-        "SELECT" => array("UF_CABINET", "PERSONAL_PHOTO"),
+        "SELECT" => array("UF_CABINET", "UF_COMPANY", "PERSONAL_PHOTO"),
         "FIELDS" => array("ID", "LAST_NAME", "NAME", "SECOND_NAME", "WORK_POSITION", "UF_CABINET", "PERSONAL_PHOTO")
     )
 );
@@ -52,48 +53,127 @@ while ($arUser = $rsUsers->Fetch()) {
         'POSITION' => $arUser['WORK_POSITION'],
         'CABINET' => $arUser['UF_CABINET'],
         'PHOTO' => $arUser['PERSONAL_PHOTO'],
+        'COMPANY_ID' => $arUser['UF_COMPANY'],
+        'LEGAL_ENTITY' => '',
         'ACCESSES' => array(),
         'WEEKEND_WORK' => in_array($userId, $weekendWorkers)
     );
 }
 
-// Получаем доступы
-if (!empty($userIds)) {
-    $arFilter = array("IBLOCK_ID" => 214, "PROPERTY_UZ_SOTRUDNIKA" => $userIds, "ACTIVE" => "Y");
-    $arSelect = array("ID", "PROPERTY_UZ_SOTRUDNIKA", "PROPERTY_DOPUSK");
-    $res = CIBlockElement::GetList(array(), $arFilter, false, false, $arSelect);
+// Получаем действующие записи списка доступов независимо от наличия и активности
+// привязанной учетной записи.
+$arFilter = array("IBLOCK_ID" => 214, "ACTIVE" => "Y", "PROPERTY_STATUS" => 7394);
+$arSelect = array("ID", "PROPERTY_UZ_SOTRUDNIKA", "PROPERTY_FIO", "PROPERTY_DOPUSK", "PROPERTY_STATUS", "PROPERTY_3160", "PROPERTY_YURIDICHESKOE_LITSO");
+$res = CIBlockElement::GetList(array(), $arFilter, false, false, $arSelect);
 
-    $accessIds = array();
-    $userAccessMap = array();
+$accessRows = array();
+$linkedUserIds = array();
+$accessIds = array();
+$legalEntityIds = array();
+$today = strtotime(date('Y-m-d'));
 
-    while ($ob = $res->Fetch()) {
-        $userId = $ob['PROPERTY_UZ_SOTRUDNIKA_VALUE'];
-        $currentAccessIds = is_array($ob['PROPERTY_DOPUSK_VALUE']) ? $ob['PROPERTY_DOPUSK_VALUE'] : [$ob['PROPERTY_DOPUSK_VALUE']];
-        foreach ($currentAccessIds as $accessId) {
-            $userAccessMap[$userId][] = $accessId;
-            $accessIds[] = $accessId;
-        }
+while ($ob = $res->Fetch()) {
+    $expiresAt = $ob['PROPERTY_3160_VALUE'] ? MakeTimeStamp($ob['PROPERTY_3160_VALUE']) : false;
+    if ($expiresAt && $expiresAt < $today) {
+        continue;
     }
 
-    $accessIds = array_unique($accessIds);
+    $userId = (int)$ob['PROPERTY_UZ_SOTRUDNIKA_VALUE'];
+    $accessId = (int)$ob['PROPERTY_DOPUSK_VALUE'];
+    $legalEntityId = (int)$ob['PROPERTY_YURIDICHESKOE_LITSO_VALUE'];
+    $accessRows[] = array(
+        'ID' => (int)$ob['ID'],
+        'USER_ID' => $userId,
+        'FIO' => trim($ob['PROPERTY_FIO_VALUE']),
+        'ACCESS_ID' => $accessId,
+        'LEGAL_ENTITY_ID' => $legalEntityId
+    );
+    if ($userId) $linkedUserIds[$userId] = $userId;
+    if ($accessId) $accessIds[$accessId] = $accessId;
+    if ($legalEntityId) $legalEntityIds[$legalEntityId] = $legalEntityId;
+}
 
-    if (!empty($accessIds)) {
-        $resAccess = CIBlockElement::GetList(array(), array("ID" => $accessIds, "IBLOCK_ID" => 215), false, false, array("ID", "NAME"));
-        $accessNames = array();
-        while ($obAccess = $resAccess->Fetch()) {
-            $accessNames[$obAccess['ID']] = $obAccess['NAME'];
-        }
-
-        foreach ($userAccessMap as $userId => $accesses) {
-            foreach ($accesses as $accessId) {
-                if (isset($accessNames[$accessId])) {
-                    $usersData[$userId]['ACCESSES'][] = $accessNames[$accessId];
-                }
-            }
-            $usersData[$userId]['ACCESSES'] = array_unique($usersData[$userId]['ACCESSES']);
-        }
+// Данные привязанных пользователей загружаются без фильтра ACTIVE.
+if ($linkedUserIds) {
+    $rsLinkedUsers = CUser::GetList(
+        ($linkedBy = "ID"),
+        ($linkedOrder = "ASC"),
+        array('ID' => implode('|', $linkedUserIds)),
+        array(
+            "SELECT" => array("UF_CABINET", "UF_COMPANY", "PERSONAL_PHOTO"),
+            "FIELDS" => array("ID", "LAST_NAME", "NAME", "SECOND_NAME", "WORK_POSITION", "UF_CABINET", "PERSONAL_PHOTO")
+        )
+    );
+    while ($arUser = $rsLinkedUsers->Fetch()) {
+        $userId = (int)$arUser['ID'];
+        $usersData[$userId] = array(
+            'ID' => $userId,
+            'FIO' => trim($arUser['LAST_NAME'] . ' ' . $arUser['NAME'] . ' ' . $arUser['SECOND_NAME']),
+            'POSITION' => $arUser['WORK_POSITION'],
+            'CABINET' => $arUser['UF_CABINET'],
+            'PHOTO' => $arUser['PERSONAL_PHOTO'],
+            'COMPANY_ID' => $arUser['UF_COMPANY'],
+            'LEGAL_ENTITY' => '',
+            'ACCESSES' => array(),
+            'WEEKEND_WORK' => in_array($userId, $weekendWorkers)
+        );
     }
 }
+
+$accessNames = array();
+if ($accessIds) {
+    $resAccess = CIBlockElement::GetList(array(), array("ID" => $accessIds, "IBLOCK_ID" => 215), false, false, array("ID", "NAME"));
+    while ($obAccess = $resAccess->Fetch()) {
+        $accessNames[$obAccess['ID']] = $obAccess['NAME'];
+    }
+}
+
+$legalEntityNames = array();
+if ($legalEntityIds) {
+    $resLegalEntities = CIBlockElement::GetList(array(), array("ID" => $legalEntityIds, "IBLOCK_ID" => 404), false, false, array("ID", "NAME"));
+    while ($legalEntity = $resLegalEntities->Fetch()) {
+        $legalEntityNames[$legalEntity['ID']] = $legalEntity['NAME'];
+    }
+}
+
+$companyNames = array();
+$companyEnum = new CUserFieldEnum;
+$companyValues = $companyEnum->GetList(array(), array('USER_FIELD_NAME' => 'UF_COMPANY'));
+while ($companyValue = $companyValues->Fetch()) {
+    $companyNames[$companyValue['ID']] = $companyValue['VALUE'];
+}
+
+foreach ($accessRows as $row) {
+    $employeeKey = $row['USER_ID'] && isset($usersData[$row['USER_ID']]) ? $row['USER_ID'] : 'access_' . $row['ID'];
+    if (!isset($usersData[$employeeKey])) {
+        $usersData[$employeeKey] = array(
+            'ID' => 0,
+            'FIO' => $row['FIO'],
+            'POSITION' => '',
+            'CABINET' => '',
+            'PHOTO' => '',
+            'COMPANY_ID' => '',
+            'LEGAL_ENTITY' => '',
+            'ACCESSES' => array(),
+            'WEEKEND_WORK' => false
+        );
+    }
+    if ($row['ACCESS_ID'] && isset($accessNames[$row['ACCESS_ID']])) {
+        $usersData[$employeeKey]['ACCESSES'][] = $accessNames[$row['ACCESS_ID']];
+    }
+    if ($row['LEGAL_ENTITY_ID'] && isset($legalEntityNames[$row['LEGAL_ENTITY_ID']])) {
+        $usersData[$employeeKey]['LEGAL_ENTITY'] = $legalEntityNames[$row['LEGAL_ENTITY_ID']];
+    }
+}
+
+foreach ($usersData as &$user) {
+    $user['ACCESSES'] = array_unique($user['ACCESSES']);
+    if ($user['LEGAL_ENTITY'] === '' && $user['COMPANY_ID']) {
+        $companyId = is_array($user['COMPANY_ID']) ? reset($user['COMPANY_ID']) : $user['COMPANY_ID'];
+        $user['LEGAL_ENTITY'] = isset($companyNames[$companyId]) ? $companyNames[$companyId] : '';
+    }
+}
+unset($user);
 
 // Фильтрация по ключевым словам (кабинет или доступ содержит одно из слов)
 $filteredEmployees = array();
@@ -127,6 +207,7 @@ if ($searchTerm) {
     $searchTermLower = mb_strtolower($searchTerm, 'UTF-8');
     $filteredEmployees = array_filter($filteredEmployees, function($employee) use ($searchTermLower) {
         return mb_strpos(mb_strtolower($employee['FIO'], 'UTF-8'), $searchTermLower) !== false ||
+               mb_strpos(mb_strtolower($employee['LEGAL_ENTITY'], 'UTF-8'), $searchTermLower) !== false ||
                mb_strpos(mb_strtolower($employee['CABINET'], 'UTF-8'), $searchTermLower) !== false ||
                mb_strpos(mb_strtolower(implode(", ", $employee['ACCESSES']), 'UTF-8'), $searchTermLower) !== false;
     });
@@ -137,11 +218,13 @@ usort($filteredEmployees, function($a, $b) use ($sortBy, $sortOrder) {
         $aValue = implode(', ', $a['ACCESSES']);
         $bValue = implode(', ', $b['ACCESSES']);
     } elseif ($sortBy === 'weekend_work') {
-        $aValue = $a[$sortBy] ? 1 : 0;
-        $bValue = $b[$sortBy] ? 1 : 0;
+        $aValue = $a['WEEKEND_WORK'] ? 1 : 0;
+        $bValue = $b['WEEKEND_WORK'] ? 1 : 0;
     } else {
-        $aValue = $a[$sortBy];
-        $bValue = $b[$sortBy];
+        $sortFields = array('cabinet' => 'CABINET', 'fio' => 'FIO', 'legal_entity' => 'LEGAL_ENTITY');
+        $sortField = isset($sortFields[$sortBy]) ? $sortFields[$sortBy] : 'FIO';
+        $aValue = $a[$sortField];
+        $bValue = $b[$sortField];
     }
     $cmp = strnatcasecmp($aValue, $bValue);
     return ($sortOrder == 'asc') ? $cmp : -$cmp;
@@ -231,10 +314,11 @@ usort($filteredEmployees, function($a, $b) use ($sortBy, $sortOrder) {
     /* Ширины колонок */
     table th:nth-child(1), table td:nth-child(1) { width: 80px; }         /* Кабинет */
     table th:nth-child(2), table td:nth-child(2) { width: 200px; }       /* ФИО */
-    table th:nth-child(3), table td:nth-child(3) { width: 10px; }        /* Иконка i */
-    table th:nth-child(4), table td:nth-child(4) { width: 150px; }       /* Должность */
-    table th:nth-child(5), table td:nth-child(5) { width: 500px; }       /* Доступы */
-    table th:nth-child(6), table td:nth-child(6) { width: 100px; }       /* Выходные */
+    table th:nth-child(3), table td:nth-child(3) { width: 150px; }       /* ЮЛ */
+    table th:nth-child(4), table td:nth-child(4) { width: 10px; }        /* Иконка i */
+    table th:nth-child(5), table td:nth-child(5) { width: 150px; }       /* Должность */
+    table th:nth-child(6), table td:nth-child(6) { width: 500px; }       /* Доступы */
+    table th:nth-child(7), table td:nth-child(7) { width: 100px; }       /* Выходные */
 
     .info-icon {
         display: inline-block;
@@ -403,7 +487,7 @@ usort($filteredEmployees, function($a, $b) use ($sortBy, $sortOrder) {
 <div class="report-container">
     <h3>Отчет по сотрудникам и доступам (<?=$address?>) на <?= date('d.m.Y') ?></h3>
     <form method="GET" action="" class="search-form">
-        <input type="text" name="search" placeholder="Поиск по ФИО, кабинету или доступу" value="<?= htmlspecialchars($searchTerm) ?>">
+        <input type="text" name="search" placeholder="Поиск по ФИО, ЮЛ, кабинету или доступу" value="<?= htmlspecialchars($searchTerm) ?>">
         <button type="submit">Искать</button>
     </form>
     <table>
@@ -411,6 +495,7 @@ usort($filteredEmployees, function($a, $b) use ($sortBy, $sortOrder) {
             <tr>
                 <th><a href="?sort=cabinet&order=<?= ($sortBy == 'cabinet' && $sortOrder == 'asc') ? 'desc' : 'asc' ?>">Кабинет</a></th>
                 <th><a href="?sort=fio&order=<?= ($sortBy == 'fio' && $sortOrder == 'asc') ? 'desc' : 'asc' ?>">ФИО</a></th>
+                <th><a href="?sort=legal_entity&order=<?= ($sortBy == 'legal_entity' && $sortOrder == 'asc') ? 'desc' : 'asc' ?>">ЮЛ</a></th>
                 <th></th> <!-- Новый столбец для иконки i -->
                 <th>Должность</th>
                 <th><a href="?sort=accesses&order=<?= ($sortBy == 'accesses' && $sortOrder == 'asc') ? 'desc' : 'asc' ?>">Доступы</a></th>
@@ -425,6 +510,7 @@ usort($filteredEmployees, function($a, $b) use ($sortBy, $sortOrder) {
                 <tr>
                     <td><?= $employee['CABINET'] ?></td>
                     <td><?= $employee['FIO'] ?></td>
+                    <td><?= $employee['LEGAL_ENTITY'] ?></td>
                     <td style="text-align: center;">
                         <span class="info-icon" onclick="showModalCard({
                             fio: '<?= addslashes($employee['FIO']) ?>',
