@@ -6,7 +6,6 @@ use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Tasks\Internals\TaskTable;
 use Bitrix\Tasks\Helper\Filter as TaskFilter;
-use Bitrix\Tasks\Kanban\ProjectsTable;
 
 $APPLICATION->SetTitle('Канбан: задачи группы 242 по стадиям');
 
@@ -69,8 +68,21 @@ if (empty($inProgressStatuses)) {
     require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php');
     return;
 }
-$project = ProjectsTable::getById($groupId)->fetch();
-$newTaskOrder = !empty($project['ORDER_NEW_TASK']) ? $project['ORDER_NEW_TASK'] : 'actual';
+// Older tasks modules may not register the ProjectsTable ORM class.
+// Read the same setting from its table only when this schema is available.
+$newTaskOrder = 'actual';
+if ($connection->isTableExist('b_tasks_projects')) {
+    $projectFields = $connection->getTableFields('b_tasks_projects');
+    if (isset($projectFields['ID'], $projectFields['ORDER_NEW_TASK'])) {
+        $project = $connection->query(sprintf(
+            'SELECT ORDER_NEW_TASK FROM b_tasks_projects WHERE ID = %d',
+            $groupId
+        ))->fetch();
+        if (!empty($project['ORDER_NEW_TASK'])) {
+            $newTaskOrder = (string)$project['ORDER_NEW_TASK'];
+        }
+    }
+}
 $taskOrder = $newTaskOrder === 'actual'
     ? ['ACTIVITY_DATE' => 'DESC', 'ID' => 'ASC']
     : ['SORTING_ORDER' => 'ASC', 'STATUS_COMPLETE' => 'ASC', 'DEADLINE' => 'ASC,NULLS', 'ID' => 'ASC'];
