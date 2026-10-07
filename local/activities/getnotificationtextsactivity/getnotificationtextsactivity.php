@@ -78,6 +78,7 @@ class CBPGetNotificationTextsActivity extends CBPActivity
             $activity = &CBPWorkflowTemplateLoader::FindActivityByName($workflowTemplate, $activityName);
             $currentValues = isset($activity['Properties']) ? $activity['Properties'] : array();
         }
+        $hasFieldMap = isset($currentValues['FieldMap']) && is_array($currentValues['FieldMap']);
         $currentValues = array_merge(array('IblockId'=>0, 'TemplateId'=>0, 'FieldMap'=>TricolorNotificationCatalog::defaults(), 'Bindings'=>array(), 'HtmlOutputs'=>array()), $currentValues);
         $currentValues['FieldMap'] = TricolorNotificationCatalog::normalizeFieldMap($currentValues['FieldMap']);
         $error = '';
@@ -88,7 +89,11 @@ class CBPGetNotificationTextsActivity extends CBPActivity
         try {
             $iblocks = TricolorNotificationCatalog::iblocks();
             if ((int)$currentValues['IblockId'] > 0) {
-                $fields = TricolorNotificationCatalog::fields((int)$currentValues['IblockId']);
+                $schema = TricolorNotificationCatalog::schema((int)$currentValues['IblockId']);
+                $fields = $schema['fields'];
+                if (!$hasFieldMap) {
+                    $currentValues['FieldMap'] = $schema['defaults'];
+                }
                 $templates = TricolorNotificationCatalog::elements((int)$currentValues['IblockId']);
                 if ((int)$currentValues['TemplateId'] > 0) {
                     $parameters = TricolorNotificationTemplate::parameters(TricolorNotificationCatalog::texts((int)$currentValues['IblockId'], (int)$currentValues['TemplateId'], $currentValues['FieldMap']));

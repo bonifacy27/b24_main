@@ -56,10 +56,19 @@ final class TricolorNotificationCatalog
 
     public static function fields($iblockId, $checkPermissions = true)
     {
+        $schema = self::schema($iblockId, $checkPermissions);
+        return $schema['fields'];
+    }
+
+    public static function schema($iblockId, $checkPermissions = true)
+    {
         self::module();
         if ($checkPermissions) {
             self::assertReadable($iblockId);
         }
+        $codes = array('TaskTitle'=>'TASK_TITLE', 'TaskText'=>'TASK_TEXT', 'FormName'=>'FORM_NAME', 'FormText'=>'FORM_TEXT', 'MailSubject'=>'MAIL_SUBJECT', 'MailText'=>'MAIL_TEXT', 'SiteText'=>'SITE_TEXT');
+        $defaults = self::defaults();
+        $matched = array();
         $fields = array('NAME'=>'Название элемента', 'PREVIEW_TEXT'=>'Описание для анонса', 'DETAIL_TEXT'=>'Подробное описание');
         $rs = CIBlockProperty::GetList(array('SORT'=>'ASC', 'ID'=>'ASC'), array('IBLOCK_ID'=>(int)$iblockId, 'ACTIVE'=>'Y', 'PROPERTY_TYPE'=>'S', 'MULTIPLE'=>'N'));
         while ($row = $rs->Fetch()) {
@@ -67,9 +76,17 @@ final class TricolorNotificationCatalog
             if (!empty($row['USER_TYPE']) && $row['USER_TYPE'] !== 'HTML') {
                 continue;
             }
-            $fields['PROPERTY_'.$row['ID']] = $row['NAME'].(!empty($row['CODE']) ? ' ['.$row['CODE'].']' : '');
+            $source = 'PROPERTY_'.$row['ID'];
+            $fields[$source] = $row['NAME'].(!empty($row['CODE']) ? ' ['.$row['CODE'].']' : '');
+            $code = strtoupper((string)$row['CODE']);
+            foreach ($codes as $output => $expectedCode) {
+                if ($code === $expectedCode && !isset($matched[$output])) {
+                    $defaults[$output] = $source;
+                    $matched[$output] = true;
+                }
+            }
         }
-        return $fields;
+        return array('fields'=>$fields, 'defaults'=>$defaults);
     }
 
     public static function validateFields($iblockId, array $map, $checkPermissions = true)

@@ -143,7 +143,8 @@ foreach ($parameters as $key) {
         request('catalog', {}, function (data) {
             options(template, data.templates.map(function (item) { return {id: item.id, name: item.name + ' [' + item.id + ']'}; }), '', 'Выберите шаблон');
             var fields = Object.keys(data.fields).map(function (key) { return {id: key, name: data.fields[key]}; });
-            outputs.forEach(function (key) { options(document.getElementById(id + '_' + key), fields, defaults[key], 'Не использовать'); });
+            var selectedDefaults = data.defaults || defaults;
+            outputs.forEach(function (key) { options(document.getElementById(id + '_' + key), fields, selectedDefaults[key], 'Не использовать'); });
         });
     };
     template.onchange = parameters;

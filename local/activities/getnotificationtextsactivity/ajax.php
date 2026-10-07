@@ -18,7 +18,8 @@ try {
     TricolorNotificationCatalog::assertReadable($iblockId);
     $action = isset($_POST['action']) && is_string($_POST['action']) ? $_POST['action'] : '';
     if ($action === 'catalog') {
-        $data = array('fields'=>TricolorNotificationCatalog::fields($iblockId), 'templates'=>TricolorNotificationCatalog::elements($iblockId));
+        $data = TricolorNotificationCatalog::schema($iblockId);
+        $data['templates'] = TricolorNotificationCatalog::elements($iblockId);
     } elseif ($action === 'parameters') {
         $map = isset($_POST['map']) && is_array($_POST['map']) ? $_POST['map'] : array();
         $texts = TricolorNotificationCatalog::texts($iblockId, (int)$_POST['template'], $map);

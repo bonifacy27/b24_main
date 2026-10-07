@@ -7,18 +7,32 @@ const file = path.resolve(__dirname, '../../local/activities/getnotificationtext
 const outputs = ['TaskTitle', 'TaskText', 'FormName', 'FormText', 'MailSubject', 'MailText', 'SiteText'];
 const source = fs.readFileSync(file, 'utf8').split('<script>')[1].split('</script>')[0]
     .replace(/<\?=.*?\?>/g, (match) => match.includes('$uid') ? 'test' : match.includes('array_keys') ? JSON.stringify(outputs) : '{}');
+function Option(text, value) { this.text = text; this.value = String(value); }
+function select(initial) {
+    let choices = [new Option(initial, initial)];
+    let selected = 0;
+    return {
+        add(option) { choices.push(option); if (selected < 0) { selected = 0; } },
+        get innerHTML() { return ''; },
+        set innerHTML(value) { choices = []; selected = -1; },
+        get value() { return selected < 0 ? '' : choices[selected].value; },
+        set value(value) { selected = choices.findIndex(option => option.value === String(value)); },
+        get selectedIndex() { return selected; },
+        set selectedIndex(value) { selected = value; }
+    };
+}
 function createDialog(inputs = [], options = {}) {
     const requests = [];
     const nodes = {};
     const form = {addEventListener() {}};
     const root = {innerHTML: 'old fields', querySelectorAll() { return inputs; }, closest() { return form; }};
     nodes.test_bindings = root;
-    nodes.test_iblock = {value: '408'};
-    nodes.test_template = {value: '3672570'};
+    nodes.test_iblock = select('408');
+    nodes.test_template = select('3672570');
     nodes.test_status = {textContent: ''};
     nodes.test_refresh = {disabled: false};
     for (const key of outputs) {
-        nodes['test_' + key] = {value: key === 'TaskTitle' ? 'NAME' : ''};
+        nodes['test_' + key] = select(key === 'TaskTitle' ? 'NAME' : '');
     }
     const BX = {
         bitrix_sessid() { return 'session'; },
@@ -52,7 +66,7 @@ function createDialog(inputs = [], options = {}) {
         return result;
     };
     BX.ajax.processScripts = function () {};
-    vm.runInNewContext(source, {document: {getElementById(id) { return nodes[id]; }}, BX});
+    vm.runInNewContext(source, {document: {getElementById(id) { return nodes[id]; }}, BX, Option});
     return {requests, nodes, root, refresh: nodes.test_refresh, status: nodes.test_status, BX};
 }
 let passed = 0;
@@ -116,12 +130,29 @@ test('renderer error gives a visible error', () => {
 });
 test('stale response cannot overwrite newer template parameters', () => {
     const dialog = createDialog(); dialog.refresh.onclick();
-    dialog.nodes.test_template.value = '6'; dialog.nodes.test_template.onchange();
+    dialog.nodes.test_template.add(new Option('second', '6')); dialog.nodes.test_template.value = '6'; dialog.nodes.test_template.onchange();
     dialog.requests[0].onsuccess({ok: true, data: {html: 'stale'}});
     assert.equal(dialog.root.innerHTML, 'old fields');
     assert.equal(dialog.refresh.disabled, true);
     dialog.requests[1].onsuccess({ok: true, data: {html: 'latest'}});
     assert.equal(dialog.root.innerHTML, 'latest');
     assert.equal(dialog.refresh.disabled, false);
+});
+test('selecting iblock fills all seven mappings from catalog defaults', () => {
+    const dialog = createDialog(); dialog.nodes.test_iblock.onchange();
+    const fields = {}; const defaults = {};
+    outputs.forEach((key, i) => { defaults[key] = 'PROPERTY_' + (100 + i); fields[defaults[key]] = key; });
+    dialog.requests[0].onsuccess({ok: true, data: {fields, defaults, templates: [{id: 5, name: 'Template'}]}});
+    outputs.forEach(key => assert.equal(dialog.nodes['test_' + key].value, defaults[key]));
+    dialog.nodes.test_template.value = '5'; dialog.nodes.test_template.onchange();
+    outputs.forEach(key => assert.equal(dialog.requests[1].data.map[key], defaults[key]));
+});
+test('selecting another template preserves manual mapping overrides', () => {
+    const dialog = createDialog(); dialog.nodes.test_iblock.onchange();
+    dialog.requests[0].onsuccess({ok: true, data: {fields: {NAME: 'Element name', PROPERTY_1: 'TASK_TITLE'}, defaults: {TaskTitle: 'PROPERTY_1'}, templates: [{id: 5, name: 'First'}, {id: 6, name: 'Second'}]}});
+    dialog.nodes.test_TaskTitle.value = 'NAME';
+    dialog.nodes.test_template.value = '6'; dialog.nodes.test_template.onchange();
+    assert.equal(dialog.nodes.test_TaskTitle.value, 'NAME');
+    assert.equal(dialog.requests[1].data.map.TaskTitle, 'NAME');
 });
 console.log(passed + ' dialog tests passed.');

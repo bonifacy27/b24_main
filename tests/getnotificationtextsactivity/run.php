@@ -32,6 +32,10 @@ class CBPWorkflowTemplateUser { const CurrentUser = 1; public function __constru
 class CBPWorkflowTemplateLoader {
     public static function &FindActivityByName(&$template, $name) { return $template[0]; }
 }
+class CBPRuntime {
+    public static function GetRuntime() { return new self(); }
+    public function ExecuteResourceFile($file, $resource, $values) { return $values; }
+}
 class FakeResult {
     private $rows;
     public function __construct($rows) { $this->rows = $rows; }
@@ -49,7 +53,8 @@ class CIBlock {
     public static function GetList($order, $filter) { return new FakeResult(self::$readable ? array(array('ID'=>407, 'NAME'=>'Каталог')) : array()); }
 }
 class CIBlockProperty {
-    public static function GetList($order, $filter) { return new FakeResult(array(array('ID'=>12,'NAME'=>'Письмо','CODE'=>'MAIL','USER_TYPE'=>'HTML'))); }
+    public static $rows = array(array('ID'=>12,'NAME'=>'Письмо','CODE'=>'MAIL','USER_TYPE'=>'HTML'));
+    public static function GetList($order, $filter) { return new FakeResult(self::$rows); }
 }
 class CIBlockElement {
     public static $title = 'Договор {{number}}';
@@ -149,6 +154,28 @@ same(true, CBPGetNotificationTextsActivity::GetPropertiesDialogValues(array(), '
 same('NAME', $template[0]['Properties']['FieldMap']['FormName'], 'form title mapping saved');
 same('PROPERTY_12', $template[0]['Properties']['FieldMap']['FormText'], 'form text mapping saved');
 same(array('FormText'), $template[0]['Properties']['HtmlOutputs'], 'form HTML option saved');
+same(TricolorNotificationCatalog::defaults(), TricolorNotificationCatalog::schema(407)['defaults'], 'missing conventional codes preserve fallback defaults');
+$savedRows = CIBlockProperty::$rows;
+CIBlockProperty::$rows = array();
+$codes = array('TaskTitle'=>'TASK_TITLE','TaskText'=>'TASK_TEXT','FormName'=>'FORM_NAME','FormText'=>'FORM_TEXT','MailSubject'=>'MAIL_SUBJECT','MailText'=>'MAIL_TEXT','SiteText'=>'SITE_TEXT');
+$expected = array(); $id = 100;
+foreach ($codes as $output => $code) {
+    CIBlockProperty::$rows[] = array('ID'=>$id,'NAME'=>'Любое название','CODE'=>$code,'USER_TYPE'=>'');
+    $expected[$output] = 'PROPERTY_'.$id++;
+}
+$schema = TricolorNotificationCatalog::schema(407);
+same($expected, $schema['defaults'], 'all seven conventional property codes selected automatically');
+same('Любое название [TASK_TITLE]', $schema['fields'][$schema['defaults']['TaskTitle']], 'autofill uses code rather than label');
+$dialogValues = CBPGetNotificationTextsActivity::GetPropertiesDialog(array(), 'a', array(), array(), array(), array('IblockId'=>407));
+same($expected, $dialogValues['currentValues']['FieldMap'], 'new dialog with selected iblock uses code defaults');
+$savedValues = array('IblockId'=>407, 'FieldMap'=>TricolorNotificationCatalog::defaults());
+$dialogValues = CBPGetNotificationTextsActivity::GetPropertiesDialog(array(), 'a', array(), array(), array(), $savedValues);
+same(TricolorNotificationCatalog::normalizeFieldMap($savedValues['FieldMap']), $dialogValues['currentValues']['FieldMap'], 'reopened dialog preserves saved manual field map');
+foreach (CIBlockProperty::$rows as &$row) { $row['ID'] += 100; } unset($row);
+same('PROPERTY_200', TricolorNotificationCatalog::schema(408)['defaults']['TaskTitle'], 'different iblock resolves its own property IDs');
+CIBlockProperty::$rows = array(array('ID'=>1,'NAME'=>'Directory','CODE'=>'TASK_TITLE','USER_TYPE'=>'directory'));
+same('NAME', TricolorNotificationCatalog::schema(407)['defaults']['TaskTitle'], 'unsupported property type never selected');
+CIBlockProperty::$rows = $savedRows;
 CIBlock::$readable=false;
 fails(function () { TricolorNotificationCatalog::elements(407); }, 'недоступен', 'designer access denied');
 echo 'All contract tests passed.'.PHP_EOL;
