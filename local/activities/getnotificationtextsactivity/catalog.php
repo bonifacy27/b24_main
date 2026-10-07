@@ -8,8 +8,8 @@ final class TricolorNotificationCatalog
         return array(
             'TaskTitle' => 'Название задания',
             'TaskText' => 'Текст задания',
-            'FORM_NAME' => 'Название задания для формы',
-            'FORM_TEXT' => 'Текст задания для формы',
+            'FormName' => 'Название задания для формы',
+            'FormText' => 'Текст задания для формы',
             'MailSubject' => 'Тема письма',
             'MailText' => 'Текст письма',
             'SiteText' => 'Текст уведомления на сайте',
@@ -18,13 +18,13 @@ final class TricolorNotificationCatalog
 
     public static function defaults()
     {
-        return array('TaskTitle'=>'NAME', 'TaskText'=>'DETAIL_TEXT', 'FORM_NAME'=>'', 'FORM_TEXT'=>'', 'MailSubject'=>'', 'MailText'=>'', 'SiteText'=>'PREVIEW_TEXT');
+        return array('TaskTitle'=>'NAME', 'TaskText'=>'DETAIL_TEXT', 'FormName'=>'', 'FormText'=>'', 'MailSubject'=>'', 'MailText'=>'', 'SiteText'=>'PREVIEW_TEXT');
     }
 
     public static function normalizeFieldMap(array $map)
     {
         // Existing saved workflows predate the optional form outputs.
-        return array_merge(array('FORM_NAME'=>'', 'FORM_TEXT'=>''), $map);
+        return array_merge(array('FormName'=>'', 'FormText'=>''), $map);
     }
 
     private static function module()

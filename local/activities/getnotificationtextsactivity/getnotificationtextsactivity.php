@@ -10,7 +10,7 @@ class CBPGetNotificationTextsActivity extends CBPActivity
         $this->arProperties = array(
             'Title'=>'', 'IblockId'=>0, 'TemplateId'=>0,
             'FieldMap'=>TricolorNotificationCatalog::defaults(), 'Bindings'=>array(), 'HtmlOutputs'=>array(),
-            'TaskTitle'=>'', 'TaskText'=>'', 'FORM_NAME'=>'', 'FORM_TEXT'=>'', 'MailSubject'=>'', 'MailText'=>'', 'SiteText'=>'',
+            'TaskTitle'=>'', 'TaskText'=>'', 'FormName'=>'', 'FormText'=>'', 'MailSubject'=>'', 'MailText'=>'', 'SiteText'=>'',
         );
         $types = array();
         foreach (TricolorNotificationCatalog::outputs() as $key => $label) {
@@ -62,7 +62,7 @@ class CBPGetNotificationTextsActivity extends CBPActivity
                 }
             }
             foreach ($properties['HtmlOutputs'] as $output) {
-                if (!in_array($output, array('TaskText','FORM_TEXT','MailText','SiteText'), true)) {
+                if (!in_array($output, array('TaskText','FormText','MailText','SiteText'), true)) {
                     throw new InvalidArgumentException('Недопустимый выход для HTML-экранирования.');
                 }
             }
@@ -124,7 +124,7 @@ class CBPGetNotificationTextsActivity extends CBPActivity
                 $properties['Bindings'][$key] = $value;
             }
             if (isset($currentValues['HtmlOutputs']) && is_array($currentValues['HtmlOutputs'])) {
-                $properties['HtmlOutputs'] = array_values(array_intersect(array('TaskText','FORM_TEXT','MailText','SiteText'), $currentValues['HtmlOutputs']));
+                $properties['HtmlOutputs'] = array_values(array_intersect(array('TaskText','FormText','MailText','SiteText'), $currentValues['HtmlOutputs']));
             }
             $errors = self::ValidateProperties($properties, new CBPWorkflowTemplateUser(CBPWorkflowTemplateUser::CurrentUser));
         } catch (Exception $e) {

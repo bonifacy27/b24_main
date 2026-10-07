@@ -34,7 +34,7 @@ foreach ($parameters as $key) {
 <option value="<?=htmlspecialcharsbx($source)?>" <?=$source===$currentValues['FieldMap'][$key] ? 'selected' : ''?>><?=htmlspecialcharsbx($sourceLabel)?></option>
 <?php endforeach; ?>
 </select>
-<?php if (in_array($key, array('TaskText','FORM_TEXT','MailText','SiteText'), true)): ?>
+<?php if (in_array($key, array('TaskText','FormText','MailText','SiteText'), true)): ?>
 <label><input type="checkbox" name="HtmlOutputs[]" value="<?=$key?>" <?=in_array($key, $currentValues['HtmlOutputs'], true) ? 'checked' : ''?>> Экранировать значения для HTML</label>
 <?php endif; ?>
 </td></tr>
