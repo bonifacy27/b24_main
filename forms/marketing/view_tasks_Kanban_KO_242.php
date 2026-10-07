@@ -5,6 +5,8 @@ use Bitrix\Disk\AttachedObject;
 use Bitrix\Main\Loader;
 use Bitrix\Main\Type\DateTime;
 use Bitrix\Tasks\Internals\TaskTable;
+use Bitrix\Tasks\Helper\Filter as TaskFilter;
+use Bitrix\Tasks\Kanban\ProjectsTable;
 
 $APPLICATION->SetTitle('Канбан: задачи группы 242 по стадиям');
 
@@ -17,6 +19,7 @@ if (!Loader::includeModule('tasks')) {
 $diskAvailable = Loader::includeModule('disk');
 $groupId = 242;
 $groupUrl = '/workgroups/group/' . $groupId . '/';
+$groupTasksUrl = $groupUrl . 'tasks/?F_CANCEL=Y&F_STATE=sR';
 $nowTs = time();
 
 $eventType = 'MARKETING_KANBAN_KO_242_VISIT';
@@ -41,59 +44,74 @@ if ($currentUserId > 0 && !in_array($currentUserId, $skipLoggingUserIds, true)) 
 
 $connection = \Bitrix\Main\Application::getConnection();
 $stageRows = $connection->query(sprintf(
-    "SELECT ID, TITLE, SORT FROM b_tasks_stages WHERE ENTITY_TYPE = 'G' AND ENTITY_ID = %d ORDER BY SORT ASC, ID ASC",
+    "SELECT ID, TITLE, SORT, SYSTEM_TYPE FROM b_tasks_stages WHERE ENTITY_TYPE = 'G' AND ENTITY_ID = %d ORDER BY SORT ASC, ID ASC",
     $groupId
 ))->fetchAll();
 
 $columns = [];
-$stageIds = [];
+$defaultStageId = null;
 foreach ($stageRows as $stage) {
     $stageId = (int)$stage['ID'];
-    $stageIds[] = $stageId;
+    if ($stage['SYSTEM_TYPE'] === 'NEW') {
+        $defaultStageId = $stageId;
+    }
     $columns[$stageId] = [
         'title' => (string)$stage['TITLE'],
         'tasks' => [],
     ];
 }
 
-$rows = TaskTable::getList([
-    'select' => ['ID', 'TITLE', 'CREATED_DATE', 'DEADLINE', 'GROUP_ID', 'STATUS', 'CREATED_BY', 'RESPONSIBLE_ID', 'UF_TASK_WEBDAV_FILES'],
-    'filter' => ['=GROUP_ID' => $groupId],
-    'order' => ['ID' => 'ASC'],
-])->fetchAll();
+// Use the installed Bitrix "In progress" preset, not only the raw status 3.
+$presets = TaskFilter::getPresets();
+$inProgressStatuses = $presets['filter_tasks_in_progress']['fields']['STATUS'] ?? [];
+if (empty($inProgressStatuses)) {
+    echo '<div style="color:#b00020;font-weight:600;">Предустановленный фильтр «В работе» не найден.</div>';
+    require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php');
+    return;
+}
+$project = ProjectsTable::getById($groupId)->fetch();
+$newTaskOrder = !empty($project['ORDER_NEW_TASK']) ? $project['ORDER_NEW_TASK'] : 'actual';
+$taskOrder = $newTaskOrder === 'actual'
+    ? ['ACTIVITY_DATE' => 'DESC', 'ID' => 'ASC']
+    : ['SORTING_ORDER' => 'ASC', 'STATUS_COMPLETE' => 'ASC', 'DEADLINE' => 'ASC,NULLS', 'ID' => 'ASC'];
 
-$taskIds = array_map(static function (array $task): int {
-    return (int)$task['ID'];
-}, $rows);
-
+// Use the native kanban query, including its access check and group sorting.
+// No pagination: load every matching task, not only the first page of each stage.
+$nativeRows = [];
+if ($currentUserId > 0) {
+    [$nativeRows] = CTaskItem::fetchListArray(
+        $currentUserId,
+        $taskOrder,
+        [
+            'GROUP_ID' => $groupId,
+            'REAL_STATUS' => $inProgressStatuses,
+            'ONLY_ROOT_TASKS' => 'N',
+        ],
+        ['SORTING_GROUP_ID' => $groupId, 'MAKE_ACCESS_FILTER' => true],
+        ['ID', 'STAGE_ID']
+    );
+}
+$taskIds = [];
 $taskStages = [];
-if (!empty($taskIds) && !empty($stageIds)) {
-    $taskRows = $connection->query(sprintf(
-        'SELECT ID, STAGE_ID FROM b_tasks WHERE ID IN (%s) AND GROUP_ID = %d AND STAGE_ID IN (%s)',
-        implode(',', array_map('intval', $taskIds)),
-        $groupId,
-        implode(',', array_map('intval', $stageIds))
-    ))->fetchAll();
-    foreach ($taskRows as $taskRow) {
-        $taskStages[(int)$taskRow['ID']] = (int)$taskRow['STAGE_ID'];
-    }
-
-    if (count($taskStages) < count($taskIds)) {
-        $taskStageRows = $connection->query(sprintf(
-            'SELECT TASK_ID, STAGE_ID FROM b_tasks_task_stage WHERE TASK_ID IN (%s) AND STAGE_ID IN (%s)',
-            implode(',', array_map('intval', $taskIds)),
-            implode(',', array_map('intval', $stageIds))
-        ))->fetchAll();
-        foreach ($taskStageRows as $taskStage) {
-            $taskId = (int)$taskStage['TASK_ID'];
-            if (!isset($taskStages[$taskId])) {
-                $taskStages[$taskId] = (int)$taskStage['STAGE_ID'];
-            }
-        }
-    }
+foreach ($nativeRows as $taskRow) {
+    $taskId = (int)$taskRow['ID'];
+    $taskIds[] = $taskId;
+    $taskStages[$taskId] = (int)$taskRow['STAGE_ID'] ?: $defaultStageId;
 }
 
-$defaultStageId = $stageIds[0] ?? null;
+// Fetch typed dates and attachment fields through ORM, preserving the native order.
+$rows = [];
+if (!empty($taskIds)) {
+    $rows = TaskTable::getList([
+        'select' => ['ID', 'TITLE', 'CREATED_DATE', 'DEADLINE', 'GROUP_ID', 'STATUS', 'CREATED_BY', 'RESPONSIBLE_ID', 'UF_TASK_WEBDAV_FILES'],
+        'filter' => ['=GROUP_ID' => $groupId, '@STATUS' => $inProgressStatuses, '@ID' => $taskIds],
+    ])->fetchAll();
+    $taskPositions = array_flip($taskIds);
+    usort($rows, static function (array $left, array $right) use ($taskPositions): int {
+        return $taskPositions[(int)$left['ID']] <=> $taskPositions[(int)$right['ID']];
+    });
+}
+
 $unassignedColumnId = 'unassigned';
 $userIds = [];
 foreach ($rows as &$task) {
@@ -194,10 +212,10 @@ $formatDeadline = static function (?int $deadlineTs) use ($nowTs): array {
 </style>
 <div class="ko-kanban">
     <div class="ko-toolbar">
-        <a href="<?= htmlspecialcharsbx($groupUrl) ?>" target="_blank">Группа #<?= (int)$groupId ?></a>: все задачи, распределенные по стадиям канбан-доски задач группы.
+        <a href="<?= htmlspecialcharsbx($groupTasksUrl) ?>" target="_blank" rel="noopener noreferrer">Группа #<?= (int)$groupId ?></a>: задачи по фильтру «В работе», в порядке штатной канбан-доски группы.
     </div>
     <?php if (empty($rows)): ?>
-        <div>Задач в группе #<?= (int)$groupId ?> не найдено.</div>
+        <div>Задач по фильтру «В работе» в группе #<?= (int)$groupId ?> не найдено.</div>
     <?php else: ?>
         <div class="ko-kanban-board">
             <?php foreach ($columns as $column): ?>
