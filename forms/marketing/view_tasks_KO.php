@@ -35,7 +35,7 @@ if ($currentUserId > 0 && !in_array($currentUserId, $skipLoggingUserIds, true)) 
         'SEVERITY' => 'SECURITY',
         'AUDIT_TYPE_ID' => $eventType,
         'MODULE_ID' => 'main',
-        'ITEM_ID' => 'forms/marketing/view_tasks_Kanban_KO_242.php',
+        'ITEM_ID' => 'forms/marketing/view_tasks_KO.php',
         'DESCRIPTION' => sprintf('USER_ID=%d; GROUP_ID=%d; URI=%s', $currentUserId, $groupId, (string)($_SERVER['REQUEST_URI'] ?? '')),
     ]);
 }
