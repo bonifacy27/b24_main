@@ -71,7 +71,7 @@ if (empty($inProgressStatuses)) {
 // Older tasks modules may not register the ProjectsTable ORM class.
 // Read the same setting from its table only when this schema is available.
 $newTaskOrder = 'actual';
-if ($connection->isTableExist('b_tasks_projects')) {
+if ($connection->isTableExists('b_tasks_projects')) {
     $projectFields = $connection->getTableFields('b_tasks_projects');
     if (isset($projectFields['ID'], $projectFields['ORDER_NEW_TASK'])) {
         $project = $connection->query(sprintf(
