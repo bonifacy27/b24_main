@@ -89,27 +89,47 @@ foreach ($parameters as $key) {
         status.textContent = 'Загрузка…';
         var data = {action: action, iblock: block.value, sessid: BX.bitrix_sessid()};
         Object.keys(extra).forEach(function (key) { data[key] = extra[key]; });
-        BX.ajax({url: '/local/activities/getnotificationtextsactivity/ajax.php', method: 'POST', dataType: 'json', data: data,
-            onsuccess: function (response) {
-                if (ticket !== revision) { return; }
-                loading = false;
-                refresh.disabled = false;
-                status.textContent = response.ok ? '' : response.error;
-                if (response.ok) { callback(response.data); }
-            },
-            onfailure: function () {
-                if (ticket !== revision) { return; }
-                loading = false; refresh.disabled = false;
-                status.textContent = 'Не удалось загрузить шаблон. Проверьте соединение и сессию.';
-            }
-        });
+        function fail(message) {
+            if (ticket !== revision) { return; }
+            loading = false;
+            refresh.disabled = false;
+            status.textContent = message;
+        }
+        try {
+            BX.ajax({url: '/local/activities/getnotificationtextsactivity/ajax.php', method: 'POST', dataType: 'json', data: data, timeout: 30,
+                onsuccess: function (response) {
+                    if (ticket !== revision) { return; }
+                    if (!response || typeof response.ok !== 'boolean') {
+                        fail('Сервер вернул некорректный ответ. Проверьте сессию и повторите обновление.');
+                        return;
+                    }
+                    if (!response.ok) {
+                        fail(response.error || 'Не удалось загрузить параметры шаблона.');
+                        return;
+                    }
+                    try {
+                        callback(response.data);
+                        loading = false;
+                        refresh.disabled = false;
+                        status.textContent = '';
+                    } catch (error) {
+                        fail('Не удалось отобразить параметры шаблона. Переоткройте настройки активити.');
+                    }
+                },
+                onfailure: function (reason) {
+                    fail(reason === 'timeout' ? 'Истекло время ожидания. Повторите обновление параметров.' : 'Не удалось загрузить шаблон. Проверьте соединение и сессию.');
+                }
+            });
+        } catch (error) {
+            fail('Не удалось отправить запрос обновления параметров. Переоткройте настройки активити.');
+        }
     }
     function parameters() {
         collect();
         if (!Number(template.value) || !Number(block.value)) {
             ++revision; loading = false; refresh.disabled = false; root.innerHTML = ''; status.textContent = 'Выберите инфоблок и шаблон.'; return;
         }
-        request('parameters', {template: template.value, map: map(), bindings: cache}, function (data) {
+        request('parameters', {template: template.value, map: map(), bindings_json: JSON.stringify(cache)}, function (data) {
             var html = BX.processHTML(data.html);
             root.innerHTML = html.HTML;
             BX.ajax.processScripts(html.SCRIPT);

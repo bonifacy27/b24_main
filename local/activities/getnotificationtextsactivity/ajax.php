@@ -23,7 +23,20 @@ try {
         $map = isset($_POST['map']) && is_array($_POST['map']) ? $_POST['map'] : array();
         $texts = TricolorNotificationCatalog::texts($iblockId, (int)$_POST['template'], $map);
         $parameters = TricolorNotificationTemplate::parameters($texts);
-        $bindings = isset($_POST['bindings']) && is_array($_POST['bindings']) ? $_POST['bindings'] : array();
+        // BX.ajax.prepareData requires hasOwnProperty() on nested objects. The UI cache
+        // deliberately has no prototype; send it as JSON, also allowing reserved key names.
+        if (isset($_POST['bindings_json'])) {
+            if (!is_string($_POST['bindings_json'])) {
+                throw new InvalidArgumentException('Некорректный формат соответствий параметров.');
+            }
+            $bindings = \Bitrix\Main\Web\Json::decode($_POST['bindings_json']);
+            if (!is_array($bindings)) {
+                throw new InvalidArgumentException('Некорректный формат соответствий параметров.');
+            }
+        } else {
+            // Keep compatibility with an already opened dialog from the previous version.
+            $bindings = isset($_POST['bindings']) && is_array($_POST['bindings']) ? $_POST['bindings'] : array();
+        }
         foreach ($bindings as $key => $value) {
             if (!is_string($value)) {
                 unset($bindings[$key]);
