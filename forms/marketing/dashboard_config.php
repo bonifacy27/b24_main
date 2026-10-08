@@ -1,6 +1,8 @@
 <?php
 return [
     'group_id' => 163,
+    // 0: first active member of Bitrix administrator group (ID 1).
+    'administrator_user_id' => 0,
     'timezone' => 'Europe/Moscow',
     // Explicit stage IDs override automatic matching of stage titles.
     'stage_map' => [], // e.g. 123 => 'review'; values: new, work, review, done.

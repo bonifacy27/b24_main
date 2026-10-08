@@ -60,7 +60,7 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
         if ($projectId === null) { $projectId = 'unavailable-' . $id; }
         if (!isset($report['projects'][$projectId])) {
             $root = $tasks[$projectId] ?? null;
-            $report['projects'][$projectId] = ['id'=>$root ? $projectId : null, 'title'=>$root ? $root['title'] : 'Корневая задача недоступна (задача #' . $id . ')', 'tasks'=>0,'done'=>0,'returns'=>0,'hours'=>0,'members'=>[], 'employeeHours'=>[], 'responsible'=>$root ? $root['responsible'] : null, 'days'=>null, 'state'=>$root ? marketingSnapshot($root,$cutoff,$stageMap) : null];
+            $report['projects'][$projectId] = ['id'=>$root ? $projectId : null, 'title'=>$root ? $root['title'] : 'Корневая задача не найдена (задача #' . $id . ')', 'tasks'=>0,'done'=>0,'returns'=>0,'hours'=>0,'members'=>[], 'employeeHours'=>[], 'responsible'=>$root ? $root['responsible'] : null, 'days'=>null, 'state'=>$root ? marketingSnapshot($root,$cutoff,$stageMap) : null];
             if ($root) {
                 foreach (array_merge([$root['responsible']],$root['accomplices']) as $member) { $report['projects'][$projectId]['members'][$member] = true; }
                 $end = $root['closed'] && $root['closed'] < $cutoff ? $root['closed'] : $cutoff - 1;

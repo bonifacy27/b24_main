@@ -1,5 +1,6 @@
 <?php
 require __DIR__ . '/../../forms/marketing/dashboard_metrics.php';
+require __DIR__ . '/../../forms/marketing/dashboard_tasks.php';
 $config = require __DIR__ . '/../../forms/marketing/dashboard_config.php';
 function ts($v) { return (new DateTimeImmutable($v,new DateTimeZone('Europe/Moscow')))->getTimestamp(); }
 function check($condition, $message) { if (!$condition) { throw new RuntimeException($message); } }
@@ -29,4 +30,31 @@ $cycle=task(1,2); check(marketingProjectId(1,[1=>$cycle,2=>$child])===null,'Cycl
 check(marketingWorkingDays(ts('2026-10-02'),ts('2026-10-05'),$config)===2,'Weekend excluded, inclusive boundaries');
 $config['working_dates']=['2026-10-03']; $config['holidays']=['2026-10-05'];
 check(marketingWorkingDays(ts('2026-10-02'),ts('2026-10-05'),$config)===2,'Holiday and working Saturday overrides');
+// Group child -> external parent -> external root; deleted parent and a cycle.
+$source = [
+    10=>['ID'=>10,'PARENT_ID'=>11,'GROUP_ID'=>163],
+    11=>['ID'=>11,'PARENT_ID'=>12,'GROUP_ID'=>999],
+    12=>['ID'=>12,'PARENT_ID'=>0,'GROUP_ID'=>999],
+    20=>['ID'=>20,'PARENT_ID'=>21,'GROUP_ID'=>163],
+    30=>['ID'=>30,'PARENT_ID'=>31,'GROUP_ID'=>163],
+    31=>['ID'=>31,'PARENT_ID'=>30,'GROUP_ID'=>999],
+];
+$calls=[];
+$fetch=static function($filter) use ($source,&$calls) {
+    $calls[]=$filter;
+    if (count($calls)>5) { throw new RuntimeException('Ancestor loading must terminate'); }
+    return array_values(array_filter($source,static function($row) use ($filter) {
+        return isset($filter['GROUP_ID']) ? $row['GROUP_ID']===$filter['GROUP_ID'] : in_array($row['ID'],$filter['ID'],true);
+    }));
+};
+$loaded=marketingLoadDashboardTasks($fetch,163);
+$loaded=array_column($loaded,null,'ID');
+check(count($loaded)===6 && isset($loaded[12]),'Load external root chain');
+check($loaded[10]['IN_REPORT_GROUP'] && !$loaded[12]['IN_REPORT_GROUP'],'External ancestors are metadata only');
+check(!isset($loaded[21]) && count($calls)===3,'Missing parent and cycle terminate');
+$external=task(12); $external['included']=false; $external['elapsed']=[['at'=>ts('2026-10-04'),'user'=>20,'seconds'=>36000]];
+$inside=task(10,12);
+$r=marketingReport([10=>$inside,12=>$external],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08'),7,$config,$map,$availability);
+check($r['tasks']===1 && $r['projectCount']===1 && $r['hours']===0,'External metadata cannot inflate department counts or hours');
+check($r['projects'][12]['title']==='Task 12','External root names project');
 echo "Marketing dashboard: all checks passed\n";
