@@ -24,6 +24,15 @@ if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true)die();
 		</select>
 	</td>
 </tr>
+<tr>
+	<td align="right" width="40%"><?= GetMessage("BPAA_PD_EMAIL_APPROVAL_ENABLED") ?>:</td>
+	<td width="60%">
+		<select name="email_approval_enabled">
+			<option value="N"<?= ($arCurrentValues["email_approval_enabled"] ?? "N") !== "Y" ? " selected" : "" ?>><?= GetMessage("BPAA_PD_NO") ?></option>
+			<option value="Y"<?= ($arCurrentValues["email_approval_enabled"] ?? "N") === "Y" ? " selected" : "" ?>><?= GetMessage("BPAA_PD_YES") ?></option>
+		</select>
+	</td>
+</tr>
 <tr><td colspan="2"><b>Напоминания о задании</b></td></tr>
 <tr>
 	<td align="right" width="40%">Напоминание 1 (часов):</td>
