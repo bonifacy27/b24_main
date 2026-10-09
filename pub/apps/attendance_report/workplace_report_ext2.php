@@ -265,7 +265,7 @@ $resolveOfficeByReverseAp = static function ($reverseAp): string {
     if ($turnstileId >= 16 && $turnstileId <= 17) { return 'ул. Рентгена, 5А'; }
     return '';
 };
-$availableTabs = ['dashboard' => true, 'employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true];
+$availableTabs = ['dashboard' => true, 'employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true, 'department-summary' => true];
 $activeTab = isset($_GET['active_tab']) && isset($availableTabs[(string)$_GET['active_tab']]) ? (string)$_GET['active_tab'] : 'dashboard';
 
 $undefinedLegalEntity = 'Не определено';
@@ -1663,6 +1663,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php endif; ?>
     <button type="button" class="tab-button<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" data-tab-target="cabinet-summary" role="tab" aria-selected="<?= $activeTab === 'cabinet-summary' ? 'true' : 'false' ?>">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
+    <button type="button" class="tab-button<?= $activeTab === 'department-summary' ? ' is-active' : '' ?>" data-tab-target="department-summary" role="tab" aria-selected="<?= $activeTab === 'department-summary' ? 'true' : 'false' ?>">Сводная таблица по подразделениям</button>
 </div>
 
 <?php if ($activeTab === 'dashboard'): ?>
@@ -2136,6 +2137,137 @@ header('Content-Type: text/html; charset=UTF-8');
 </section>
 <?php endif; ?>
 
+<?php if ($activeTab === 'department-summary'): ?>
+<?php
+// Group by CEO-1 and use user IDs to avoid counting an employee twice
+// when several head departments belong to the same CEO-1.
+$departmentSummaryMonths = [];
+$monthNames = [1 => 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+for ($month = (clone $dateFrom)->modify('first day of this month'); $month <= $dateTo; $month->modify('+1 month')) {
+    $departmentSummaryMonths[$month->format('Y-m')] = [
+        'LABEL' => $monthNames[(int)$month->format('n')] . '.' . $month->format('y'),
+        'DAYS' => [],
+    ];
+}
+foreach ($periodDays as $dateKey) {
+    $departmentSummaryMonths[substr($dateKey, 0, 7)]['DAYS'][] = $dateKey;
+}
+$departmentSummaryUsers = [];
+$departmentSummaryCabinets = [];
+foreach (array_keys($selectedHeadDepartmentIds) as $departmentId) {
+    $headUserId = (int)$departments[$departmentId]['UF_HEAD'];
+    $ceo1Title = trim((string)($headOrgSummaryMap[$headUserId]['CEO1'] ?? ''));
+    if ($ceo1Title === '') { $ceo1Title = 'Не определено'; }
+    $assignedCabinets = $departmentCabinetAssignedUsers[$departmentId] ?? [];
+    foreach ($periodDays as $dateKey) {
+        foreach ($inactiveEventAssignedUsers[$dateKey][$departmentId] ?? [] as $cabNorm => $users) {
+            if (!isset($assignedCabinets[$cabNorm])) { $assignedCabinets[$cabNorm] = []; }
+            $assignedCabinets[$cabNorm] += $users;
+        }
+    }
+    foreach ($assignedCabinets as $cabNorm => $users) {
+        if (!isset($summaryCabinets[$cabNorm])) { continue; }
+        if (!isset($departmentSummaryUsers[$ceo1Title])) { $departmentSummaryUsers[$ceo1Title] = []; }
+        $departmentSummaryUsers[$ceo1Title] += $users;
+        if (!isset($departmentSummaryCabinets[$ceo1Title][$cabNorm])) { $departmentSummaryCabinets[$ceo1Title][$cabNorm] = []; }
+        $departmentSummaryCabinets[$ceo1Title][$cabNorm] += $users;
+    }
+}
+ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
+// The denominator includes every CEO-1, even when the report filters one out.
+$departmentSummaryAllCabinetUsers = [];
+$allAssignedCabinetsByDepartment = $departmentCabinetAssignedUsers;
+foreach ($periodDays as $dateKey) {
+    foreach ($inactiveEventAssignedUsers[$dateKey] ?? [] as $departmentId => $assignedCabinets) {
+        foreach ($assignedCabinets as $cabNorm => $users) {
+            if (!isset($allAssignedCabinetsByDepartment[$departmentId][$cabNorm])) { $allAssignedCabinetsByDepartment[$departmentId][$cabNorm] = []; }
+            $allAssignedCabinetsByDepartment[$departmentId][$cabNorm] += $users;
+        }
+    }
+}
+foreach ($allAssignedCabinetsByDepartment as $departmentId => $assignedCabinets) {
+    $headUserId = (int)($departments[$departmentId]['UF_HEAD'] ?? 0);
+    $ceo1Title = trim((string)($headOrgSummaryMap[$headUserId]['CEO1'] ?? ''));
+    if ($ceo1Title === '') { $ceo1Title = 'Не определено'; }
+    foreach ($assignedCabinets as $cabNorm => $users) {
+        if (!isset($departmentSummaryAllCabinetUsers[$cabNorm][$ceo1Title])) { $departmentSummaryAllCabinetUsers[$cabNorm][$ceo1Title] = []; }
+        $departmentSummaryAllCabinetUsers[$cabNorm][$ceo1Title] += $users;
+    }
+}
+$departmentSummaryWorkplaces = [];
+foreach ($departmentSummaryCabinets as $ceo1Title => $assignedCabinets) {
+    $departmentSummaryWorkplaces[$ceo1Title] = 0;
+    foreach ($assignedCabinets as $cabNorm => $users) {
+        $cabinetAssignedCount = array_sum(array_map('count', $departmentSummaryAllCabinetUsers[$cabNorm] ?? []));
+        if ($cabinetAssignedCount > 0) {
+            $departmentSummaryWorkplaces[$ceo1Title] += (int)$summaryCabinets[$cabNorm]['WORKPLACES'] * count($users) / $cabinetAssignedCount;
+        }
+    }
+}
+$departmentSummaryAssignedTotal = array_sum($departmentSummaryWorkplaces);
+?>
+<section class="tab-pane is-active" id="tab-department-summary" role="tabpanel">
+<h2>Сводная таблица по подразделениям</h2>
+<p class="dashboard-muted">Закрепленные РМ — сумма рабочих мест по справочнику кабинетов, к которым привязаны сотрудники подразделения (включая неактивных сотрудников с посещениями за выбранный период). Рабочие места общего кабинета распределяются пропорционально числу закрепленных сотрудников среди всех СЕО-1, независимо от фильтра подразделения. Каждый сотрудник учитывается один раз внутри СЕО-1. «Итого» — сумма распределенных РМ по выбранным подразделениям. Свободные РМ — среднее за рабочие дни месяца в выбранном периоде. Загрузка — доля занятых РМ за эти дни; учитывается присутствие в офисе более 4 часов. Если рабочих дней нет, отображается «—».</p>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="department-summary-report-table" data-export-name="department_summary">Экспорт в Excel</button></div>
+<div style="overflow-x: auto;">
+<table id="department-summary-report-table">
+    <thead>
+    <tr>
+        <th rowspan="2">Подразделение (СЕО-1)</th>
+        <th rowspan="2" class="col-narrow">Кол-во закрепленных РМ за подразделением</th>
+        <?php foreach ($departmentSummaryMonths as $monthData): ?>
+            <th colspan="2"><?=htmlspecialcharsbx($monthData['LABEL'])?></th>
+        <?php endforeach; ?>
+    </tr>
+    <tr>
+        <?php foreach ($departmentSummaryMonths as $monthData): ?>
+            <th class="col-narrow">Кол-во свободных РМ</th>
+            <th>% загрузки</th>
+        <?php endforeach; ?>
+    </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($departmentSummaryUsers as $ceo1Title => $assignedUsers): ?>
+        <?php $assignedCount = $departmentSummaryWorkplaces[$ceo1Title]; ?>
+        <tr>
+            <td><?=htmlspecialcharsbx((string)$ceo1Title)?></td>
+            <td x:num="<?= number_format($assignedCount, 1, '.', '') ?>" style='mso-number-format: "0.0";'><?= number_format($assignedCount, 1, ',', '') ?></td>
+            <?php foreach ($departmentSummaryMonths as $monthData): ?>
+                <?php
+                $occupiedDays = 0;
+                foreach ($monthData['DAYS'] as $dateKey) {
+                    foreach ($assignedUsers as $userId => $_userName) {
+                        if (isset($officePresenceKeys[$dateKey]['U' . $userId])) { $occupiedDays++; }
+                    }
+                }
+                $dayCount = count($monthData['DAYS']);
+                $averageFree = $dayCount > 0 ? round(max(0, $assignedCount - $occupiedDays / $dayCount), 1) : null;
+                $utilization = $dayCount > 0 && $assignedCount > 0 ? round($occupiedDays / ($assignedCount * $dayCount) * 100, 1) : null;
+                ?>
+                <td<?php if ($averageFree !== null): ?> x:num="<?= number_format($averageFree, 1, '.', '') ?>" style='mso-number-format: "0.0";'<?php endif; ?>><?= $averageFree === null ? '—' : number_format($averageFree, 1, ',', '') ?></td>
+                <td><?= $utilization === null ? '—' : $utilization . '%' ?></td>
+            <?php endforeach; ?>
+        </tr>
+    <?php endforeach; ?>
+    <?php if (empty($departmentSummaryUsers)): ?>
+        <tr><td colspan="<?= 2 + 2 * count($departmentSummaryMonths) ?>">Нет закрепленных РМ по выбранным фильтрам.</td></tr>
+    <?php endif; ?>
+    </tbody>
+    <tfoot>
+        <tr style="font-weight: bold;">
+            <td>Итого</td>
+            <td x:num="<?= number_format($departmentSummaryAssignedTotal, 1, '.', '') ?>" style='mso-number-format: "0.0";'><?= number_format($departmentSummaryAssignedTotal, 1, ',', '') ?></td>
+            <?php foreach ($departmentSummaryMonths as $monthData): ?>
+                <td></td><td></td>
+            <?php endforeach; ?>
+        </tr>
+    </tfoot>
+</table>
+</div>
+</section>
+<?php endif; ?>
+
 <?php if ($activeTab === 'legal-summary'): ?>
 <section class="tab-pane is-active" id="tab-legal-summary" role="tabpanel">
 <h2>Сводные данные по ЮЛ</h2>
@@ -2422,7 +2554,7 @@ header('Content-Type: text/html; charset=UTF-8');
             var table = document.getElementById(button.getAttribute('data-export-table') || '');
             if (!table) { return; }
 
-            var html = '<html><head><meta charset="UTF-8"></head><body>' + table.outerHTML + '</body></html>';
+            var html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body>' + table.outerHTML + '</body></html>';
             var blob = new Blob(['\ufeff', html], {type: 'application/vnd.ms-excel;charset=utf-8;'});
             var link = document.createElement('a');
             var fileName = (button.getAttribute('data-export-name') || 'report') + '_' + (new Date()).toISOString().slice(0, 10) + '.xls';
