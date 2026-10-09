@@ -2171,6 +2171,7 @@ foreach (array_keys($selectedHeadDepartmentIds) as $departmentId) {
     }
 }
 ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
+$departmentSummaryAssignedTotal = array_sum(array_map('count', $departmentSummaryUsers));
 ?>
 <section class="tab-pane is-active" id="tab-department-summary" role="tabpanel">
 <h2>Сводная таблица по подразделениям</h2>
@@ -2211,7 +2212,7 @@ ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
                 $averageFree = $dayCount > 0 ? round($assignedCount - $occupiedDays / $dayCount, 1) : null;
                 $utilization = $dayCount > 0 && $assignedCount > 0 ? round($occupiedDays / ($assignedCount * $dayCount) * 100, 1) : null;
                 ?>
-                <td><?= $averageFree === null ? '—' : $averageFree ?></td>
+                <td<?php if ($averageFree !== null): ?> x:num="<?= number_format($averageFree, 1, '.', '') ?>" style='mso-number-format: "0.0";'<?php endif; ?>><?= $averageFree === null ? '—' : number_format($averageFree, 1, ',', '') ?></td>
                 <td><?= $utilization === null ? '—' : $utilization . '%' ?></td>
             <?php endforeach; ?>
         </tr>
@@ -2220,6 +2221,15 @@ ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
         <tr><td colspan="<?= 2 + 2 * count($departmentSummaryMonths) ?>">Нет закрепленных РМ по выбранным фильтрам.</td></tr>
     <?php endif; ?>
     </tbody>
+    <tfoot>
+        <tr style="font-weight: bold;">
+            <td>Итого</td>
+            <td><?= (int)$departmentSummaryAssignedTotal ?></td>
+            <?php foreach ($departmentSummaryMonths as $monthData): ?>
+                <td></td><td></td>
+            <?php endforeach; ?>
+        </tr>
+    </tfoot>
 </table>
 </div>
 </section>
@@ -2511,7 +2521,7 @@ ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
             var table = document.getElementById(button.getAttribute('data-export-table') || '');
             if (!table) { return; }
 
-            var html = '<html><head><meta charset="UTF-8"></head><body>' + table.outerHTML + '</body></html>';
+            var html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body>' + table.outerHTML + '</body></html>';
             var blob = new Blob(['\ufeff', html], {type: 'application/vnd.ms-excel;charset=utf-8;'});
             var link = document.createElement('a');
             var fileName = (button.getAttribute('data-export-name') || 'report') + '_' + (new Date()).toISOString().slice(0, 10) + '.xls';
