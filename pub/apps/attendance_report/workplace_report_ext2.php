@@ -2153,6 +2153,7 @@ foreach ($periodDays as $dateKey) {
     $departmentSummaryMonths[substr($dateKey, 0, 7)]['DAYS'][] = $dateKey;
 }
 $departmentSummaryUsers = [];
+$departmentSummaryCabinets = [];
 foreach (array_keys($selectedHeadDepartmentIds) as $departmentId) {
     $headUserId = (int)$departments[$departmentId]['UF_HEAD'];
     $ceo1Title = trim((string)($headOrgSummaryMap[$headUserId]['CEO1'] ?? ''));
@@ -2168,14 +2169,46 @@ foreach (array_keys($selectedHeadDepartmentIds) as $departmentId) {
         if (!isset($summaryCabinets[$cabNorm])) { continue; }
         if (!isset($departmentSummaryUsers[$ceo1Title])) { $departmentSummaryUsers[$ceo1Title] = []; }
         $departmentSummaryUsers[$ceo1Title] += $users;
+        if (!isset($departmentSummaryCabinets[$ceo1Title][$cabNorm])) { $departmentSummaryCabinets[$ceo1Title][$cabNorm] = []; }
+        $departmentSummaryCabinets[$ceo1Title][$cabNorm] += $users;
     }
 }
 ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
-$departmentSummaryAssignedTotal = array_sum(array_map('count', $departmentSummaryUsers));
+// The denominator includes every CEO-1, even when the report filters one out.
+$departmentSummaryAllCabinetUsers = [];
+$allAssignedCabinetsByDepartment = $departmentCabinetAssignedUsers;
+foreach ($periodDays as $dateKey) {
+    foreach ($inactiveEventAssignedUsers[$dateKey] ?? [] as $departmentId => $assignedCabinets) {
+        foreach ($assignedCabinets as $cabNorm => $users) {
+            if (!isset($allAssignedCabinetsByDepartment[$departmentId][$cabNorm])) { $allAssignedCabinetsByDepartment[$departmentId][$cabNorm] = []; }
+            $allAssignedCabinetsByDepartment[$departmentId][$cabNorm] += $users;
+        }
+    }
+}
+foreach ($allAssignedCabinetsByDepartment as $departmentId => $assignedCabinets) {
+    $headUserId = (int)($departments[$departmentId]['UF_HEAD'] ?? 0);
+    $ceo1Title = trim((string)($headOrgSummaryMap[$headUserId]['CEO1'] ?? ''));
+    if ($ceo1Title === '') { $ceo1Title = 'Не определено'; }
+    foreach ($assignedCabinets as $cabNorm => $users) {
+        if (!isset($departmentSummaryAllCabinetUsers[$cabNorm][$ceo1Title])) { $departmentSummaryAllCabinetUsers[$cabNorm][$ceo1Title] = []; }
+        $departmentSummaryAllCabinetUsers[$cabNorm][$ceo1Title] += $users;
+    }
+}
+$departmentSummaryWorkplaces = [];
+foreach ($departmentSummaryCabinets as $ceo1Title => $assignedCabinets) {
+    $departmentSummaryWorkplaces[$ceo1Title] = 0;
+    foreach ($assignedCabinets as $cabNorm => $users) {
+        $cabinetAssignedCount = array_sum(array_map('count', $departmentSummaryAllCabinetUsers[$cabNorm] ?? []));
+        if ($cabinetAssignedCount > 0) {
+            $departmentSummaryWorkplaces[$ceo1Title] += (int)$summaryCabinets[$cabNorm]['WORKPLACES'] * count($users) / $cabinetAssignedCount;
+        }
+    }
+}
+$departmentSummaryAssignedTotal = array_sum($departmentSummaryWorkplaces);
 ?>
 <section class="tab-pane is-active" id="tab-department-summary" role="tabpanel">
 <h2>Сводная таблица по подразделениям</h2>
-<p class="dashboard-muted">Закрепленные РМ — сотрудники с привязкой к кабинету (включая неактивных сотрудников с посещениями за выбранный период). Свободные РМ — среднее за рабочие дни месяца в выбранном периоде. Загрузка — доля занятых РМ за эти дни; учитывается присутствие в офисе более 4 часов. Если рабочих дней нет, отображается «—».</p>
+<p class="dashboard-muted">Закрепленные РМ — сумма рабочих мест по справочнику кабинетов, к которым привязаны сотрудники подразделения (включая неактивных сотрудников с посещениями за выбранный период). Рабочие места общего кабинета распределяются пропорционально числу закрепленных сотрудников среди всех СЕО-1, независимо от фильтра подразделения. Каждый сотрудник учитывается один раз внутри СЕО-1. «Итого» — сумма распределенных РМ по выбранным подразделениям. Свободные РМ — среднее за рабочие дни месяца в выбранном периоде. Загрузка — доля занятых РМ за эти дни; учитывается присутствие в офисе более 4 часов. Если рабочих дней нет, отображается «—».</p>
 <div class="report-toolbar"><button type="button" class="export-button" data-export-table="department-summary-report-table" data-export-name="department_summary">Экспорт в Excel</button></div>
 <div style="overflow-x: auto;">
 <table id="department-summary-report-table">
@@ -2196,10 +2229,10 @@ $departmentSummaryAssignedTotal = array_sum(array_map('count', $departmentSummar
     </thead>
     <tbody>
     <?php foreach ($departmentSummaryUsers as $ceo1Title => $assignedUsers): ?>
-        <?php $assignedCount = count($assignedUsers); ?>
+        <?php $assignedCount = $departmentSummaryWorkplaces[$ceo1Title]; ?>
         <tr>
             <td><?=htmlspecialcharsbx((string)$ceo1Title)?></td>
-            <td><?= $assignedCount ?></td>
+            <td x:num="<?= number_format($assignedCount, 1, '.', '') ?>" style='mso-number-format: "0.0";'><?= number_format($assignedCount, 1, ',', '') ?></td>
             <?php foreach ($departmentSummaryMonths as $monthData): ?>
                 <?php
                 $occupiedDays = 0;
@@ -2209,7 +2242,7 @@ $departmentSummaryAssignedTotal = array_sum(array_map('count', $departmentSummar
                     }
                 }
                 $dayCount = count($monthData['DAYS']);
-                $averageFree = $dayCount > 0 ? round($assignedCount - $occupiedDays / $dayCount, 1) : null;
+                $averageFree = $dayCount > 0 ? round(max(0, $assignedCount - $occupiedDays / $dayCount), 1) : null;
                 $utilization = $dayCount > 0 && $assignedCount > 0 ? round($occupiedDays / ($assignedCount * $dayCount) * 100, 1) : null;
                 ?>
                 <td<?php if ($averageFree !== null): ?> x:num="<?= number_format($averageFree, 1, '.', '') ?>" style='mso-number-format: "0.0";'<?php endif; ?>><?= $averageFree === null ? '—' : number_format($averageFree, 1, ',', '') ?></td>
@@ -2224,7 +2257,7 @@ $departmentSummaryAssignedTotal = array_sum(array_map('count', $departmentSummar
     <tfoot>
         <tr style="font-weight: bold;">
             <td>Итого</td>
-            <td><?= (int)$departmentSummaryAssignedTotal ?></td>
+            <td x:num="<?= number_format($departmentSummaryAssignedTotal, 1, '.', '') ?>" style='mso-number-format: "0.0";'><?= number_format($departmentSummaryAssignedTotal, 1, ',', '') ?></td>
             <?php foreach ($departmentSummaryMonths as $monthData): ?>
                 <td></td><td></td>
             <?php endforeach; ?>
