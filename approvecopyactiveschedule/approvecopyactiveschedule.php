@@ -110,6 +110,7 @@ class CBPapprovecopyactiveschedule
 			"NotifyText" => "",
 			"NotifySubject" => "",
 			"ShowTaskLinkInEmail" => "Y",
+			"EmailApprovalEnabled" => "N",
 			"Reminder3Text" => "",
 			"Reminder2Text" => "",
 			"Reminder1Text" => "",
@@ -862,6 +863,7 @@ $this->WriteToTrackingService(
 			"NotifySubject" => "notify_subject",
 			"NotifyText" => "notify_text",
 			"ShowTaskLinkInEmail" => "show_task_link_in_email",
+			"EmailApprovalEnabled" => "email_approval_enabled",
 			"Reminder1Hours" => "rem1_hours",
 			"Reminder2Hours" => "rem2_hours",
 			"Reminder3Hours" => "rem3_hours",
@@ -963,6 +965,7 @@ $this->WriteToTrackingService(
 			$arCurrentValues['status_message'] = GetMessage("BPAA_ACT_INFO");
 		if (!array_key_exists("show_task_link_in_email", $arCurrentValues) || $arCurrentValues["show_task_link_in_email"] == '')
 			$arCurrentValues["show_task_link_in_email"] = "Y";
+		$arCurrentValues["email_approval_enabled"] = ($arCurrentValues["email_approval_enabled"] ?? "N") === "Y" ? "Y" : "N";
 		if ($arCurrentValues['task_button1_message'] == '')
 			$arCurrentValues['task_button1_message'] = GetMessage("BPAA_ACT_BUTTON1");
 		if ($arCurrentValues['task_button2_message'] == '')
@@ -993,6 +996,7 @@ $this->WriteToTrackingService(
 			"notify_subject" => "NotifySubject",
 			"notify_text" => "NotifyText",
 			"show_task_link_in_email" => "ShowTaskLinkInEmail",
+			"email_approval_enabled" => "EmailApprovalEnabled",
 			"rem1_hours" => "Reminder1Hours",
 			"rem2_hours" => "Reminder2Hours",
 			"rem3_hours" => "Reminder3Hours",
@@ -1039,6 +1043,7 @@ $this->WriteToTrackingService(
 				$arProperties[$value] = $arCurrentValues[$key] ?? null;
 			}
 		}
+		$arProperties["EmailApprovalEnabled"] = ($arCurrentValues["email_approval_enabled"] ?? "N") === "Y" ? "Y" : "N";
 		$arProperties["Users"] = CBPHelper::UsersStringToArray($arCurrentValues["approve_users"], $documentType, $arErrors);
 		if (count($arErrors) > 0)
 			return false;

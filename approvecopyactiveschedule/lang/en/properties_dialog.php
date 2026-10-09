@@ -34,3 +34,4 @@ $MESS["BPAR_PD_TASK_BUTTON2_MESSAGE"] = "Reject button text";
 $MESS["BPAR_PD_TASK_BUTTON3_MESSAGE"] = "Text of the Request changes button";
 
 $MESS["BPAR_PD_SHOW_TASK_LINK_IN_EMAIL"] = "Show task link in e-mail";
+$MESS["BPAA_PD_EMAIL_APPROVAL_ENABLED"] = "Allow approval by replying to e-mail";
