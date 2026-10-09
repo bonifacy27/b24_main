@@ -265,7 +265,7 @@ $resolveOfficeByReverseAp = static function ($reverseAp): string {
     if ($turnstileId >= 16 && $turnstileId <= 17) { return 'ул. Рентгена, 5А'; }
     return '';
 };
-$availableTabs = ['dashboard' => true, 'employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true];
+$availableTabs = ['dashboard' => true, 'employees' => true, 'unknown' => true, 'temporary' => true, 'cabinet-summary' => true, 'legal-summary' => true, 'department-summary' => true];
 $activeTab = isset($_GET['active_tab']) && isset($availableTabs[(string)$_GET['active_tab']]) ? (string)$_GET['active_tab'] : 'dashboard';
 
 $undefinedLegalEntity = 'Не определено';
@@ -1663,6 +1663,7 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php endif; ?>
     <button type="button" class="tab-button<?= $activeTab === 'cabinet-summary' ? ' is-active' : '' ?>" data-tab-target="cabinet-summary" role="tab" aria-selected="<?= $activeTab === 'cabinet-summary' ? 'true' : 'false' ?>">Сводная таблица по кабинетам</button>
     <button type="button" class="tab-button<?= $activeTab === 'legal-summary' ? ' is-active' : '' ?>" data-tab-target="legal-summary" role="tab" aria-selected="<?= $activeTab === 'legal-summary' ? 'true' : 'false' ?>">Сводные данные по ЮЛ</button>
+    <button type="button" class="tab-button<?= $activeTab === 'department-summary' ? ' is-active' : '' ?>" data-tab-target="department-summary" role="tab" aria-selected="<?= $activeTab === 'department-summary' ? 'true' : 'false' ?>">Сводная таблица по подразделениям</button>
 </div>
 
 <?php if ($activeTab === 'dashboard'): ?>
@@ -2133,6 +2134,94 @@ header('Content-Type: text/html; charset=UTF-8');
     <?php endforeach; ?>
     </tbody>
 </table>
+</section>
+<?php endif; ?>
+
+<?php if ($activeTab === 'department-summary'): ?>
+<?php
+// Group by CEO-1 and use user IDs to avoid counting an employee twice
+// when several head departments belong to the same CEO-1.
+$departmentSummaryMonths = [];
+$monthNames = [1 => 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+for ($month = (clone $dateFrom)->modify('first day of this month'); $month <= $dateTo; $month->modify('+1 month')) {
+    $departmentSummaryMonths[$month->format('Y-m')] = [
+        'LABEL' => $monthNames[(int)$month->format('n')] . '.' . $month->format('y'),
+        'DAYS' => [],
+    ];
+}
+foreach ($periodDays as $dateKey) {
+    $departmentSummaryMonths[substr($dateKey, 0, 7)]['DAYS'][] = $dateKey;
+}
+$departmentSummaryUsers = [];
+foreach (array_keys($selectedHeadDepartmentIds) as $departmentId) {
+    $headUserId = (int)$departments[$departmentId]['UF_HEAD'];
+    $ceo1Title = trim((string)($headOrgSummaryMap[$headUserId]['CEO1'] ?? ''));
+    if ($ceo1Title === '') { $ceo1Title = 'Не определено'; }
+    $assignedCabinets = $departmentCabinetAssignedUsers[$departmentId] ?? [];
+    foreach ($periodDays as $dateKey) {
+        foreach ($inactiveEventAssignedUsers[$dateKey][$departmentId] ?? [] as $cabNorm => $users) {
+            if (!isset($assignedCabinets[$cabNorm])) { $assignedCabinets[$cabNorm] = []; }
+            $assignedCabinets[$cabNorm] += $users;
+        }
+    }
+    foreach ($assignedCabinets as $cabNorm => $users) {
+        if (!isset($summaryCabinets[$cabNorm])) { continue; }
+        if (!isset($departmentSummaryUsers[$ceo1Title])) { $departmentSummaryUsers[$ceo1Title] = []; }
+        $departmentSummaryUsers[$ceo1Title] += $users;
+    }
+}
+ksort($departmentSummaryUsers, SORT_NATURAL | SORT_FLAG_CASE);
+?>
+<section class="tab-pane is-active" id="tab-department-summary" role="tabpanel">
+<h2>Сводная таблица по подразделениям</h2>
+<p class="dashboard-muted">Закрепленные РМ — сотрудники с привязкой к кабинету (включая неактивных сотрудников с посещениями за выбранный период). Свободные РМ — среднее за рабочие дни месяца в выбранном периоде. Загрузка — доля занятых РМ за эти дни; учитывается присутствие в офисе более 4 часов. Если рабочих дней нет, отображается «—».</p>
+<div class="report-toolbar"><button type="button" class="export-button" data-export-table="department-summary-report-table" data-export-name="department_summary">Экспорт в Excel</button></div>
+<div style="overflow-x: auto;">
+<table id="department-summary-report-table">
+    <thead>
+    <tr>
+        <th rowspan="2">Подразделение (СЕО-1)</th>
+        <th rowspan="2" class="col-narrow">Кол-во закрепленных РМ за подразделением</th>
+        <?php foreach ($departmentSummaryMonths as $monthData): ?>
+            <th colspan="2"><?=htmlspecialcharsbx($monthData['LABEL'])?></th>
+        <?php endforeach; ?>
+    </tr>
+    <tr>
+        <?php foreach ($departmentSummaryMonths as $monthData): ?>
+            <th class="col-narrow">Кол-во свободных РМ</th>
+            <th>% загрузки</th>
+        <?php endforeach; ?>
+    </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($departmentSummaryUsers as $ceo1Title => $assignedUsers): ?>
+        <?php $assignedCount = count($assignedUsers); ?>
+        <tr>
+            <td><?=htmlspecialcharsbx((string)$ceo1Title)?></td>
+            <td><?= $assignedCount ?></td>
+            <?php foreach ($departmentSummaryMonths as $monthData): ?>
+                <?php
+                $occupiedDays = 0;
+                foreach ($monthData['DAYS'] as $dateKey) {
+                    foreach ($assignedUsers as $userId => $_userName) {
+                        if (isset($officePresenceKeys[$dateKey]['U' . $userId])) { $occupiedDays++; }
+                    }
+                }
+                $dayCount = count($monthData['DAYS']);
+                $averageFree = $dayCount > 0 ? round($assignedCount - $occupiedDays / $dayCount, 1) : null;
+                $utilization = $dayCount > 0 && $assignedCount > 0 ? round($occupiedDays / ($assignedCount * $dayCount) * 100, 1) : null;
+                ?>
+                <td><?= $averageFree === null ? '—' : $averageFree ?></td>
+                <td><?= $utilization === null ? '—' : $utilization . '%' ?></td>
+            <?php endforeach; ?>
+        </tr>
+    <?php endforeach; ?>
+    <?php if (empty($departmentSummaryUsers)): ?>
+        <tr><td colspan="<?= 2 + 2 * count($departmentSummaryMonths) ?>">Нет закрепленных РМ по выбранным фильтрам.</td></tr>
+    <?php endif; ?>
+    </tbody>
+</table>
+</div>
 </section>
 <?php endif; ?>
 
