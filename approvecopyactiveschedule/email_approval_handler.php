@@ -20,16 +20,10 @@ class ReplyHandler
         if (preg_match('/^(?:Согласовано|Согласовать)[.!]?$/iu', $command)) $approve = true;
         elseif (preg_match('/^(?:Отклонено|Отклонить)[.!]?$/iu', $command)) $approve = false;
         else throw new \InvalidArgumentException('unknown_decision');
-        $comment = array();
-        foreach ($lines as $line)
-        {
-            // Stop at a quote, signature or a recognizable reply delimiter.
-            if (preg_match('/^\s*>|^--\s*$|^-{2,}\s*(Original Message|Исходное сообщение)|^On .+wrote:|^.*написал\(а\):/iu', $line)) break;
-            if (preg_match('/^\s*Согласование по почте:/iu', $line)) break;
-            if (preg_match('/ACS:[a-f0-9]{64}/i', $line)) break;
-            $comment[] = $line;
-        }
-        $comment = trim(implode("\n", $comment));
+        // Only the physical line immediately after the decision is a comment.
+        $comment = trim((string)($lines[0] ?? ''));
+        if (preg_match('/^>|^--|^On .+wrote:|^.*написал\(а\):|^Согласование по почте:/iu', $comment)
+            || preg_match('/ACS:[a-f0-9]{64}/i', $comment)) $comment = '';
         if (strlen($comment) > 16384) throw new \InvalidArgumentException('comment_too_large');
         return array('hash' => hash('sha256', reset($tokens)), 'approve' => $approve, 'comment' => $comment);
     }
