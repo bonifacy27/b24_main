@@ -499,13 +499,28 @@ function csvClean(string $s): string
     return $s;
 }
 
+
+/** Signal that the download is ready; downloads leave the report form on screen. */
+function signalReportDownloadReady(): void
+{
+    $token = $_GET['download_token'] ?? '';
+    if (!is_string($token) || !preg_match('/^[a-z0-9]{1,64}$/D', $token)) return;
+    setcookie('time_report_download', $token, [
+        'expires' => time() + 300,
+        'path' => '/',
+        'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+        'httponly' => false,
+        'samesite' => 'Lax',
+    ]);
+}
+
 // ----------------------------
 // UI FORM
 // ----------------------------
 if ($exportFormat === '') {
     echo "<h1 style='font-family:Arial'>Отчет по рабочему времени сотрудников</h1>";
     echo "
-<form method='GET' style='margin:15px 0; font-family:Arial'>
+<form id='time-report-form' method='GET' style='margin:15px 0; font-family:Arial'>
 <label><b>Период:</b></label><br>
 <label>с <input type='date' name='date_from' value='".h($dateFromStr)."'></label>
 &nbsp;&nbsp;
@@ -526,6 +541,61 @@ if ($exportFormat === '') {
 <button type='submit' name='export' value='HTMLXLS'>Выгрузить (HTML-XLS)</button>
 <button type='submit' name='export' value='CSV'>Выгрузить (CSV)</button>
 </form>
+
+<script>
+(function () {
+    var form = document.getElementById('time-report-form');
+    var buttons = form.querySelectorAll('button[type=\"submit\"]');
+    var busy = false;
+    var poll = null;
+    var tokenInput = null;
+    var exportInput = null;
+    function reset() {
+        busy = false;
+        buttons.forEach(function (button) {
+            button.disabled = false;
+            button.style.opacity = '';
+            button.style.cursor = '';
+        });
+        form.removeAttribute('aria-busy');
+        if (poll) { clearInterval(poll); poll = null; }
+        if (tokenInput) { tokenInput.remove(); tokenInput = null; }
+        if (exportInput) { exportInput.remove(); exportInput = null; }
+    }
+    form.addEventListener('submit', function (event) {
+        if (busy) { event.preventDefault(); return; }
+        var submitter = event.submitter || document.activeElement;
+        // Disabled buttons are not submitted: preserve the selected export format.
+        if (submitter && submitter.form === form && submitter.name === 'export') {
+            exportInput = document.createElement('input');
+            exportInput.type = 'hidden';
+            exportInput.name = 'export';
+            exportInput.value = submitter.value;
+            form.appendChild(exportInput);
+            var token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+            tokenInput = document.createElement('input');
+            tokenInput.type = 'hidden';
+            tokenInput.name = 'download_token';
+            tokenInput.value = token;
+            form.appendChild(tokenInput);
+            poll = setInterval(function () {
+                if (document.cookie.split('; ').indexOf('time_report_download=' + token) !== -1) {
+                    document.cookie = 'time_report_download=; Max-Age=0; Path=/; SameSite=Lax';
+                    reset();
+                }
+            }, 500);
+        }
+        busy = true;
+        form.setAttribute('aria-busy', 'true');
+        buttons.forEach(function (button) {
+            button.disabled = true;
+            button.style.opacity = '0.5';
+            button.style.cursor = 'wait';
+        });
+    });
+    window.addEventListener('pageshow', reset);
+})();
+</script>
 <hr>";
 }
 
@@ -903,6 +973,22 @@ if ($exportFormat === 'HTMLXLS') {
     @ignore_user_abort(true);
     disableOutputBuffers();
 
+    $rows = generateReportRows(
+        $userIds,
+        $usersById,
+        $dates,
+        $enumMaps,
+        $presenceTypeMap,
+        $fromStart,
+        $toEnd,
+        $HL5_FIELD_DATE,
+        $HL5_FIELD_USER,
+        $HL91_FIELD_DATE,
+        $HL91_FIELD_USER,
+        EXCEL_USER_CHUNK
+    );
+    signalReportDownloadReady();
+
     $filename = "Отчет_рабочее_время_{$dateFromStr}_{$dateToStr}.xls";
 
     header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
@@ -918,20 +1004,6 @@ if ($exportFormat === 'HTMLXLS') {
     }
     echo '</tr>' . "\n";
 
-    $rows = generateReportRows(
-        $userIds,
-        $usersById,
-        $dates,
-        $enumMaps,
-        $presenceTypeMap,
-        $fromStart,
-        $toEnd,
-        $HL5_FIELD_DATE,
-        $HL5_FIELD_USER,
-        $HL91_FIELD_DATE,
-        $HL91_FIELD_USER,
-        EXCEL_USER_CHUNK
-    );
 
     foreach ($rows as $row) {
         echo '<tr>';
@@ -975,6 +1047,22 @@ if ($exportFormat === 'CSV') {
     @ignore_user_abort(true);
     disableOutputBuffers();
 
+    $rows = generateReportRows(
+        $userIds,
+        $usersById,
+        $dates,
+        $enumMaps,
+        $presenceTypeMap,
+        $fromStart,
+        $toEnd,
+        $HL5_FIELD_DATE,
+        $HL5_FIELD_USER,
+        $HL91_FIELD_DATE,
+        $HL91_FIELD_USER,
+        EXCEL_USER_CHUNK
+    );
+    signalReportDownloadReady();
+
     $filename = "Отчет_рабочее_время_{$dateFromStr}_{$dateToStr}.csv";
 
     header('Content-Type: text/csv; charset=UTF-8');
@@ -993,20 +1081,6 @@ if ($exportFormat === 'CSV') {
     fputcsv($out, $headers, ';');
 
     $rowCounter = 0;
-    $rows = generateReportRows(
-        $userIds,
-        $usersById,
-        $dates,
-        $enumMaps,
-        $presenceTypeMap,
-        $fromStart,
-        $toEnd,
-        $HL5_FIELD_DATE,
-        $HL5_FIELD_USER,
-        $HL91_FIELD_DATE,
-        $HL91_FIELD_USER,
-        EXCEL_USER_CHUNK
-    );
 
     foreach ($rows as $row) {
         $values = [
