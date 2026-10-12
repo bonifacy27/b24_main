@@ -11,20 +11,21 @@ class ReplyHandler
     {
         if (strlen($subject) > 8192 || strlen($body) > 262144)
             throw new \InvalidArgumentException('message_too_large');
-        preg_match_all('/\[ACS:([a-f0-9]{64})\]/i', $subject, $matches);
+        preg_match_all('/\bACS:([a-f0-9]{64})(?![a-f0-9])/i', $body . "\n" . $subject, $matches);
         $tokens = array_unique(array_map('strtolower', $matches[1]));
         if (count($tokens) !== 1) throw new \InvalidArgumentException('ambiguous_token');
         $lines = preg_split('/\r\n|\r|\n/', $body);
         while ($lines && trim($lines[0]) === '') array_shift($lines);
         $command = trim((string)array_shift($lines));
-        if (preg_match('/^Согласовано[.!]?$/iu', $command)) $approve = true;
-        elseif (preg_match('/^Отклонено[.!]?$/iu', $command)) $approve = false;
+        if (preg_match('/^(?:Согласовано|Согласовать)[.!]?$/iu', $command)) $approve = true;
+        elseif (preg_match('/^(?:Отклонено|Отклонить)[.!]?$/iu', $command)) $approve = false;
         else throw new \InvalidArgumentException('unknown_decision');
         $comment = array();
         foreach ($lines as $line)
         {
             // Stop at a quote, signature or a recognizable reply delimiter.
             if (preg_match('/^\s*>|^--\s*$|^-{2,}\s*(Original Message|Исходное сообщение)|^On .+wrote:|^.*написал\(а\):/iu', $line)) break;
+            if (preg_match('/^\s*Согласование по почте:/iu', $line)) break;
             if (preg_match('/ACS:[a-f0-9]{64}/i', $line)) break;
             $comment[] = $line;
         }
