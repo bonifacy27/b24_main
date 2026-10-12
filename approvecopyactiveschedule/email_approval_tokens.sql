@@ -1,0 +1,17 @@
+-- Run once on the portal MySQL/MariaDB database before enabling email approval.
+CREATE TABLE IF NOT EXISTS acs_email_approval_tokens (
+    ID INT NOT NULL AUTO_INCREMENT,
+    TOKEN_HASH VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    TASK_ID INT NOT NULL,
+    WORKFLOW_ID VARCHAR(255) NOT NULL,
+    ACTIVITY_NAME VARCHAR(255) NOT NULL,
+    USER_ID INT NOT NULL,
+    EMAIL VARCHAR(320) NOT NULL,
+    CREATED_AT DATETIME NOT NULL,
+    EXPIRES_AT DATETIME NOT NULL,
+    STATUS VARCHAR(16) NOT NULL,
+    PRIMARY KEY (ID),
+    UNIQUE KEY ux_acs_token_hash (TOKEN_HASH),
+    UNIQUE KEY ux_acs_task_user (TASK_ID, USER_ID),
+    KEY ix_acs_expiration (STATUS, EXPIRES_AT)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

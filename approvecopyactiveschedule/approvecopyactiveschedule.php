@@ -280,6 +280,9 @@ class CBPapprovecopyactiveschedule
 			$addAgent($this->Reminder3Hours, $this->Reminder3Subject, $this->Reminder3Text);
 		}
 		// === Email notifications: send to all task executors ===
+		$emailApprovalEnabled = $this->IsPropertyExists("EmailApprovalEnabled") && $this->EmailApprovalEnabled === "Y";
+		$tokenExpiresAt = time() + 7 * 24 * 3600;
+		if ($timeoutDuration > 0) $tokenExpiresAt = min($tokenExpiresAt, time() + $timeoutDuration);
 		try
 		{
 			$notifyText = (string)$this->NotifyText;
@@ -287,7 +290,7 @@ class CBPapprovecopyactiveschedule
 			$taskLink = 'https://ourtricolortv.nsc.ru/company/personal/bizproc/' . intval($this->taskId) . '/';
 			if (!empty($arUsers))
 			{
-				foreach ($arUsers as $uid)
+				foreach (array_unique($arUsers) as $uid)
 				{
 					$uid = (int)$uid;
 					if ($uid <= 0) continue;
@@ -302,18 +305,39 @@ class CBPapprovecopyactiveschedule
 							{
 								$mailBody = ($mailBody ? $mailBody."\n" : '') . 'Ссылка на задание: ' . $taskLink;
 							}
-							\Bitrix\Main\Mail\Mail::send(array(
+							$mailSubject = ($this->NotifySubject !== '' ? $this->NotifySubject : ($this->Name ? $this->Name : 'Business Process Task'));
+							$issuedToken = null;
+							if ($emailApprovalEnabled)
+							{
+								try
+								{
+									require_once __DIR__ . '/email_approval_tokens.php';
+									$issuedToken = \Acs\EmailApproval\TokenTable::issue($this->taskId, $this->GetWorkflowInstanceId(), $this->name, $uid, $email, $tokenExpiresAt);
+									$mailSubject .= ' [ACS:' . $issuedToken['token'] . ']';
+									$mailBody .= "\n\nКод согласования: ACS:" . $issuedToken['token'];
+								}
+								catch (\Throwable $e)
+								{
+									$this->WriteToTrackingService('Не удалось создать токен почтового согласования для user_' . $uid . '. Отправляется обычное уведомление.');
+								}
+							}
+							$mailSent = \Bitrix\Main\Mail\Mail::send(array(
 								'TO' => $email,
-								'SUBJECT' => ($this->NotifySubject !== '' ? $this->NotifySubject : ($this->Name ? $this->Name : 'Business Process Task')),
+								'SUBJECT' => $mailSubject,
 								'BODY' => $mailBody,
 								'HEADER' => array('Precedence' => 'bulk')
 							));
+							if (!$mailSent && $issuedToken)
+							{
+								\Acs\EmailApproval\TokenTable::revoke($issuedToken['id']);
+								$this->WriteToTrackingService('Не удалось отправить уведомление для user_' . $uid . '; токен отозван.');
+							}
 						}
 					}
 				}
 			}
 		}
-		catch (\Exception $e) { /* keep silent */ }
+		catch (\Throwable $e) { $this->WriteToTrackingService('Ошибка отправки уведомления о задании.'); }
 		$this->TaskId = $this->taskId;
 		$this->taskUsers = $arUsers;
 		$this->TotalCount = count($arUsers);
