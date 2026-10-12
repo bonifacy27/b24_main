@@ -132,6 +132,8 @@ class CBPapprovecopyactiveschedule
 			"SetStatusMessage" => "Y",
 			"LastApprover" => null,
 			"LastApproverComment" => '',
+			"ConfirmationMethod" => '',
+			"ConfirmationMethods" => array(),
 			"Approvers" => "",
 			"Rejecters" => "",
 			"UserApprovers" => [],
@@ -163,6 +165,8 @@ class CBPapprovecopyactiveschedule
 			'NotApprovedCount' => array('Type' => 'int'),
 			'LastApprover' => array('Type' => 'user'),
 			'LastApproverComment' => array('Type' => 'string'),
+			'ConfirmationMethod' => array('Type' => 'string'),
+			'ConfirmationMethods' => array('Type' => 'string', 'Multiple' => true),
 			'Approvers' => array('Type' => 'string'),
 			'Rejecters' => array('Type' => 'string'),
 			'UserApprovers' => array('Type' => 'user', 'Multiple' => true),
@@ -170,6 +174,8 @@ class CBPapprovecopyactiveschedule
 			'IsTimeout' => array('Type' => 'int'),
 			'RefineAllowed' => array('Type' => 'string'), // <<< ТИП
 		), array(
+			'ConfirmationMethod' => array('Name' => 'Способ последнего подтверждения (email/portal)', 'Type' => 'string'),
+			'ConfirmationMethods' => array('Name' => 'Способы подтверждения исполнителей', 'Type' => 'string', 'Multiple' => true),
 			'RefinePressed' => array('Name' => GetMessage('BPAA_DESCR_REFINE_PRESSED'), 'Type' => 'string'),
 			'RefineAllowed' => array('Name' => GetMessage('BPAA_DESCR_REFINE_ALLOWED'), 'Type' => 'string'), // <<< ЛОКАЛИЗАЦИЯ
 		));
@@ -313,8 +319,7 @@ class CBPapprovecopyactiveschedule
 								{
 									require_once __DIR__ . '/email_approval_tokens.php';
 									$issuedToken = \Acs\EmailApproval\TokenTable::issue($this->taskId, $this->GetWorkflowInstanceId(), $this->name, $uid, $email, $tokenExpiresAt);
-									$mailSubject .= ' [ACS:' . $issuedToken['token'] . ']';
-									$mailBody .= "\n\nКод согласования: ACS:" . $issuedToken['token'];
+									$mailBody .= "\n\nСогласование по почте:\nЭто задание можно согласовать по почте: ответьте на это письмо словом \"Согласовано\" или \"Отклонено\" в первой строке. При ответе не изменяйте содержимое исходного письма — сохраните его в цитате.\nКод согласования: ACS:" . $issuedToken['token'];
 								}
 								catch (\Throwable $e)
 								{
@@ -501,6 +506,14 @@ class CBPapprovecopyactiveschedule
 			), false, false, array('ID'))->Fetch();
 			if (!$waiting) return;
 		}
+		$confirmationMethod = !empty($arEventParameters['EMAIL_TOKEN_ID']) ? 'email' : 'portal';
+		if ($this->IsPropertyExists('ConfirmationMethod')) $this->ConfirmationMethod = $confirmationMethod;
+		if ($this->IsPropertyExists('ConfirmationMethods'))
+		{
+			$methods = (array)$this->ConfirmationMethods;
+			$methods[] = 'user_' . $arEventParameters['REAL_USER_ID'] . ':' . $confirmationMethod;
+			$this->ConfirmationMethods = $methods;
+		}
 		if ($this->IsPropertyExists("LastApprover"))
 			$this->LastApprover = "user_".$arEventParameters["REAL_USER_ID"];
 		if ($this->IsPropertyExists("LastApproverComment"))
@@ -527,7 +540,7 @@ else
 	$trackingMessage = GetMessage("BPAA_ACT_NONAPPROVE_TRACK");
 }
 $this->WriteToTrackingService(
-	str_replace(
+	($confirmationMethod === 'email' ? '[По почте] ' : '[На портале] ') . str_replace(
 		array("#PERSON#", "#COMMENT#"),
 		array(
 			"{=user:user_".$arEventParameters["REAL_USER_ID"]."}",
@@ -700,6 +713,8 @@ $this->WriteToTrackingService(
 		$this->UserRejecters = [];
 		$this->LastApprover = null;
 		$this->LastApproverComment = '';
+		if ($this->IsPropertyExists('ConfirmationMethod')) $this->ConfirmationMethod = '';
+		if ($this->IsPropertyExists('ConfirmationMethods')) $this->ConfirmationMethods = array();
 	}
 	public static function ShowTaskForm($arTask, $userId, $userName = "")
 	{
@@ -1108,6 +1123,8 @@ $this->WriteToTrackingService(
 	public static function GetReturnValues()
 	{
 		return array(
+			"ConfirmationMethod" => array('Name' => 'Способ последнего подтверждения (email/portal)', 'Type' => 'string'),
+			"ConfirmationMethods" => array('Name' => 'Способы подтверждения исполнителей', 'Type' => 'string', 'Multiple' => true),
 			"RefinePressed" => array(
 				"Name" => GetMessage("BPAA_DESCR_REFINE_PRESSED"),
 				"Type" => "string",
