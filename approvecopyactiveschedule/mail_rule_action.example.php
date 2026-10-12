@@ -3,12 +3,13 @@
 $acsRoot = rtrim((string)\Bitrix\Main\Application::getDocumentRoot(), '/');
 $acsLogFile = $acsRoot . '/upload/logs/acs_email_approval.log';
 $acsMessageId = (int)($arMessageFields['ID'] ?? 0);
-$acsLog = static function ($status, $taskId = 0, $errorClass = '') use ($acsLogFile, $acsMessageId) {
+$acsLog = static function ($status, $taskId = 0, $errorClass = '', $errorFile = '', $errorLine = 0) use ($acsLogFile, $acsMessageId) {
     $dir = dirname($acsLogFile);
     if (!is_dir($dir)) @mkdir($dir, 0750, true);
     $line = date('c') . ' message_id=' . $acsMessageId
         . ' status=' . $status . ' task_id=' . (int)$taskId;
     if ($errorClass !== '') $line .= ' error_class=' . $errorClass;
+    if ($errorFile !== '') $line .= ' error_file=' . $errorFile . ' error_line=' . (int)$errorLine;
     if (@file_put_contents($acsLogFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX) === false) {
         error_log('ACS: cannot write ' . $acsLogFile . '; message_id=' . $acsMessageId);
     }
@@ -37,8 +38,12 @@ try {
         return;
     }
     $acsResult = \Acs\EmailApproval\MailRuleAdapter::handle($arMessageFields, $acsMailConfig);
-    $acsLog($acsResult['status'], $acsResult['task_id'] ?? 0);
+    $acsLog(
+        $acsResult['status'], $acsResult['task_id'] ?? 0,
+        $acsResult['error_class'] ?? '', $acsResult['error_file'] ?? '',
+        $acsResult['error_line'] ?? 0
+    );
 } catch (\Throwable $e) {
     // Exception messages can contain secrets; log only the class.
-    $acsLog('rule_exception', 0, get_class($e));
+    $acsLog('rule_exception', 0, get_class($e), basename($e->getFile()), $e->getLine());
 }

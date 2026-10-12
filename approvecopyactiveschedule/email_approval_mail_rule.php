@@ -112,7 +112,12 @@ class MailRuleAdapter
         catch (\Throwable $e)
         {
             // Do not expose database errors, headers or raw tokens to the mail log.
-            return array('status' => 'handler_error');
+            return array(
+                'status' => 'handler_error',
+                'error_class' => get_class($e),
+                'error_file' => basename($e->getFile()),
+                'error_line' => $e->getLine(),
+            );
         }
     }
 }
