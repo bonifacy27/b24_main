@@ -53,6 +53,9 @@ Loader::includeModule('intranet');
 const ORG_IBLOCK_ID = 5;
 const HL_SCHEDULES  = 91;
 const HL_RECALC     = 5;
+const HL_EVENTS     = 3;
+const HL_EVENT_ENTRY = 45;
+const HL_EVENT_EXIT  = 46;
 const HL_PRES_TYPES = 93;
 
 const DATE_FIELD_CANDIDATES = ['UF_DATE','UF_DAY','UF_WORK_DATE','UF_DATE_TIME','UF_DATETIME','UF_DAY_DATE'];
@@ -496,13 +499,28 @@ function csvClean(string $s): string
     return $s;
 }
 
+
+/** Signal that the download is ready; downloads leave the report form on screen. */
+function signalReportDownloadReady(): void
+{
+    $token = $_GET['download_token'] ?? '';
+    if (!is_string($token) || !preg_match('/^[a-z0-9]{1,64}$/D', $token)) return;
+    setcookie('time_report_download', $token, [
+        'expires' => time() + 300,
+        'path' => '/',
+        'secure' => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+        'httponly' => false,
+        'samesite' => 'Lax',
+    ]);
+}
+
 // ----------------------------
 // UI FORM
 // ----------------------------
 if ($exportFormat === '') {
     echo "<h1 style='font-family:Arial'>Отчет по рабочему времени сотрудников</h1>";
     echo "
-<form method='GET' style='margin:15px 0; font-family:Arial'>
+<form id='time-report-form' method='GET' style='margin:15px 0; font-family:Arial'>
 <label><b>Период:</b></label><br>
 <label>с <input type='date' name='date_from' value='".h($dateFromStr)."'></label>
 &nbsp;&nbsp;
@@ -523,6 +541,61 @@ if ($exportFormat === '') {
 <button type='submit' name='export' value='HTMLXLS'>Выгрузить (HTML-XLS)</button>
 <button type='submit' name='export' value='CSV'>Выгрузить (CSV)</button>
 </form>
+
+<script>
+(function () {
+    var form = document.getElementById('time-report-form');
+    var buttons = form.querySelectorAll('button[type=\"submit\"]');
+    var busy = false;
+    var poll = null;
+    var tokenInput = null;
+    var exportInput = null;
+    function reset() {
+        busy = false;
+        buttons.forEach(function (button) {
+            button.disabled = false;
+            button.style.opacity = '';
+            button.style.cursor = '';
+        });
+        form.removeAttribute('aria-busy');
+        if (poll) { clearInterval(poll); poll = null; }
+        if (tokenInput) { tokenInput.remove(); tokenInput = null; }
+        if (exportInput) { exportInput.remove(); exportInput = null; }
+    }
+    form.addEventListener('submit', function (event) {
+        if (busy) { event.preventDefault(); return; }
+        var submitter = event.submitter || document.activeElement;
+        // Disabled buttons are not submitted: preserve the selected export format.
+        if (submitter && submitter.form === form && submitter.name === 'export') {
+            exportInput = document.createElement('input');
+            exportInput.type = 'hidden';
+            exportInput.name = 'export';
+            exportInput.value = submitter.value;
+            form.appendChild(exportInput);
+            var token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+            tokenInput = document.createElement('input');
+            tokenInput.type = 'hidden';
+            tokenInput.name = 'download_token';
+            tokenInput.value = token;
+            form.appendChild(tokenInput);
+            poll = setInterval(function () {
+                if (document.cookie.split('; ').indexOf('time_report_download=' + token) !== -1) {
+                    document.cookie = 'time_report_download=; Max-Age=0; Path=/; SameSite=Lax';
+                    reset();
+                }
+            }, 500);
+        }
+        busy = true;
+        form.setAttribute('aria-busy', 'true');
+        buttons.forEach(function (button) {
+            button.disabled = true;
+            button.style.opacity = '0.5';
+            button.style.cursor = 'wait';
+        });
+    });
+    window.addEventListener('pageshow', reset);
+})();
+</script>
 <hr>";
 }
 
@@ -728,6 +801,42 @@ function generateReportRows(
             }
         } catch (\Throwable $e) {}
 
+        // HL3 дополняет только дни, отсутствующие в основном отчете HL5.
+        $eventsByUserDate = [];
+        $EventsClass = getHLDataClass(HL_EVENTS);
+        $events = $EventsClass::getList([
+            'select' => ['ID', 'UF_DATETIME', 'UF_USER_ID', 'UF_EVENT'],
+            'filter' => [
+                '>=UF_DATETIME' => $fromStart,
+                '<=UF_DATETIME' => $toEnd,
+                '=UF_USER_ID' => $chunkIds,
+                '=UF_EVENT' => [HL_EVENT_ENTRY, HL_EVENT_EXIT],
+            ],
+            'order' => ['UF_DATETIME' => 'ASC', 'ID' => 'ASC'],
+        ]);
+        while ($event = $events->fetch()) {
+            $eventDate = $event['UF_DATETIME'];
+            if (!$eventDate) continue;
+            if (!($eventDate instanceof \Bitrix\Main\Type\DateTime) && !($eventDate instanceof \DateTimeInterface)) {
+                try {
+                    $eventDate = new DateTime((string)$eventDate);
+                } catch (\Throwable $e) {
+                    continue;
+                }
+            }
+            $eventUid = (int)$event['UF_USER_ID'];
+            $eventYmd = $eventDate->format('Y-m-d');
+            $primary = $recalcByUserDate[$eventUid][$eventYmd] ?? null;
+            if ($primary && trim(normVal($primary['UF_NORMA'] ?? '')) !== '00:00') continue;
+            if ((int)$event['UF_EVENT'] === HL_EVENT_ENTRY) {
+                if (!isset($eventsByUserDate[$eventUid][$eventYmd]['UF_ENTRY_TIME'])) {
+                    $eventsByUserDate[$eventUid][$eventYmd]['UF_ENTRY_TIME'] = $eventDate->format('H:i');
+                }
+            } elseif ((int)$event['UF_EVENT'] === HL_EVENT_EXIT) {
+                $eventsByUserDate[$eventUid][$eventYmd]['UF_EXIT_TIME'] = $eventDate->format('H:i');
+            }
+        }
+
         foreach ($chunkIds as $uid) {
             $u = $usersById[$uid] ?? null;
             if (!$u) continue;
@@ -773,7 +882,12 @@ function generateReportRows(
             foreach ($dates as $ymd) {
                 $r = $recalcByUserDate[$uid][$ymd] ?? null;
                 $normaVal = $r ? trim(normVal($r['UF_NORMA'] ?? '')) : '';
-                if ($r && $normaVal === '00:00') continue;
+                $fallback = $eventsByUserDate[$uid][$ymd] ?? null;
+                if ($r && $normaVal === '00:00' && !$fallback) continue;
+                if ($fallback) {
+                    // События не содержат нормы, заявок и рассчитанного рабочего времени.
+                    $r = array_merge($r ?? [], $fallback);
+                }
 
                 $dateDisplay = (new DateTime($ymd))->format('d.m.Y');
                 $sch = $schedulesByUserDate[$uid][$ymd] ?? null;
@@ -843,7 +957,7 @@ function generateReportRows(
             }
         }
 
-        unset($schedulesByUserDate, $recalcByUserDate);
+        unset($schedulesByUserDate, $recalcByUserDate, $eventsByUserDate);
     }
 
     return $resultRows;
@@ -858,6 +972,22 @@ if ($exportFormat === 'HTMLXLS') {
     @ini_set('max_execution_time', '0');
     @ignore_user_abort(true);
     disableOutputBuffers();
+
+    $rows = generateReportRows(
+        $userIds,
+        $usersById,
+        $dates,
+        $enumMaps,
+        $presenceTypeMap,
+        $fromStart,
+        $toEnd,
+        $HL5_FIELD_DATE,
+        $HL5_FIELD_USER,
+        $HL91_FIELD_DATE,
+        $HL91_FIELD_USER,
+        EXCEL_USER_CHUNK
+    );
+    signalReportDownloadReady();
 
     $filename = "Отчет_рабочее_время_{$dateFromStr}_{$dateToStr}.xls";
 
@@ -874,20 +1004,6 @@ if ($exportFormat === 'HTMLXLS') {
     }
     echo '</tr>' . "\n";
 
-    $rows = generateReportRows(
-        $userIds,
-        $usersById,
-        $dates,
-        $enumMaps,
-        $presenceTypeMap,
-        $fromStart,
-        $toEnd,
-        $HL5_FIELD_DATE,
-        $HL5_FIELD_USER,
-        $HL91_FIELD_DATE,
-        $HL91_FIELD_USER,
-        EXCEL_USER_CHUNK
-    );
 
     foreach ($rows as $row) {
         echo '<tr>';
@@ -931,6 +1047,22 @@ if ($exportFormat === 'CSV') {
     @ignore_user_abort(true);
     disableOutputBuffers();
 
+    $rows = generateReportRows(
+        $userIds,
+        $usersById,
+        $dates,
+        $enumMaps,
+        $presenceTypeMap,
+        $fromStart,
+        $toEnd,
+        $HL5_FIELD_DATE,
+        $HL5_FIELD_USER,
+        $HL91_FIELD_DATE,
+        $HL91_FIELD_USER,
+        EXCEL_USER_CHUNK
+    );
+    signalReportDownloadReady();
+
     $filename = "Отчет_рабочее_время_{$dateFromStr}_{$dateToStr}.csv";
 
     header('Content-Type: text/csv; charset=UTF-8');
@@ -949,20 +1081,6 @@ if ($exportFormat === 'CSV') {
     fputcsv($out, $headers, ';');
 
     $rowCounter = 0;
-    $rows = generateReportRows(
-        $userIds,
-        $usersById,
-        $dates,
-        $enumMaps,
-        $presenceTypeMap,
-        $fromStart,
-        $toEnd,
-        $HL5_FIELD_DATE,
-        $HL5_FIELD_USER,
-        $HL91_FIELD_DATE,
-        $HL91_FIELD_USER,
-        EXCEL_USER_CHUNK
-    );
 
     foreach ($rows as $row) {
         $values = [
@@ -1081,3 +1199,4 @@ foreach ($rows as $row) {
 echo "</table>";
 
 require($_SERVER["DOCUMENT_ROOT"] . "/bitrix/modules/main/include/epilog_after.php");
+
