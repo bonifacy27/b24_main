@@ -452,6 +452,29 @@ class CBPapprovecopyactiveschedule
 		$arEventParameters["REAL_USER_ID"] = intval($arEventParameters["REAL_USER_ID"]);
 		if (!in_array($arEventParameters["USER_ID"], $arUsers))
 			return;
+		// Recheck on the live workflow instance: queued mail and portal events
+		// may have been received before another decision or delegation.
+		if (array_key_exists($arEventParameters["USER_ID"], $this->arApproveOriginalResults)
+			|| array_key_exists($arEventParameters["REAL_USER_ID"], $this->arApproveResults)) return;
+		if (!empty($arEventParameters['EMAIL_TOKEN_ID']))
+		{
+			require_once __DIR__ . '/email_approval_tokens.php';
+			$token = \Acs\EmailApproval\TokenTable::getByPrimary((int)$arEventParameters['EMAIL_TOKEN_ID'])->fetch();
+			if (!$token || $token['STATUS'] !== 'PROCESSING'
+				|| (int)$token['TASK_ID'] !== (int)$this->taskId
+				|| (int)$token['USER_ID'] !== $arEventParameters['USER_ID']
+				|| $arEventParameters['USER_ID'] !== $arEventParameters['REAL_USER_ID']
+				|| $token['WORKFLOW_ID'] !== $this->GetWorkflowInstanceId()
+				|| $token['ACTIVITY_NAME'] !== $this->name
+				|| $token['EXPIRES_AT']->getTimestamp() <= time()) return;
+			if (!$this->IsPropertyExists("EmailApprovalEnabled") || $this->EmailApprovalEnabled !== 'Y') return;
+			$mailUser = CUser::GetByID($arEventParameters['USER_ID'])->Fetch();
+			if (!$mailUser || $mailUser['ACTIVE'] !== 'Y' || strcasecmp(trim($mailUser['EMAIL']), $token['EMAIL']) !== 0) return;
+			$waiting = false;
+			foreach ((array)$this->workflow->GetService("TaskService")->GetTaskUsers($this->taskId) as $taskUser)
+				if ((int)$taskUser['USER_ID'] === $arEventParameters['USER_ID'] && (int)$taskUser['STATUS'] === CBPTaskUserStatus::Waiting) $waiting = true;
+			if (!$waiting) return;
+		}
 		if ($this->IsPropertyExists("LastApprover"))
 			$this->LastApprover = "user_".$arEventParameters["REAL_USER_ID"];
 		if ($this->IsPropertyExists("LastApproverComment"))
@@ -747,6 +770,8 @@ $this->WriteToTrackingService(
 				"USER_NAME" => $userName,
 				"COMMENT" => isset($arRequest["task_comment"]) ? trim($arRequest["task_comment"]) : '',
 			);
+			if (!empty($arRequest['EMAIL_TOKEN_ID']))
+				$arEventParameters['EMAIL_TOKEN_ID'] = (int)$arRequest['EMAIL_TOKEN_ID'];
 			// Устанавливаем флаг доработки
 			if ((isset($arRequest['REFINE']) && $arRequest['REFINE'] === 'Y') || (isset($arRequest['refine']) && $arRequest['refine'] !== ''))
 			{
