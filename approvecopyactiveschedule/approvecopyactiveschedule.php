@@ -280,6 +280,9 @@ class CBPapprovecopyactiveschedule
 			$addAgent($this->Reminder3Hours, $this->Reminder3Subject, $this->Reminder3Text);
 		}
 		// === Email notifications: send to all task executors ===
+		$emailApprovalEnabled = $this->IsPropertyExists("EmailApprovalEnabled") && $this->EmailApprovalEnabled === "Y";
+		$tokenExpiresAt = time() + 7 * 24 * 3600;
+		if ($timeoutDuration > 0) $tokenExpiresAt = min($tokenExpiresAt, time() + $timeoutDuration);
 		try
 		{
 			$notifyText = (string)$this->NotifyText;
@@ -287,7 +290,7 @@ class CBPapprovecopyactiveschedule
 			$taskLink = 'https://ourtricolortv.nsc.ru/company/personal/bizproc/' . intval($this->taskId) . '/';
 			if (!empty($arUsers))
 			{
-				foreach ($arUsers as $uid)
+				foreach (array_unique($arUsers) as $uid)
 				{
 					$uid = (int)$uid;
 					if ($uid <= 0) continue;
@@ -302,18 +305,40 @@ class CBPapprovecopyactiveschedule
 							{
 								$mailBody = ($mailBody ? $mailBody."\n" : '') . 'Ссылка на задание: ' . $taskLink;
 							}
-							\Bitrix\Main\Mail\Mail::send(array(
+							$mailSubject = ($this->NotifySubject !== '' ? $this->NotifySubject : ($this->Name ? $this->Name : 'Business Process Task'));
+							$issuedToken = null;
+							if ($emailApprovalEnabled)
+							{
+								try
+								{
+									require_once __DIR__ . '/email_approval_tokens.php';
+									$issuedToken = \Acs\EmailApproval\TokenTable::issue($this->taskId, $this->GetWorkflowInstanceId(), $this->name, $uid, $email, $tokenExpiresAt);
+									$mailSubject .= ' [ACS:' . $issuedToken['token'] . ']';
+									$mailBody .= "\n\nКод согласования: ACS:" . $issuedToken['token'];
+								}
+								catch (\Throwable $e)
+								{
+									$this->WriteToTrackingService('Не удалось создать токен почтового согласования для user_' . $uid . '. Отправляется обычное уведомление.');
+								}
+							}
+							$mailSent = \Bitrix\Main\Mail\Mail::send(array(
 								'TO' => $email,
-								'SUBJECT' => ($this->NotifySubject !== '' ? $this->NotifySubject : ($this->Name ? $this->Name : 'Business Process Task')),
+								'SUBJECT' => $mailSubject,
 								'BODY' => $mailBody,
+								'CHARSET' => 'UTF-8',
 								'HEADER' => array('Precedence' => 'bulk')
 							));
+							if (!$mailSent && $issuedToken)
+							{
+								\Acs\EmailApproval\TokenTable::revoke($issuedToken['id']);
+								$this->WriteToTrackingService('Не удалось отправить уведомление для user_' . $uid . '; токен отозван.');
+							}
 						}
 					}
 				}
 			}
 		}
-		catch (\Exception $e) { /* keep silent */ }
+		catch (\Throwable $e) { $this->WriteToTrackingService('Ошибка отправки уведомления о задании.'); }
 		$this->TaskId = $this->taskId;
 		$this->taskUsers = $arUsers;
 		$this->TotalCount = count($arUsers);
@@ -452,6 +477,30 @@ class CBPapprovecopyactiveschedule
 		$arEventParameters["REAL_USER_ID"] = intval($arEventParameters["REAL_USER_ID"]);
 		if (!in_array($arEventParameters["USER_ID"], $arUsers))
 			return;
+		// Recheck on the live workflow instance: queued mail and portal events
+		// may have been received before another decision or delegation.
+		if (array_key_exists($arEventParameters["USER_ID"], $this->arApproveOriginalResults)
+			|| array_key_exists($arEventParameters["REAL_USER_ID"], $this->arApproveResults)) return;
+		if (!empty($arEventParameters['EMAIL_TOKEN_ID']))
+		{
+			require_once __DIR__ . '/email_approval_tokens.php';
+			$token = \Acs\EmailApproval\TokenTable::getByPrimary((int)$arEventParameters['EMAIL_TOKEN_ID'])->fetch();
+			if (!$token || $token['STATUS'] !== 'PROCESSING'
+				|| (int)$token['TASK_ID'] !== (int)$this->taskId
+				|| (int)$token['USER_ID'] !== $arEventParameters['USER_ID']
+				|| $arEventParameters['USER_ID'] !== $arEventParameters['REAL_USER_ID']
+				|| $token['WORKFLOW_ID'] !== $this->GetWorkflowInstanceId()
+				|| $token['ACTIVITY_NAME'] !== $this->name
+				|| $token['EXPIRES_AT']->getTimestamp() <= time()) return;
+			if (!$this->IsPropertyExists("EmailApprovalEnabled") || $this->EmailApprovalEnabled !== 'Y') return;
+			$mailUser = CUser::GetByID($arEventParameters['USER_ID'])->Fetch();
+			if (!$mailUser || $mailUser['ACTIVE'] !== 'Y' || strcasecmp(trim($mailUser['EMAIL']), $token['EMAIL']) !== 0) return;
+			$waiting = (bool)CBPTaskService::GetList(array(), array(
+				'ID' => $this->taskId, 'USER_ID' => $arEventParameters['USER_ID'],
+				'USER_STATUS' => CBPTaskUserStatus::Waiting,
+			), false, false, array('ID'))->Fetch();
+			if (!$waiting) return;
+		}
 		if ($this->IsPropertyExists("LastApprover"))
 			$this->LastApprover = "user_".$arEventParameters["REAL_USER_ID"];
 		if ($this->IsPropertyExists("LastApproverComment"))
@@ -747,6 +796,8 @@ $this->WriteToTrackingService(
 				"USER_NAME" => $userName,
 				"COMMENT" => isset($arRequest["task_comment"]) ? trim($arRequest["task_comment"]) : '',
 			);
+			if (!empty($arRequest['EMAIL_TOKEN_ID']))
+				$arEventParameters['EMAIL_TOKEN_ID'] = (int)$arRequest['EMAIL_TOKEN_ID'];
 			// Устанавливаем флаг доработки
 			if ((isset($arRequest['REFINE']) && $arRequest['REFINE'] === 'Y') || (isset($arRequest['refine']) && $arRequest['refine'] !== ''))
 			{
