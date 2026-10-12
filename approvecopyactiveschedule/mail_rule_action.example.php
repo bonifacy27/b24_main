@@ -18,7 +18,7 @@ $acsLog = static function ($status, $taskId = 0, $errorClass = '') use ($acsLogF
 $acsLog('rule_started');
 try {
     // Adjust this directory to the actual location of the installed activity.
-    $acsActivityDir = $acsRoot . '/local/activities/custom/approvecopyactiveschedule';
+    $acsActivityDir = $acsRoot . '/local/activities/approvecopyactiveschedule';
     if (!is_file($acsActivityDir . '/email_approval_mail_rule.php')) {
         $acsLog('handler_file_missing');
         return;
