@@ -34,3 +34,4 @@ $MESS["BPAR_PD_TASK_BUTTON2_MESSAGE"] = "Text der Schaltfläche beim Ablehnen de
 $MESS["BPAR_PD_TASK_BUTTON3_MESSAGE"] = "Text der Schaltfläche \"Überarbeiten\"";
 
 $MESS["BPAR_PD_SHOW_TASK_LINK_IN_EMAIL"] = "Aufgabenlink in E-Mail anzeigen";
+$MESS["BPAA_PD_EMAIL_APPROVAL_ENABLED"] = "Genehmigung per E-Mail-Antwort erlauben";
