@@ -15,9 +15,22 @@ $acsMailConfig = array(
 
 $acsResult = \Acs\EmailApproval\MailRuleAdapter::handle($arMessageFields, $acsMailConfig);
 // Log only message ID, result code and task ID. Never log the token or subject.
-AddMessage2Log(
-    'ACS: message_id=' . (int)($arMessageFields['ID'] ?? 0)
-    . '; status=' . $acsResult['status']
-    . '; task_id=' . (int)($acsResult['task_id'] ?? 0),
-    'acs_email_approval'
-);
+$acsLogDir = $_SERVER['DOCUMENT_ROOT'] . '/upload/logs';
+$acsLogFile = $acsLogDir . '/acs_email_approval.log';
+$acsLogLine = date('c')
+    . ' message_id=' . (int)($arMessageFields['ID'] ?? 0)
+    . ' status=' . $acsResult['status']
+    . ' task_id=' . (int)($acsResult['task_id'] ?? 0)
+    . PHP_EOL;
+
+if (!is_dir($acsLogDir)) {
+    @mkdir($acsLogDir, 0750, true);
+}
+if (!is_dir($acsLogDir)
+    || @file_put_contents($acsLogFile, $acsLogLine, FILE_APPEND | LOCK_EX) === false) {
+    AddMessage2Log(
+        'ACS: cannot write /upload/logs/acs_email_approval.log; message_id='
+        . (int)($arMessageFields['ID'] ?? 0),
+        'acs_email_approval'
+    );
+}
