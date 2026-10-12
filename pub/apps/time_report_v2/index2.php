@@ -545,15 +545,26 @@ if ($exportFormat === '') {
 <script>
 (function () {
     var form = document.getElementById('time-report-form');
-    var buttons = form.querySelectorAll('button[type=\"submit\"]');
+    function controls() { return document.querySelectorAll('#time-report-form button, a[data-report-export]'); }
+    function lock() {
+        busy = true;
+        form.setAttribute('aria-busy', 'true');
+        controls().forEach(function (control) {
+            if (control.tagName === 'BUTTON') control.disabled = true;
+            control.setAttribute('aria-disabled', 'true');
+            control.style.opacity = '0.5';
+            control.style.cursor = 'wait';
+        });
+    }
     var busy = false;
     var poll = null;
     var tokenInput = null;
     var exportInput = null;
     function reset() {
         busy = false;
-        buttons.forEach(function (button) {
-            button.disabled = false;
+        controls().forEach(function (button) {
+            if (button.tagName === 'BUTTON') button.disabled = false;
+            button.removeAttribute('aria-disabled');
             button.style.opacity = '';
             button.style.cursor = '';
         });
@@ -585,15 +596,34 @@ if ($exportFormat === '') {
                 }
             }, 500);
         }
-        busy = true;
-        form.setAttribute('aria-busy', 'true');
-        buttons.forEach(function (button) {
-            button.disabled = true;
-            button.style.opacity = '0.5';
-            button.style.cursor = 'wait';
-        });
+        lock();
     });
-    window.addEventListener('pageshow', reset);
+    document.addEventListener('click', function (event) {
+        var link = event.target.closest('a[data-report-export]');
+        if (!link) return;
+        event.preventDefault();
+        if (busy) return;
+        var token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        var url = new URL(link.href, window.location.href);
+        url.searchParams.set('download_token', token);
+        lock();
+        poll = setInterval(function () {
+            if (document.cookie.split('; ').indexOf('time_report_download=' + token) !== -1) {
+                document.cookie = 'time_report_download=; Max-Age=0; Path=/; SameSite=Lax';
+                reset();
+            }
+        }, 500);
+        window.location.assign(url.href);
+    });
+    // A streamed response can show the form while the report is still running.
+    var query = new URLSearchParams(window.location.search);
+    if (query.get('ALL_DEPARTMENTS') === 'Y' || Number(query.get('SECTION_ID')) > 0) {
+        lock();
+        window.addEventListener('load', reset, { once: true });
+    }
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) reset();
+    });
 })();
 </script>
 <hr>";
@@ -663,10 +693,10 @@ if ($exportFormat === '' && $estimatedRows > HTML_MAX_ROWS) {
     echo "<b>Слишком много строк для вывода в браузере.</b><br>";
     echo "Оценочно строк: <b>".(int)$estimatedRows."</b> (сотрудников: <b>".count($userIds)."</b>, дней: <b>".count($dates)."</b>).<br>";
     echo "<div style='margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;'>";
-    echo "<a href='".h($htmlxlsUrl)."' style='display:inline-block;padding:8px 12px;background:#007bff;color:#fff;text-decoration:none;border-radius:4px;'>
+    echo "<a data-report-export href='".h($htmlxlsUrl)."' style='display:inline-block;padding:8px 12px;background:#007bff;color:#fff;text-decoration:none;border-radius:4px;'>
 Выгрузить в HTML-XLS (рекомендуется)
 </a>";
-    echo "<a href='".h($csvUrl)."' style='display:inline-block;padding:8px 12px;background:#28a745;color:#fff;text-decoration:none;border-radius:4px;'>
+    echo "<a data-report-export href='".h($csvUrl)."' style='display:inline-block;padding:8px 12px;background:#28a745;color:#fff;text-decoration:none;border-radius:4px;'>
 Выгрузить в CSV
 </a>";
     echo "</div>";
@@ -1146,8 +1176,8 @@ if ($exportFormat === '' && count($rows) > HTML_MAX_ROWS) {
     echo "<b>Строк больше лимита для просмотра в браузере.</b><br>";
     echo "Фактически строк: <b>".count($rows)."</b>.<br>";
     echo "<div style='margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;'>";
-    echo "<a href='".h($htmlxlsUrl)."' style='display:inline-block;padding:8px 12px;background:#007bff;color:#fff;text-decoration:none;border-radius:4px;'>Выгрузить в HTML-XLS</a>";
-    echo "<a href='".h($csvUrl)."' style='display:inline-block;padding:8px 12px;background:#28a745;color:#fff;text-decoration:none;border-radius:4px;'>Выгрузить в CSV</a>";
+    echo "<a data-report-export href='".h($htmlxlsUrl)."' style='display:inline-block;padding:8px 12px;background:#007bff;color:#fff;text-decoration:none;border-radius:4px;'>Выгрузить в HTML-XLS</a>";
+    echo "<a data-report-export href='".h($csvUrl)."' style='display:inline-block;padding:8px 12px;background:#28a745;color:#fff;text-decoration:none;border-radius:4px;'>Выгрузить в CSV</a>";
     echo "</div>";
     echo "</div>";
 
