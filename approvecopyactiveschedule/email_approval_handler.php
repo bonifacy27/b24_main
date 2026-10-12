@@ -100,11 +100,11 @@ class ReplyHandler
         }
         try
         {
-            require_once __DIR__ . '/approvecopyactiveschedule.php';
             $request = array('task_comment' => $decision['comment'], 'EMAIL_TOKEN_ID' => (int)$row['ID']);
             $request[$decision['approve'] ? 'approve' : 'nonapprove'] = 'Y';
             $errors = array();
-            $accepted = \CBPapprovecopyactiveschedule::PostTaskForm($task, $userId, $request, $errors, '', $userId);
+            // The standard dispatcher loads the activity and resolves the task user.
+            $accepted = \CBPDocument::PostTaskForm($task, $userId, $request, $errors, '');
             $expected = $decision['approve'] ? \CBPTaskUserStatus::Yes : \CBPTaskUserStatus::No;
             $confirmed = (bool)\CBPTaskService::GetList(array(), array(
                 'ID' => $taskId, 'USER_ID' => $userId, 'USER_STATUS' => $expected,
@@ -117,7 +117,11 @@ class ReplyHandler
         catch (\Throwable $e)
         {
             // PROCESSING remains blocked for manual reconciliation.
-            return array('status' => 'review_required', 'task_id' => $taskId);
+            return array(
+                'status' => 'review_required', 'task_id' => $taskId,
+                'error_class' => get_class($e),
+                'error_file' => basename($e->getFile()), 'error_line' => $e->getLine(),
+            );
         }
     }
 }
