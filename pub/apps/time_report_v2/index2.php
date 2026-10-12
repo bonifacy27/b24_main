@@ -53,6 +53,9 @@ Loader::includeModule('intranet');
 const ORG_IBLOCK_ID = 5;
 const HL_SCHEDULES  = 91;
 const HL_RECALC     = 5;
+const HL_EVENTS     = 3;
+const HL_EVENT_ENTRY = 45;
+const HL_EVENT_EXIT  = 46;
 const HL_PRES_TYPES = 93;
 
 const DATE_FIELD_CANDIDATES = ['UF_DATE','UF_DAY','UF_WORK_DATE','UF_DATE_TIME','UF_DATETIME','UF_DAY_DATE'];
@@ -728,6 +731,42 @@ function generateReportRows(
             }
         } catch (\Throwable $e) {}
 
+        // HL3 дополняет только дни, отсутствующие в основном отчете HL5.
+        $eventsByUserDate = [];
+        $EventsClass = getHLDataClass(HL_EVENTS);
+        $events = $EventsClass::getList([
+            'select' => ['ID', 'UF_DATETIME', 'UF_USER_ID', 'UF_EVENT'],
+            'filter' => [
+                '>=UF_DATETIME' => $fromStart,
+                '<=UF_DATETIME' => $toEnd,
+                '=UF_USER_ID' => $chunkIds,
+                '=UF_EVENT' => [HL_EVENT_ENTRY, HL_EVENT_EXIT],
+            ],
+            'order' => ['UF_DATETIME' => 'ASC', 'ID' => 'ASC'],
+        ]);
+        while ($event = $events->fetch()) {
+            $eventDate = $event['UF_DATETIME'];
+            if (!$eventDate) continue;
+            if (!($eventDate instanceof \Bitrix\Main\Type\DateTime) && !($eventDate instanceof \DateTimeInterface)) {
+                try {
+                    $eventDate = new DateTime((string)$eventDate);
+                } catch (\Throwable $e) {
+                    continue;
+                }
+            }
+            $eventUid = (int)$event['UF_USER_ID'];
+            $eventYmd = $eventDate->format('Y-m-d');
+            $primary = $recalcByUserDate[$eventUid][$eventYmd] ?? null;
+            if ($primary && trim(normVal($primary['UF_NORMA'] ?? '')) !== '00:00') continue;
+            if ((int)$event['UF_EVENT'] === HL_EVENT_ENTRY) {
+                if (!isset($eventsByUserDate[$eventUid][$eventYmd]['UF_ENTRY_TIME'])) {
+                    $eventsByUserDate[$eventUid][$eventYmd]['UF_ENTRY_TIME'] = $eventDate->format('H:i');
+                }
+            } elseif ((int)$event['UF_EVENT'] === HL_EVENT_EXIT) {
+                $eventsByUserDate[$eventUid][$eventYmd]['UF_EXIT_TIME'] = $eventDate->format('H:i');
+            }
+        }
+
         foreach ($chunkIds as $uid) {
             $u = $usersById[$uid] ?? null;
             if (!$u) continue;
@@ -773,7 +812,12 @@ function generateReportRows(
             foreach ($dates as $ymd) {
                 $r = $recalcByUserDate[$uid][$ymd] ?? null;
                 $normaVal = $r ? trim(normVal($r['UF_NORMA'] ?? '')) : '';
-                if ($r && $normaVal === '00:00') continue;
+                $fallback = $eventsByUserDate[$uid][$ymd] ?? null;
+                if ($r && $normaVal === '00:00' && !$fallback) continue;
+                if ($fallback) {
+                    // События не содержат нормы, заявок и рассчитанного рабочего времени.
+                    $r = array_merge($r ?? [], $fallback);
+                }
 
                 $dateDisplay = (new DateTime($ymd))->format('d.m.Y');
                 $sch = $schedulesByUserDate[$uid][$ymd] ?? null;
@@ -843,7 +887,7 @@ function generateReportRows(
             }
         }
 
-        unset($schedulesByUserDate, $recalcByUserDate);
+        unset($schedulesByUserDate, $recalcByUserDate, $eventsByUserDate);
     }
 
     return $resultRows;
@@ -1081,3 +1125,4 @@ foreach ($rows as $row) {
 echo "</table>";
 
 require($_SERVER["DOCUMENT_ROOT"] . "/bitrix/modules/main/include/epilog_after.php");
+
