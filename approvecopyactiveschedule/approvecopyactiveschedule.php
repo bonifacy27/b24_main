@@ -495,9 +495,10 @@ class CBPapprovecopyactiveschedule
 			if (!$this->IsPropertyExists("EmailApprovalEnabled") || $this->EmailApprovalEnabled !== 'Y') return;
 			$mailUser = CUser::GetByID($arEventParameters['USER_ID'])->Fetch();
 			if (!$mailUser || $mailUser['ACTIVE'] !== 'Y' || strcasecmp(trim($mailUser['EMAIL']), $token['EMAIL']) !== 0) return;
-			$waiting = false;
-			foreach ((array)$this->workflow->GetService("TaskService")->GetTaskUsers($this->taskId) as $taskUser)
-				if ((int)$taskUser['USER_ID'] === $arEventParameters['USER_ID'] && (int)$taskUser['STATUS'] === CBPTaskUserStatus::Waiting) $waiting = true;
+			$waiting = (bool)CBPTaskService::GetList(array(), array(
+				'ID' => $this->taskId, 'USER_ID' => $arEventParameters['USER_ID'],
+				'USER_STATUS' => CBPTaskUserStatus::Waiting,
+			), false, false, array('ID'))->Fetch();
 			if (!$waiting) return;
 		}
 		if ($this->IsPropertyExists("LastApprover"))

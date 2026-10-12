@@ -35,9 +35,11 @@ class ReplyHandler
 
     private static function waiting($service, $taskId, $userId)
     {
-        foreach ((array)$service->GetTaskUsers($taskId) as $user)
-            if ((int)$user['USER_ID'] === $userId && (int)$user['STATUS'] === \CBPTaskUserStatus::Waiting) return true;
-        return false;
+        $result = \CBPTaskService::GetList(array(), array(
+            'ID' => $taskId, 'USER_ID' => $userId,
+            'USER_STATUS' => \CBPTaskUserStatus::Waiting,
+        ), false, false, array('ID'));
+        return (bool)$result->Fetch();
     }
 
     /** Sender authorization is supplied by portal policy, never by the message itself. */
@@ -61,7 +63,9 @@ class ReplyHandler
             return array('status' => 'user_changed');
         $service = \CBPRuntime::GetRuntime()->GetService('TaskService');
         $taskId = (int)$row['TASK_ID'];
-        $task = $service->GetTaskById($taskId);
+        $task = \CBPTaskService::GetList(array(), array('ID' => $taskId), false, false, array(
+            'ID', 'STATUS', 'ACTIVITY', 'WORKFLOW_ID', 'ACTIVITY_NAME', 'PARAMETERS',
+        ))->Fetch();
         if (!$task || (int)$task['STATUS'] !== \CBPTaskStatus::Running
             || $task['ACTIVITY'] !== 'approvecopyactiveschedule'
             || $task['WORKFLOW_ID'] !== $row['WORKFLOW_ID']
@@ -102,9 +106,9 @@ class ReplyHandler
             $errors = array();
             $accepted = \CBPapprovecopyactiveschedule::PostTaskForm($task, $userId, $request, $errors, '', $userId);
             $expected = $decision['approve'] ? \CBPTaskUserStatus::Yes : \CBPTaskUserStatus::No;
-            $confirmed = false;
-            foreach ((array)$service->GetTaskUsers($taskId) as $taskUser)
-                if ((int)$taskUser['USER_ID'] === $userId && (int)$taskUser['STATUS'] === $expected) $confirmed = true;
+            $confirmed = (bool)\CBPTaskService::GetList(array(), array(
+                'ID' => $taskId, 'USER_ID' => $userId, 'USER_STATUS' => $expected,
+            ), false, false, array('ID'))->Fetch();
             $status = $accepted && $confirmed ? 'USED' : 'REVIEW';
             $result = TokenTable::update((int)$row['ID'], array('STATUS' => $status));
             if (!$result->isSuccess()) return array('status' => 'review_required');
