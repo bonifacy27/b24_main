@@ -32,6 +32,17 @@ namespace {
         \Acs\EmailApproval\ReplyHandler::parse($subject, "Согласовано\nACS:" . str_repeat('b', 64));
         throw new \RuntimeException('conflicting tokens accepted');
     } catch (\InvalidArgumentException $e) {}
+    $longComment = str_repeat('Тестовый комментарий на этой строчке ', 6);
+    foreach (array("\n", "\r\n", "\r") as $newline) {
+        $r = \Acs\EmailApproval\ReplyHandler::parse($subject, 'Согласовано' . $newline . $longComment . $newline . '--Тело письма' . $newline . 'Другой текст');
+        if ($r['comment'] !== trim($longComment)) throw new \RuntimeException('long single line truncated');
+    }
+    foreach (array('Отклонено', "Согласовано\n\nНе брать эту строку", "Согласовано\n--Тело письма", "Согласовано\n> Цитата") as $body) {
+        $r = \Acs\EmailApproval\ReplyHandler::parse($subject, $body);
+        if ($r['comment'] !== '') throw new \RuntimeException('unexpected comment');
+    }
+    $r = \Acs\EmailApproval\ReplyHandler::parse($subject, "Отклонено\nПервая строка\nВторая строка");
+    if ($r['comment'] !== 'Первая строка') throw new \RuntimeException('multiple comment lines accepted');
     if (\Acs\EmailApproval\ReplyHandler::handle(array())['status'] !== 'unverified_sender') throw new \RuntimeException('sender gate failed');
     echo "Reply parser checks passed\n";
 }
