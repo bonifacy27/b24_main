@@ -321,7 +321,14 @@ class CBPapprovecopyactiveschedule
 								{
 									require_once __DIR__ . '/email_approval_tokens.php';
 									$issuedToken = \Acs\EmailApproval\TokenTable::issue($this->taskId, $this->GetWorkflowInstanceId(), $this->name, $uid, $email, $tokenExpiresAt);
-									$mailBody .= "\n\nСогласование по почте:\nЭто задание можно согласовать по почте: ответьте на это письмо словом \"Согласовано\" или \"Отклонено\" в первой строке. При ответе не изменяйте содержимое исходного письма — сохраните его в цитате.\nКод согласования: ACS:" . $issuedToken['token'];
+									if (!$this->IsPropertyExists("RefineAllowed") || $this->RefineAllowed === 'Y')
+									{
+										$mailBody .= "\n\nСогласование по почте:\nЭто задание можно согласовать по почте: ответьте на это письмо словом \"Согласовано\", \"Отклонено\" или \"Доработать\" в первой строке. На второй строке оставьте комментарий.\nПри ответе не изменяйте содержимое исходного письма — сохраните его в цитате.\nКод согласования: ACS:" . $issuedToken['token'];
+									}
+									else
+									{
+										$mailBody .= "\n\nСогласование по почте:\nЭто задание можно согласовать по почте: ответьте на это письмо словом \"Согласовано\" или \"Отклонено\" в первой строке. При ответе не изменяйте содержимое исходного письма — сохраните его в цитате.\nКод согласования: ACS:" . $issuedToken['token'];
+									}
 								}
 								catch (\Throwable $e)
 								{
@@ -455,7 +462,6 @@ class CBPapprovecopyactiveschedule
 	}
 	public function OnExternalEvent($arEventParameters = array())
 	{
-		$this->RefinePressed = (isset($arEventParameters['REFINE']) && $arEventParameters['REFINE'] === 'Y') ? 'Y' : 'N';
 		if ($this->executionStatus == CBPActivityExecutionStatus::Closed)
 			return;
 		$timeoutDuration = $this->CalculateTimeoutDuration();
@@ -510,6 +516,10 @@ class CBPapprovecopyactiveschedule
 			), false, false, array('ID'))->Fetch();
 			if (!$waiting) return;
 		}
+		$refine = isset($arEventParameters['REFINE']) && $arEventParameters['REFINE'] === 'Y';
+		if ($refine && $this->IsPropertyExists('RefineAllowed') && $this->RefineAllowed !== 'Y') return;
+		if ($refine) $approve = false;
+		$this->RefinePressed = $refine ? 'Y' : 'N';
 		$confirmationMethod = !empty($arEventParameters['EMAIL_TOKEN_ID']) ? 'email' : 'portal';
 		if ($this->IsPropertyExists('ConfirmationMethod')) $this->ConfirmationMethod = $confirmationMethod;
 		if ($this->IsPropertyExists('ConfirmationMethods'))
@@ -608,6 +618,7 @@ $this->WriteToTrackingService(
 					$result = "NonApprove";
 			}
 		}
+		if ($refine) $result = "NonApprove";
 		$approvers = "";
 		$rejecters = "";
 		if (!$this->IsPropertyExists("SetStatusMessage") || $this->SetStatusMessage == "Y")
@@ -820,6 +831,8 @@ $this->WriteToTrackingService(
 			// Устанавливаем флаг доработки
 			if ((isset($arRequest['REFINE']) && $arRequest['REFINE'] === 'Y') || (isset($arRequest['refine']) && $arRequest['refine'] !== ''))
 			{
+				if (($arTask['PARAMETERS']['RefineAllowed'] ?? 'Y') !== 'Y')
+					throw new CBPNotSupportedException(GetMessage("BPAA_ACT_NO_ACTION"));
 				$arEventParameters['REFINE'] = 'Y';
 			}
 			if (isset($arRequest['approve']) && $arRequest["approve"] <> ''

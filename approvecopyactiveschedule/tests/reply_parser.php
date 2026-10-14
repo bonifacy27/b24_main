@@ -43,6 +43,21 @@ namespace {
     }
     $r = \Acs\EmailApproval\ReplyHandler::parse($subject, "Отклонено\nПервая строка\nВторая строка");
     if ($r['comment'] !== 'Первая строка') throw new \RuntimeException('multiple comment lines accepted');
+    foreach (array('Доработать', 'доработать', 'Доработка', 'доработка', 'ДОРАБОТАТЬ', 'Доработка.') as $command) {
+        foreach (array("\n", "\r\n", "\r") as $newline) {
+            $r = \Acs\EmailApproval\ReplyHandler::parse($subject, $command . $newline . 'Исправить сумму' . $newline . 'Не брать эту строку');
+            if (!$r['refine'] || $r['approve'] || $r['comment'] !== 'Исправить сумму') throw new \RuntimeException('refine parsing failed');
+        }
+    }
+    foreach (array("Доработать\n\nНе брать эту строку", "Доработка\n> Цитата", "Доработать\nКод согласования: ACS:" . $token) as $body) {
+        $r = \Acs\EmailApproval\ReplyHandler::parse($subject, $body);
+        if ($r['comment'] !== '') throw new \RuntimeException('refine comment boundary failed');
+    }
+    foreach (array('Не доработать', '> Доработать', 'Прошу доработать', 'Доработать или Согласовано') as $body) {
+        try { \Acs\EmailApproval\ReplyHandler::parse($subject, $body); }
+        catch (\InvalidArgumentException $e) { continue; }
+        throw new \RuntimeException('unsafe refine accepted');
+    }
     if (\Acs\EmailApproval\ReplyHandler::handle(array())['status'] !== 'unverified_sender') throw new \RuntimeException('sender gate failed');
     echo "Reply parser checks passed\n";
 }
