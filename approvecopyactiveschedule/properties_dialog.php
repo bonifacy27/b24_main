@@ -16,6 +16,12 @@ if (!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true)die();
 	<td width="60%"><textarea name="notify_text" rows="4" cols="50"><?= htmlspecialcharsbx($arCurrentValues["notify_text"]) ?></textarea></td>
 </tr>
 <tr>
+	<td align="right" width="40%" valign="top"><?= GetMessage("BPAA_NOTIFY_FILE") ?>:</td>
+	<td width="60%">
+		<?= CBPDocument::ShowParameterField("file", "notify_file", $arCurrentValues["notify_file"] ?? null) ?>
+	</td>
+</tr>
+<tr>
 	<td align="right" width="40%"><?= GetMessage("BPAR_PD_SHOW_TASK_LINK_IN_EMAIL") ?>:</td>
 	<td width="60%">
 		<select name="show_task_link_in_email">

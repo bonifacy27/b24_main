@@ -35,3 +35,5 @@ $MESS["BPAR_PD_DELEGATION_TYPE"] = "Тип делегування";
 $MESS["BPAR_PD_TASK_BUTTON3_MESSAGE"] = "Текст кнопки при доопрацюванні";
 $MESS["BPAR_PD_SHOW_TASK_LINK_IN_EMAIL"] = "Показувати посилання в e-mail";
 $MESS["BPAA_PD_EMAIL_APPROVAL_ENABLED"] = "Дозволити погодження відповіддю на лист";
+
+$MESS["BPAA_NOTIFY_FILE"] = "Файл для e-mail сповіщення";

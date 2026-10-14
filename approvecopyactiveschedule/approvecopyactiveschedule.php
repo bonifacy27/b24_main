@@ -108,6 +108,7 @@ class CBPapprovecopyactiveschedule
 			"ApproveWaitForAll" => "N",
 			"TaskId" => 0,
 			"NotifyText" => "",
+			"NotifyFile" => null,
 			"NotifySubject" => "",
 			"ShowTaskLinkInEmail" => "Y",
 			"EmailApprovalEnabled" => "N",
@@ -292,6 +293,7 @@ class CBPapprovecopyactiveschedule
 		try
 		{
 			$notifyText = (string)$this->NotifyText;
+			$notifyAttachments = $this->getNotifyAttachments();
 			$showTaskLinkInEmail = !$this->IsPropertyExists("ShowTaskLinkInEmail") || (string)$this->ShowTaskLinkInEmail !== "N";
 			$taskLink = 'https://ourtricolortv.nsc.ru/company/personal/bizproc/' . intval($this->taskId) . '/';
 			if (!empty($arUsers))
@@ -326,13 +328,15 @@ class CBPapprovecopyactiveschedule
 									$this->WriteToTrackingService('Не удалось создать токен почтового согласования для user_' . $uid . '. Отправляется обычное уведомление.');
 								}
 							}
-							$mailSent = \Bitrix\Main\Mail\Mail::send(array(
+							$mailFields = array(
 								'TO' => $email,
 								'SUBJECT' => $mailSubject,
 								'BODY' => $mailBody,
 								'CHARSET' => 'UTF-8',
 								'HEADER' => array('Precedence' => 'bulk')
-							));
+							);
+							if ($notifyAttachments) $mailFields['ATTACHMENT'] = $notifyAttachments;
+							$mailSent = \Bitrix\Main\Mail\Mail::send($mailFields);
 							if (!$mailSent && $issuedToken)
 							{
 								\Acs\EmailApproval\TokenTable::revoke($issuedToken['id']);
@@ -922,12 +926,42 @@ $this->WriteToTrackingService(
 		}
 		return min($timeoutDuration, 3600 * 24 * 365 * 5);
 	}
+	/** Resolve only Bitrix file IDs; old serialized workflows have no NotifyFile. */
+	protected function getNotifyAttachments()
+	{
+		if (!$this->IsPropertyExists("NotifyFile")) return array();
+		$value = $this->NotifyFile;
+		$attachments = array();
+		foreach (array_unique((array)$value, SORT_REGULAR) as $fileId)
+		{
+			if ($fileId === null || $fileId === '' || $fileId === false) continue;
+			try
+			{
+				if ((!is_int($fileId) && !is_string($fileId)) || !ctype_digit((string)$fileId) || (int)$fileId <= 0)
+					throw new \RuntimeException('Invalid file ID');
+				$file = CFile::MakeFileArray((int)$fileId);
+				if (!$file || empty($file['tmp_name']) || !is_file($file['tmp_name']) || !is_readable($file['tmp_name']))
+					throw new \RuntimeException('File unavailable');
+				$attachments[] = array(
+					'PATH' => $file['tmp_name'],
+					'NAME' => $file['name'],
+					'CONTENT_TYPE' => !empty($file['type']) ? $file['type'] : 'application/octet-stream',
+				);
+			}
+			catch (\Throwable $e)
+			{
+				$this->WriteToTrackingService('Не удалось прикрепить файл к основному e-mail уведомлению. Уведомление отправляется без этого файла.');
+			}
+		}
+		return $attachments;
+	}
 	public static function GetPropertiesDialog($documentType, $activityName, $arWorkflowTemplate, $arWorkflowParameters, $arWorkflowVariables, $arCurrentValues = null, $formName = "")
 	{
 		$runtime = CBPRuntime::GetRuntime();
 		$arMap = array(
 			"NotifySubject" => "notify_subject",
 			"NotifyText" => "notify_text",
+			"NotifyFile" => "notify_file",
 			"ShowTaskLinkInEmail" => "show_task_link_in_email",
 			"EmailApprovalEnabled" => "email_approval_enabled",
 			"Reminder1Hours" => "rem1_hours",
@@ -1061,6 +1095,7 @@ $this->WriteToTrackingService(
 		$arMap = array(
 			"notify_subject" => "NotifySubject",
 			"notify_text" => "NotifyText",
+			"notify_file" => "NotifyFile",
 			"show_task_link_in_email" => "ShowTaskLinkInEmail",
 			"email_approval_enabled" => "EmailApprovalEnabled",
 			"rem1_hours" => "Reminder1Hours",
