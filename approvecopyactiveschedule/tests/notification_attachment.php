@@ -36,6 +36,8 @@ class CBPWorkflowTemplateLoader
 }
 class CBPRuntime
 {
+    public static $eventHandler;
+    public static function SendExternalEvent($workflowId, $activityName, $event) { call_user_func(self::$eventHandler, $event); }
     public static function GetRuntime() { return new self(); }
     public function GetService($name) { return $this; }
     public function GetDocumentFields($type) { return array(); }

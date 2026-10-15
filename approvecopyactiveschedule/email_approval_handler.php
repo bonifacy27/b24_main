@@ -17,15 +17,17 @@ class ReplyHandler
         $lines = preg_split('/\r\n|\r|\n/', $body);
         while ($lines && trim($lines[0]) === '') array_shift($lines);
         $command = trim((string)array_shift($lines));
+        $refine = false;
         if (preg_match('/^(?:Согласовано|Согласовать)[.!]?$/iu', $command)) $approve = true;
         elseif (preg_match('/^(?:Отклонено|Отклонить)[.!]?$/iu', $command)) $approve = false;
+        elseif (preg_match('/^(?:Доработать|Доработка)[.!]?$/iu', $command)) { $approve = false; $refine = true; }
         else throw new \InvalidArgumentException('unknown_decision');
         // Only the physical line immediately after the decision is a comment.
         $comment = trim((string)($lines[0] ?? ''));
         if (preg_match('/^>|^--|^On .+wrote:|^.*написал\(а\):|^Согласование по почте:/iu', $comment)
             || preg_match('/ACS:[a-f0-9]{64}/i', $comment)) $comment = '';
         if (strlen($comment) > 16384) throw new \InvalidArgumentException('comment_too_large');
-        return array('hash' => hash('sha256', reset($tokens)), 'approve' => $approve, 'comment' => $comment);
+        return array('hash' => hash('sha256', reset($tokens)), 'approve' => $approve, 'refine' => $refine, 'comment' => $comment);
     }
 
     private static function waiting($service, $taskId, $userId)
@@ -67,6 +69,8 @@ class ReplyHandler
             || $task['ACTIVITY_NAME'] !== $row['ACTIVITY_NAME']
             || !static::waiting($service, $taskId, $userId)) return array('status' => 'task_unavailable');
         $parameters = $task['PARAMETERS'];
+        if ($decision['refine'] && ($parameters['RefineAllowed'] ?? 'Y') !== 'Y')
+            return array('status' => 'refine_not_allowed');
         $required = $parameters['CommentRequired'] ?? 'N';
         if (($parameters['ShowComment'] ?? 'Y') === 'Y' && $decision['comment'] === ''
             && ($required === 'Y' || ($required === 'YA' && $decision['approve']) || ($required === 'YR' && !$decision['approve'])))
@@ -96,7 +100,7 @@ class ReplyHandler
         try
         {
             $request = array('task_comment' => $decision['comment'], 'EMAIL_TOKEN_ID' => (int)$row['ID']);
-            $request[$decision['approve'] ? 'approve' : 'nonapprove'] = 'Y';
+            $request[$decision['refine'] ? 'refine' : ($decision['approve'] ? 'approve' : 'nonapprove')] = 'Y';
             $errors = array();
             // The standard dispatcher loads the activity and resolves the task user.
             $accepted = \CBPDocument::PostTaskForm($task, $userId, $request, $errors, '');
