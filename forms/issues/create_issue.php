@@ -464,22 +464,75 @@ $APPLICATION->SetTitle('Новое обращение');
 Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
 ?>
 <style>
-.issue-form {max-width:900px;box-sizing:border-box;padding:24px;background:var(--ui-color-background-primary,#fff);border-radius:var(--ui-border-radius-md,8px)}
-.issue-form .issue-field {margin-bottom:20px}
-.issue-form .issue-note {color:var(--ui-color-text-secondary,#828b95);font-size:13px}
-.issue-form .issue-crm-controls {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.issue-form .issue-crm-controls [hidden] {display:none}
-.issue-form .issue-crm-panel {margin-top:12px;padding:16px;border:1px solid #dfe3e6;border-radius:6px}
-.issue-form .issue-crm-search {display:flex;gap:8px;flex-wrap:wrap}
-.issue-form .issue-crm-search .ui-ctl {flex:1;min-width:180px}
+.issue-form {
+    --issue-border:#d8e0e8;--issue-muted:#68778a;--issue-accent:#147ac2;
+    width:100%;max-width:1000px;box-sizing:border-box;
+    color:#263447;font:14px/1.5 var(--ui-font-family-primary,Arial,sans-serif);
+}
+.issue-form * {box-sizing:border-box}
+.issue-form .issue-intro {margin:0 0 20px;color:var(--issue-muted);font-size:14px}
+.issue-form .issue-author {display:flex;align-items:center;gap:12px;padding:16px 20px;margin-bottom:20px;background:#f5f8fb;border:1px solid var(--issue-border);border-radius:10px}
+.issue-form .issue-author-icon {display:flex;align-items:center;justify-content:center;width:38px;height:38px;flex-shrink:0;border-radius:50%;background:#e0effa;color:var(--issue-accent)}
+.issue-form .issue-author-icon svg {width:20px;height:20px}
+.issue-form .issue-author-label {font-size:12px;color:var(--issue-muted)}
+.issue-form .issue-author-name {font-size:14px;font-weight:600;color:#263447}
+.issue-form .issue-section {padding:24px;margin:0 0 20px;background:#fff;border:1px solid var(--issue-border);border-radius:10px;min-width:0}
+.issue-form .issue-section-head {display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #edf0f4}
+.issue-form .issue-section-title {margin:0;color:#263447;font-size:16px;line-height:1.4;font-weight:600}
+.issue-form .issue-optional {color:var(--issue-muted);font-size:12px;font-weight:400;white-space:nowrap}
+.issue-form .issue-field {margin-bottom:20px;min-width:0}
+.issue-form .issue-field:last-child {margin-bottom:0}
+.issue-form .ui-ctl-label-text {display:block;margin:0 0 8px;padding:0;color:#344459;font-size:14px;line-height:20px;font-weight:600}
+.issue-form .issue-required {color:#d34d55}
+.issue-form .ui-ctl {margin:0;width:100%;height:44px;min-width:0}
+.issue-form .ui-ctl-element {width:100%;height:44px;min-height:44px;border:1px solid #c8d2dd;border-radius:6px;background-color:#fff;color:#263447;font:14px/1.4 var(--ui-font-family-primary,Arial,sans-serif);transition:border-color .15s,box-shadow .15s}
+.issue-form input.ui-ctl-element {padding:0 12px}
+.issue-form select.ui-ctl-element {padding-left:12px;padding-right:36px}
+.issue-form .ui-ctl-element:focus {outline:0;border-color:var(--issue-accent);box-shadow:0 0 0 3px rgba(20,122,194,.12)}
+.issue-form .issue-editor-frame {overflow:hidden;width:100%;min-height:240px;border:1px solid #c8d2dd;border-radius:6px;background:#fff}
+.issue-form .issue-editor-frame:focus-within {border-color:var(--issue-accent);box-shadow:0 0 0 3px rgba(20,122,194,.12)}
+.issue-form .issue-editor-frame .lhe-stat-toolbar-cont,.issue-form .issue-editor-frame .lhe-stat-toolbar {background-color:#f5f7fa}
+.issue-form .issue-editor-frame iframe {max-width:100%;background:#fff}
+.issue-form .issue-note {margin:8px 0 0;color:var(--issue-muted);font-size:12px;line-height:1.6}
+.issue-form .issue-note:empty {display:none}
+.issue-form #issue-text-error {color:#bc3c47}
+.issue-form .issue-upload {padding:20px;background:#f8fafc;border:1px dashed #b9c9d8;border-radius:8px}
+.issue-form .issue-upload input[type="file"] {display:block;width:100%;max-width:100%;color:#526278;font:13px/1.5 var(--ui-font-family-primary,Arial,sans-serif)}
+.issue-form .issue-upload input[type="file"]::file-selector-button {margin-right:12px;padding:9px 14px;background:#fff;border:1px solid #becbd8;border-radius:6px;color:#344459;cursor:pointer;font:600 13px/1.4 var(--ui-font-family-primary,Arial,sans-serif)}
+.issue-form .issue-upload input[type="file"]::file-selector-button:hover {background:#eef5fc;border-color:#90b1ce}
+.issue-form .issue-crm-controls {display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px;background:#f8fafc;border:1px solid var(--issue-border);border-radius:8px}
+.issue-form #issue-crm-title {flex:1;min-width:160px;color:#344459;overflow-wrap:anywhere}
+.issue-form .issue-crm-panel {margin-top:12px;padding:16px;background:#fff;border:1px solid var(--issue-border);border-radius:8px}
+.issue-form .issue-crm-search {display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px}
 .issue-form .issue-crm-results {display:grid;gap:4px;margin-top:12px;max-height:280px;overflow:auto}
-.issue-form .issue-crm-result {text-align:left;border:0;padding:10px;background:transparent;color:inherit;cursor:pointer;font:inherit}
-.issue-form .issue-crm-details {display:block;margin-top:4px;font-size:12px;color:var(--ui-color-text-secondary,#828b95);overflow-wrap:anywhere}
-.issue-form .issue-crm-result:hover,.issue-form .issue-crm-result:focus {background:#eef6ff}
+.issue-form .issue-crm-results:empty {display:none}
+.issue-form .issue-crm-result {display:block;width:100%;text-align:left;border:1px solid transparent;border-radius:6px;padding:12px;background:#fff;color:#263447;cursor:pointer;font:14px/1.5 var(--ui-font-family-primary,Arial,sans-serif);overflow-wrap:anywhere}
+.issue-form .issue-crm-result+.issue-crm-result {border-top-color:#edf0f4}
+.issue-form .issue-crm-details {display:block;margin-top:4px;font-size:12px;font-weight:400;color:var(--issue-muted);overflow-wrap:anywhere}
+.issue-form .issue-crm-result:hover,.issue-form .issue-crm-result:focus-visible {outline:0;background:#edf6fd;border-color:#b7d7ef}
+.issue-form .ui-btn {display:inline-flex;align-items:center;justify-content:center;min-height:40px;height:auto;margin:0;padding:10px 16px;border-radius:6px;font-size:13px;line-height:18px;font-weight:600;text-transform:none;letter-spacing:normal;white-space:normal;text-align:center;box-shadow:none}
+.issue-form .ui-btn-light-border {border:1px solid #becbd8;background:#fff;color:#344459}
+.issue-form .ui-btn-light-border:hover {background:#f0f6fc}
+.issue-form .ui-btn-primary {border:1px solid var(--issue-accent);background:var(--issue-accent);color:#fff}
+.issue-form .ui-btn-primary:hover {background:#106aa9;border-color:#106aa9}
+.issue-form .ui-btn:focus-visible {outline:2px solid var(--issue-accent);outline-offset:3px}
+.issue-form .ui-btn:disabled {opacity:.6;cursor:wait}
+.issue-form .issue-actions {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 24px;background:#fff;border:1px solid var(--issue-border);border-radius:10px}
 .issue-form [hidden] {display:none!important}
-@media (max-width:600px) {.issue-form {padding:16px}.issue-form .issue-submit {width:100%;height:auto;min-height:39px;white-space:normal}}
+@media (max-width:640px) {
+    .issue-form .issue-section {padding:18px 16px}
+    .issue-form .issue-author {padding:14px 16px}
+    .issue-form .issue-section-head {gap:8px;flex-wrap:wrap}
+    .issue-form .issue-crm-search {grid-template-columns:minmax(0,1fr)}
+    .issue-form .issue-upload {padding:16px}
+    .issue-form .issue-actions {padding:16px;flex-direction:column-reverse;align-items:stretch}
+    .issue-form .issue-actions .ui-btn {width:100%}
+    .issue-form .issue-crm-controls #issue-crm-title {flex-basis:100%}
+    .issue-form .issue-crm-controls .ui-btn {flex:1}
+}
 </style>
 <div class="issue-form">
+    <p class="issue-intro">Опишите обращение. При необходимости добавьте файлы и укажите контрагента.</p>
     <?php if ($outcome): ?>
         <?php $issueUrl = '/bizproc/processes/' . ISSUE_IBLOCK_ID . '/element/0/' . (int)$outcome['id'] . '/'; ?>
         <div class="ui-alert <?= !empty($outcome['workflow']) ? 'ui-alert-success' : 'ui-alert-warning' ?>" role="status"><div class="ui-alert-message">
@@ -502,12 +555,17 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
         <form method="post" action="<?= issueEscape(ISSUE_FORM_PATH) ?>" enctype="multipart/form-data" id="issue-create-form">
             <?= bitrix_sessid_post() ?>
             <input type="hidden" name="form_token" value="<?= issueEscape($formToken) ?>">
-            <div class="issue-field">
-                <label class="ui-ctl-label-text">Автор обращения</label>
-                <div><?= issueEscape($employeeName) ?></div>
+            <div class="issue-author">
+                <span class="issue-author-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></span>
+                <div><div class="issue-author-label">Автор обращения</div><div class="issue-author-name"><?= issueEscape($employeeName) ?></div></div>
             </div>
+            <section class="issue-section" aria-labelledby="issue-content-heading">
+                <div class="issue-section-head">
+                    <h2 class="issue-section-title" id="issue-content-heading">Содержание обращения</h2>
+                    <span class="issue-optional"><span class="issue-required">*</span> Обязательные поля</span>
+                </div>
             <div class="issue-field">
-                <label class="ui-ctl-label-text" for="issue-topic">Тема обращения *</label>
+                <label class="ui-ctl-label-text" for="issue-topic">Тема обращения <span class="issue-required">*</span></label>
                 <div class="ui-ctl ui-ctl-after-icon ui-ctl-dropdown ui-ctl-w100">
                 <div class="ui-ctl-after ui-ctl-icon-angle"></div>
                 <select class="ui-ctl-element" name="topic" id="issue-topic" required>
@@ -519,7 +577,8 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
                 </div>
             </div>
             <div class="issue-field">
-                <label class="ui-ctl-label-text" for="issue-text-editor">Текст обращения *</label>
+                <label class="ui-ctl-label-text" for="issue-text-editor">Текст обращения <span class="issue-required">*</span></label>
+                <div class="issue-editor-frame">
                 <?php
                 $editor = new CLightHTMLEditor();
                 $editor->Show([
@@ -540,15 +599,27 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
                     ],
                 ]);
                 ?>
+                </div>
+                <p class="issue-note">Опишите ситуацию и ожидаемый результат. Можно использовать списки, выделение текста и ссылки.</p>
                 <div id="issue-text-error" class="issue-note" role="alert"></div>
             </div>
-            <div class="issue-field">
-                <label class="ui-ctl-label-text" for="issue-files">Вложения</label>
+            </section>
+            <section class="issue-section" aria-labelledby="issue-files-heading">
+                <div class="issue-section-head">
+                    <h2 class="issue-section-title" id="issue-files-heading">Вложения</h2>
+                    <span class="issue-optional">Необязательно</span>
+                </div>
+                <div class="issue-upload">
+                <label class="ui-ctl-label-text" for="issue-files">Добавьте документы или изображения</label>
                 <input type="file" name="attachments[]" id="issue-files" <?= $filesAreMultiple ? 'multiple' : '' ?>>
                 <p class="issue-note"><?= $filesAreMultiple ? 'До 10 файлов' : 'Один файл' ?>, каждый не более 20 МБ. Документы, изображения и ZIP. Также действуют ограничения загрузки сервера.</p>
             </div>
-            <div class="issue-field">
-                <label class="ui-ctl-label-text">Контрагент</label>
+            </section>
+            <section class="issue-section" aria-labelledby="issue-crm-heading">
+                <div class="issue-section-head">
+                    <h2 class="issue-section-title" id="issue-crm-heading">Контрагент</h2>
+                    <span class="issue-optional">Необязательно</span>
+                </div>
                 <input type="hidden" name="counterparty" id="issue-crm-value" value="<?= issueEscape($crmItem ? $crmValue : '') ?>">
                 <div class="issue-crm-controls">
                 <span id="issue-crm-title"><?= issueEscape($crmItem ? $crmItem['title'] : 'Не выбран') ?><?php if ($crmItem): ?>
@@ -576,9 +647,11 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
                     <div id="issue-crm-results" class="issue-crm-results" aria-label="Результаты поиска"></div>
                 </div>
                 <div id="issue-crm-error" class="issue-note" role="status"></div>
+            </section>
+            <div class="issue-actions">
+                <a class="ui-btn ui-btn-light-border" href="<?= issueEscape(ISSUE_LIST_PATH) ?>">К списку заявок</a>
+                <button class="ui-btn ui-btn-primary issue-submit" type="submit" id="issue-submit">Создать заявку</button>
             </div>
-            <a class="ui-btn ui-btn-light-border" href="<?= issueEscape(ISSUE_LIST_PATH) ?>">К списку заявок</a>
-            <button class="ui-btn ui-btn-success issue-submit" type="submit" id="issue-submit">Создать заявку и запустить БП</button>
         </form>
         <script>
         BX.ready(function () {
