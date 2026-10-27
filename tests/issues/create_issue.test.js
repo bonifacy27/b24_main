@@ -90,13 +90,18 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(t.calls.length, 3, 'Search input is debounced');
     t.tick();
     assert.equal(t.calls[3].options.body.get('query'), 'Tricolor');
-    t.respond(3, {items: [{id: 99, entityId: 'company', title: 'Tricolor'}]});
+    t.respond(3, {items: [{id: 99, entityId: 'company', title: 'Tricolor', phones: ['+7 900 123-45-67', '+7 900 765-43-21'], emails: ['sales@example.org', '<b>office</b>@example.org']}]});
     await flush();
     t.respond(2, {items: [{id: 1, entityId: 'company', title: 'Old result'}]});
     await flush();
     assert.equal(t.nodes['issue-crm-results'].children[0].textContent, 'Tricolor (#99)', 'Stale search cannot replace latest results');
     t.nodes['issue-crm-results'].children[0].events.click();
     assert.equal(t.nodes['issue-crm-value'].value, 'CO_99');
+    assert.equal(t.nodes['issue-crm-results'].children[0].children[0].textContent,
+        'Тел.: +7 900 123-45-67, +7 900 765-43-21 · Почта: sales@example.org, <b>office</b>@example.org',
+        'All phones and emails use textContent, including HTML-like values');
+    assert.equal(t.nodes['issue-crm-title'].textContent,
+        'Tricolor — Тел.: +7 900 123-45-67, +7 900 765-43-21 · Почта: sales@example.org, <b>office</b>@example.org');
 
     const enter = setup();
     enter.nodes['issue-crm-query'].value = 'New';
@@ -120,5 +125,5 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     const missingField = setup({noField: true});
     assert.equal(missingField.submit(), false);
     assert.equal(missingField.nodes['issue-create-form'].children[0].value, '<p><b>Hello</b></p>');
-    console.log('Issue form client checks passed: CRM search, CSRF, contact/company selection, stale results, errors, HTML submission and empty editor validation.');
+    console.log('Issue form client checks passed: CRM search, CSRF, contact/company selection, phone/email output, stale results, errors, HTML submission and empty editor validation.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
