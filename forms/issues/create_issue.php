@@ -22,6 +22,7 @@ const ISSUE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ISSUE_ALLOWED_EXTENSIONS = 'jpg,jpeg,png,gif,webp,pdf,txt,csv,doc,docx,xls,xlsx,ppt,pptx,zip';
 const ISSUE_FORM_PATH = '/forms/issues/create_issue.php';
 const ISSUE_LIST_PATH = '/forms/issues/list.php';
+const ISSUE_SUCCESS_PATH = '/';
 
 global $APPLICATION, $USER;
 
@@ -111,7 +112,35 @@ function issueCrmItem($entity, $id, $permissions)
     $title = $company ? (string)$record['TITLE'] : trim(
         ($record['LAST_NAME'] ?? '') . ' ' . ($record['NAME'] ?? '') . ' ' . ($record['SECOND_NAME'] ?? '')
     );
-    return ['id' => (int)$id, 'entityId' => $entity, 'title' => $title !== '' ? $title : '#' . $id];
+    $phones = [];
+    $emails = [];
+    $multiFields = \Bitrix\Crm\FieldMultiTable::getList([
+        'select' => ['TYPE_ID', 'VALUE'],
+        'filter' => [
+            '=ENTITY_ID' => $company ? 'COMPANY' : 'CONTACT',
+            '=ELEMENT_ID' => (int)$id,
+            '@TYPE_ID' => ['PHONE', 'EMAIL'],
+        ],
+        'order' => ['ID' => 'ASC'],
+    ]);
+    while ($field = $multiFields->fetch()) {
+        $value = trim((string)$field['VALUE']);
+        if ($value === '') {
+            continue;
+        }
+        if ($field['TYPE_ID'] === 'PHONE') {
+            $phones[] = $value;
+        } elseif ($field['TYPE_ID'] === 'EMAIL') {
+            $emails[] = $value;
+        }
+    }
+    return [
+        'id' => (int)$id,
+        'entityId' => $entity,
+        'title' => $title !== '' ? $title : '#' . $id,
+        'phones' => array_values(array_unique($phones)),
+        'emails' => array_values(array_unique($emails)),
+    ];
 }
 
 $request = Context::getCurrent()->getRequest();
@@ -150,19 +179,27 @@ if ($isCrmSearch) {
     }
     try {
         $permissions = issueCrmPermissions();
-        // Явно разрешённый административный поиск только по компаниям и контактам.
-        // Не используем провайдеры селектора, выполняющиеся с правами посетителя.
-        $filter = ['CHECK_PERMISSIONS' => 'N'];
+        // Legacy GetListEx может игнорировать вложенные OR-фильтры.
+        // D7 ORM применяет условия вхождения до сортировки и ограничения выдачи.
+        // ORM читает в административном контексте; права проверяются в issueCrmItem.
+        $filter = [];
         $words = preg_split('/\s+/u', $query, -1, PREG_SPLIT_NO_EMPTY);
         foreach ($words as $word) {
-            $word = str_replace(['%', '_'], ['\\%', '\\_'], $word);
             $filter[] = $entity === 'company'
                 ? ['%TITLE' => $word]
                 : ['LOGIC' => 'OR', '%NAME' => $word, '%LAST_NAME' => $word, '%SECOND_NAME' => $word];
         }
+        $parameters = [
+            'select' => ['ID'],
+            'filter' => $filter,
+            'order' => $entity === 'company'
+                ? ['TITLE' => 'ASC', 'ID' => 'ASC']
+                : ['LAST_NAME' => 'ASC', 'NAME' => 'ASC', 'ID' => 'ASC'],
+            'limit' => 20,
+        ];
         $rows = $entity === 'company'
-            ? CCrmCompany::GetListEx(['TITLE' => 'ASC', 'ID' => 'ASC'], $filter, false, ['nTopCount' => 20], ['ID'])
-            : CCrmContact::GetListEx(['LAST_NAME' => 'ASC', 'NAME' => 'ASC', 'ID' => 'ASC'], $filter, false, ['nTopCount' => 20], ['ID']);
+            ? \Bitrix\Crm\CompanyTable::getList($parameters)
+            : \Bitrix\Crm\ContactTable::getList($parameters);
         $items = [];
         while ($row = $rows->Fetch()) {
             $item = issueCrmItem($entity, (int)$row['ID'], $permissions);
@@ -236,7 +273,7 @@ if (is_string($resultToken)) {
     $entry = $_SESSION[$sessionKey][$resultToken] ?? null;
     if (is_array($entry) && !empty($entry['id'])) {
         if (!empty($entry['workflow'])) {
-            LocalRedirect(ISSUE_LIST_PATH);
+            LocalRedirect(ISSUE_SUCCESS_PATH);
             exit;
         }
         $outcome = $entry;
@@ -255,7 +292,7 @@ if ($request->isPost()) {
     } elseif (!is_array($entry)) {
         $errors[] = 'Форма устарела. Обновите страницу.';
     } elseif (!empty($entry['id'])) {
-        LocalRedirect(!empty($entry['workflow']) ? ISSUE_LIST_PATH : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
+        LocalRedirect(!empty($entry['workflow']) ? ISSUE_SUCCESS_PATH : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
         exit;
     } elseif (!empty($entry['processing'])) {
         $errors[] = 'Эта форма уже отправлена. Проверьте список заявок перед повторным созданием.';
@@ -409,7 +446,7 @@ if ($request->isPost()) {
                 error_log('Issue #' . $createdId . ', workflow start failed: ' . $exception->getMessage());
             }
             LocalRedirect(!empty($_SESSION[$sessionKey][$token]['workflow'])
-                ? ISSUE_LIST_PATH : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
+                ? ISSUE_SUCCESS_PATH : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
             exit;
         }
     }
@@ -437,6 +474,7 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
 .issue-form .issue-crm-search .ui-ctl {flex:1;min-width:180px}
 .issue-form .issue-crm-results {display:grid;gap:4px;margin-top:12px;max-height:280px;overflow:auto}
 .issue-form .issue-crm-result {text-align:left;border:0;padding:10px;background:transparent;color:inherit;cursor:pointer;font:inherit}
+.issue-form .issue-crm-details {display:block;margin-top:4px;font-size:12px;color:var(--ui-color-text-secondary,#828b95);overflow-wrap:anywhere}
 .issue-form .issue-crm-result:hover,.issue-form .issue-crm-result:focus {background:#eef6ff}
 .issue-form [hidden] {display:none!important}
 @media (max-width:600px) {.issue-form {padding:16px}.issue-form .issue-submit {width:100%;height:auto;min-height:39px;white-space:normal}}
@@ -513,7 +551,12 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
                 <label class="ui-ctl-label-text">Контрагент</label>
                 <input type="hidden" name="counterparty" id="issue-crm-value" value="<?= issueEscape($crmItem ? $crmValue : '') ?>">
                 <div class="issue-crm-controls">
-                <span id="issue-crm-title"><?= issueEscape($crmItem ? $crmItem['title'] : 'Не выбран') ?></span>
+                <span id="issue-crm-title"><?= issueEscape($crmItem ? $crmItem['title'] : 'Не выбран') ?><?php if ($crmItem): ?>
+                    <span class="issue-crm-details"><?= issueEscape(implode(' · ', array_filter([
+                        $crmItem['phones'] ? 'Тел.: ' . implode(', ', $crmItem['phones']) : '',
+                        $crmItem['emails'] ? 'Почта: ' . implode(', ', $crmItem['emails']) : '',
+                    ]))) ?></span>
+                <?php endif; ?></span>
                 <button class="ui-btn ui-btn-light-border ui-btn-sm" type="button" id="issue-crm-select">Выбрать контакт или компанию</button>
                 <button class="ui-btn ui-btn-link ui-btn-sm" type="button" id="issue-crm-clear" <?= $crmItem ? '' : 'hidden' ?>>Убрать</button>
                 </div>
@@ -552,6 +595,12 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
             var timer;
             var requestNumber = 0;
 
+            function crmDetails(item) {
+                var parts = [];
+                if (item.phones && item.phones.length) { parts.push('Тел.: ' + item.phones.join(', ')); }
+                if (item.emails && item.emails.length) { parts.push('Почта: ' + item.emails.join(', ')); }
+                return parts.join(' · ');
+            }
             function searchCrm() {
                 var number = ++requestNumber;
                 results.replaceChildren();
@@ -585,9 +634,16 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
                         button.type = 'button';
                         button.className = 'issue-crm-result';
                         button.textContent = item.title + ' (#' + item.id + ')';
+                        var details = crmDetails(item);
+                        if (details) {
+                            var description = document.createElement('span');
+                            description.className = 'issue-crm-details';
+                            description.textContent = details;
+                            button.appendChild(description);
+                        }
                         button.addEventListener('click', function () {
                             input.value = (item.entityId === 'company' ? 'CO_' : 'C_') + item.id;
-                            title.textContent = item.title;
+                            title.textContent = item.title + (details ? ' — ' + details : '');
                             clear.hidden = false;
                             panel.hidden = true;
                             error.textContent = '';
