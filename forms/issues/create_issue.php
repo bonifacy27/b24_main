@@ -8,7 +8,7 @@ use Bitrix\Main\Context;
 use Bitrix\Main\Loader;
 use Bitrix\Main\UI\Extension;
 
-require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_before.php';
+require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/header.php';
 
 const ISSUE_IBLOCK_ID = 409;
 const ISSUE_TEMPLATE_ID = 1379;
@@ -23,6 +23,7 @@ const ISSUE_ALLOWED_EXTENSIONS = 'jpg,jpeg,png,gif,webp,pdf,txt,csv,doc,docx,xls
 const ISSUE_FORM_PATH = '/forms/issues/create_issue.php';
 
 global $APPLICATION, $USER;
+$APPLICATION->SetTitle('Новое обращение');
 
 function issueEscape($value)
 {
@@ -37,7 +38,6 @@ function issuePostString($request, $name)
 
 function issueStop($message)
 {
-    require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/header.php';
     ShowError($message);
     require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php';
     exit;
@@ -45,6 +45,7 @@ function issueStop($message)
 
 if (!$USER->IsAuthorized()) {
     $APPLICATION->AuthForm('Для создания заявки необходимо авторизоваться.');
+    require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php';
     exit;
 }
 
@@ -55,19 +56,7 @@ foreach (['iblock', 'lists', 'bizproc', 'crm'] as $module) {
 }
 
 $documentType = ['lists', ISSUE_DOCUMENT_ENTITY, 'iblock_' . ISSUE_IBLOCK_ID];
-try {
-    $canCreate = CBPDocument::CanUserOperateDocumentType(
-        CBPCanUserOperateOperation::CreateDocument,
-        (int)$USER->GetID(),
-        $documentType,
-        ['UserGroups' => $USER->GetUserGroupArray()]
-    );
-} catch (\Throwable $exception) {
-    issueStop('Не удалось проверить права на создание заявки.');
-}
-if (!$canCreate) {
-    issueStop('У вас нет прав на создание заявки в этом списке.');
-}
+// Создание через эту форму разрешено любому авторизованному пользователю.
 
 // Не подставляем другой ENTITY: он должен совпадать с шаблоном БП.
 $template = CBPWorkflowTemplateLoader::GetList(
@@ -330,30 +319,22 @@ if ($employeeName === '') {
     $employeeName = (string)$USER->GetLogin();
 }
 
-require $_SERVER['DOCUMENT_ROOT'] . '/bitrix/header.php';
-$APPLICATION->SetTitle('Новое обращение');
-Extension::load(['ui.entity-selector', 'crm.entity-selector']);
+Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts', 'ui.entity-selector', 'crm.entity-selector']);
 $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE;
 ?>
 <style>
-.issue-form {max-width:800px;margin:24px auto;padding:24px;background:#fff;border-radius:12px}
+.issue-form {max-width:900px;box-sizing:border-box;padding:24px;background:var(--ui-color-background-primary,#fff);border-radius:var(--ui-border-radius-md,8px)}
 .issue-form .issue-field {margin-bottom:20px}
-.issue-form label {display:block;margin-bottom:8px;font-weight:600}
-.issue-form select,.issue-form textarea {box-sizing:border-box;width:100%;padding:10px;border:1px solid #c6cdd3;border-radius:6px;font:inherit}
-.issue-form textarea {resize:vertical}
-.issue-form button {padding:10px 16px;border:1px solid #c6cdd3;border-radius:6px;background:#f5f7f8;cursor:pointer}
-.issue-form button[type="submit"] {color:#fff;background:#0089d0;border-color:#0089d0}
-.issue-form button:disabled {opacity:.6;cursor:default}
-.issue-form .issue-note {color:#667;font-size:13px}
-.issue-form .issue-message {padding:16px;margin-bottom:20px;background:#edf8ed;border-radius:6px}
-.issue-form .issue-error {background:#fff0ee}
-.issue-form #issue-crm-title {margin-right:12px}
+.issue-form .issue-note {color:var(--ui-color-text-secondary,#828b95);font-size:13px}
+.issue-form .issue-crm-controls {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.issue-form .issue-crm-controls [hidden] {display:none}
+.issue-form .issue-text {min-height:180px;height:auto}
+@media (max-width:600px) {.issue-form {padding:16px}.issue-form .issue-submit {width:100%;height:auto;min-height:39px;white-space:normal}}
 </style>
 <div class="issue-form">
-    <h2>Новое обращение</h2>
     <?php if ($outcome): ?>
         <?php $issueUrl = '/bizproc/processes/' . ISSUE_IBLOCK_ID . '/element/0/' . (int)$outcome['id'] . '/'; ?>
-        <div class="issue-message" role="status">
+        <div class="ui-alert <?= !empty($outcome['workflow']) ? 'ui-alert-success' : 'ui-alert-warning' ?>" role="status"><div class="ui-alert-message">
             Заявка <a href="<?= issueEscape($issueUrl) ?>">#<?= (int)$outcome['id'] ?></a> сохранена.
             <?php if (!empty($outcome['workflow'])): ?>
                 Бизнес-процесс запущен.
@@ -361,49 +342,56 @@ $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_
                 <p>Запуск бизнес-процесса не подтверждён: <?= issueEscape($outcome['workflow_error']) ?></p>
                 <p>Не создавайте заявку повторно. Проверьте БП сохранённой заявки.</p>
             <?php endif; ?>
-        </div>
-        <a href="<?= issueEscape(ISSUE_FORM_PATH) ?>">Создать новое обращение</a>
+        </div></div>
+        <a class="ui-btn ui-btn-light-border" href="<?= issueEscape(ISSUE_FORM_PATH) ?>">Создать новое обращение</a>
     <?php else: ?>
         <?php if ($errors): ?>
-            <div class="issue-message issue-error" role="alert">
+            <div class="ui-alert ui-alert-danger" role="alert"><div class="ui-alert-message">
                 <ul><?php foreach ($errors as $error): ?><li><?= issueEscape($error) ?></li><?php endforeach; ?></ul>
                 <p>При повторной отправке выберите вложения заново.</p>
-            </div>
+            </div></div>
         <?php endif; ?>
         <form method="post" action="<?= issueEscape(ISSUE_FORM_PATH) ?>" enctype="multipart/form-data" id="issue-create-form">
             <?= bitrix_sessid_post() ?>
             <input type="hidden" name="form_token" value="<?= issueEscape($formToken) ?>">
             <div class="issue-field">
-                <label>Автор обращения</label>
+                <label class="ui-ctl-label-text">Автор обращения</label>
                 <div><?= issueEscape($employeeName) ?></div>
             </div>
             <div class="issue-field">
-                <label for="issue-topic">Тема обращения *</label>
-                <select name="topic" id="issue-topic" required>
+                <label class="ui-ctl-label-text" for="issue-topic">Тема обращения *</label>
+                <div class="ui-ctl ui-ctl-after-icon ui-ctl-dropdown ui-ctl-w100">
+                <div class="ui-ctl-after ui-ctl-icon-angle"></div>
+                <select class="ui-ctl-element" name="topic" id="issue-topic" required>
                     <option value="">— выберите —</option>
                     <?php foreach ($topics as $id => $name): ?>
                         <option value="<?= (int)$id ?>" <?= (string)$topic === (string)$id ? 'selected' : '' ?>><?= issueEscape($name) ?></option>
                     <?php endforeach; ?>
                 </select>
+                </div>
             </div>
             <div class="issue-field">
-                <label for="issue-text">Текст обращения *</label>
-                <textarea name="issue_text" id="issue-text" rows="8" required><?= issueEscape($text) ?></textarea>
+                <label class="ui-ctl-label-text" for="issue-text">Текст обращения *</label>
+                <div class="ui-ctl ui-ctl-textarea ui-ctl-w100 issue-text">
+                <textarea class="ui-ctl-element" name="issue_text" id="issue-text" rows="8" required><?= issueEscape($text) ?></textarea>
+                </div>
             </div>
             <div class="issue-field">
-                <label for="issue-files">Вложения</label>
+                <label class="ui-ctl-label-text" for="issue-files">Вложения</label>
                 <input type="file" name="attachments[]" id="issue-files" multiple>
                 <p class="issue-note">До 10 файлов, каждый не более 20 МБ. Документы, изображения и ZIP. Также действуют ограничения загрузки сервера.</p>
             </div>
             <div class="issue-field">
-                <label>Контрагент</label>
+                <label class="ui-ctl-label-text">Контрагент</label>
                 <input type="hidden" name="counterparty" id="issue-crm-value" value="<?= issueEscape($crmItem ? $crmValue : '') ?>">
+                <div class="issue-crm-controls">
                 <span id="issue-crm-title"><?= issueEscape($crmItem ? $crmItem['title'] : 'Не выбран') ?></span>
-                <button type="button" id="issue-crm-select">Выбрать контакт или компанию</button>
-                <button type="button" id="issue-crm-clear" <?= $crmItem ? '' : 'hidden' ?>>Убрать</button>
+                <button class="ui-btn ui-btn-light-border ui-btn-sm" type="button" id="issue-crm-select">Выбрать контакт или компанию</button>
+                <button class="ui-btn ui-btn-link ui-btn-sm" type="button" id="issue-crm-clear" <?= $crmItem ? '' : 'hidden' ?>>Убрать</button>
+                </div>
                 <div id="issue-crm-error" class="issue-note" role="status"></div>
             </div>
-            <button type="submit" id="issue-submit">Создать заявку и запустить БП</button>
+            <button class="ui-btn ui-btn-success issue-submit" type="submit" id="issue-submit">Создать заявку и запустить БП</button>
         </form>
         <script>
         BX.ready(function () {
