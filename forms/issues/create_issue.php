@@ -154,7 +154,7 @@ if (!$USER->IsAuthorized()) {
     exit;
 }
 
-foreach (['iblock', 'lists', 'bizproc', 'crm', 'fileman'] as $module) {
+foreach (['iblock', 'lists', 'bizproc', 'crm', 'fileman', 'im'] as $module) {
     if (!Loader::includeModule($module)) {
         if ($isCrmSearch) {
             issueJson(['error' => 'Не удалось подключить модуль: ' . $module], 500);
@@ -272,7 +272,7 @@ $resultToken = $request->getQuery('result');
 if (is_string($resultToken)) {
     $entry = $_SESSION[$sessionKey][$resultToken] ?? null;
     if (is_array($entry) && !empty($entry['id'])) {
-        if (!empty($entry['workflow'])) {
+        if (!empty($entry['workflow']) && empty($entry['notification_error'])) {
             LocalRedirect($successPath);
             exit;
         }
@@ -292,7 +292,7 @@ if ($request->isPost()) {
     } elseif (!is_array($entry)) {
         $errors[] = 'Форма устарела. Обновите страницу.';
     } elseif (!empty($entry['id'])) {
-        LocalRedirect(!empty($entry['workflow']) ? $successPath : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
+        LocalRedirect(!empty($entry['workflow']) && empty($entry['notification_error']) ? $successPath : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
         exit;
     } elseif (!empty($entry['processing'])) {
         $errors[] = 'Эта форма уже отправлена. Проверьте список заявок перед повторным созданием.';
@@ -401,7 +401,7 @@ if ($request->isPost()) {
             $createdId = (int)$element->Add([
                 'IBLOCK_ID' => ISSUE_IBLOCK_ID,
                 'ACTIVE' => 'Y',
-                'NAME' => 'Обращение: ' . $topics[$topic],
+                'NAME' => 'Обращение',
                 'CREATED_BY' => $userId,
                 'MODIFIED_BY' => $userId,
                 'PROPERTY_VALUES' => $propertyValues,
@@ -421,8 +421,19 @@ if ($request->isPost()) {
             $_SESSION[$sessionKey][$token]['workflow'] = '';
             $_SESSION[$sessionKey][$token]['workflow_error'] =
                 'Результат запуска БП не подтверждён. Проверьте журнал бизнес-процессов заявки.';
+            $_SESSION[$sessionKey][$token]['notification_error'] = '';
             $workflowErrors = [];
             try {
+                // ID выдаётся только после Add. Название обновляем до запуска БП,
+                // чтобы в процессе использовалось уже итоговое NAME.
+                if (!$element->Update($createdId, [
+                    'NAME' => 'Обращение #' . $createdId,
+                    'MODIFIED_BY' => $userId,
+                ])) {
+                    $_SESSION[$sessionKey][$token]['workflow_error'] =
+                        'Не удалось установить название заявки. Бизнес-процесс не запускался.';
+                    throw new RuntimeException('Issue rename failed: ' . $element->LAST_ERROR);
+                }
                 $workflowId = CBPDocument::StartWorkflow(
                     ISSUE_TEMPLATE_ID,
                     ['lists', ISSUE_DOCUMENT_ENTITY, $createdId],
@@ -432,6 +443,28 @@ if ($request->isPost()) {
                 if ($workflowId) {
                     $_SESSION[$sessionKey][$token]['workflow'] = (string)$workflowId;
                     $_SESSION[$sessionKey][$token]['workflow_error'] = '';
+                    try {
+                        // Тема отображается как текст, без интерпретации HTML/BBCode.
+                        $topicLabel = str_replace(['[', ']'], ['&#91;', '&#93;'], htmlspecialcharsbx($topics[$topic]));
+                        $notificationText = 'Обращение #' . $createdId . ' (' . $topicLabel . ') создано и поставлено в очередь, после взятия в работу появится в ваших задачах';
+                        $notificationId = CIMNotify::Add([
+                            'TO_USER_ID' => $userId,
+                            'FROM_USER_ID' => 0,
+                            'NOTIFY_TYPE' => IM_NOTIFY_SYSTEM,
+                            'NOTIFY_MODULE' => 'im',
+                            'NOTIFY_EVENT' => 'default',
+                            'NOTIFY_TAG' => 'ISSUE_CREATED_' . ISSUE_IBLOCK_ID . '_' . $createdId . '_' . $userId,
+                            'NOTIFY_MESSAGE' => $notificationText . ' [URL=' . $successPath . ']Мои задачи[/URL]',
+                        ]);
+                        if (!$notificationId) {
+                            throw new RuntimeException('CIMNotify::Add did not return an ID');
+                        }
+                        $_SESSION[$sessionKey][$token]['notification_id'] = (int)$notificationId;
+                    } catch (\Throwable $exception) {
+                        $_SESSION[$sessionKey][$token]['notification_error'] =
+                            'Заявка создана и БП запущен, но уведомление в колокольчик не отправлено. Обратитесь к администратору.';
+                        error_log('Issue #' . $createdId . ', notification failed: ' . $exception->getMessage());
+                    }
                 } else {
                     $messages = [];
                     foreach ($workflowErrors as $workflowError) {
@@ -446,6 +479,7 @@ if ($request->isPost()) {
                 error_log('Issue #' . $createdId . ', workflow start failed: ' . $exception->getMessage());
             }
             LocalRedirect(!empty($_SESSION[$sessionKey][$token]['workflow'])
+                && empty($_SESSION[$sessionKey][$token]['notification_error'])
                 ? $successPath : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
             exit;
         }
@@ -535,13 +569,17 @@ Extension::load(['ui.forms', 'ui.buttons', 'ui.alerts']);
     <p class="issue-intro">Опишите обращение. При необходимости добавьте файлы и укажите контрагента.</p>
     <?php if ($outcome): ?>
         <?php $issueUrl = '/bizproc/processes/' . ISSUE_IBLOCK_ID . '/element/0/' . (int)$outcome['id'] . '/'; ?>
-        <div class="ui-alert <?= !empty($outcome['workflow']) ? 'ui-alert-success' : 'ui-alert-warning' ?>" role="status"><div class="ui-alert-message">
+        <div class="ui-alert <?= !empty($outcome['workflow']) && empty($outcome['notification_error']) ? 'ui-alert-success' : 'ui-alert-warning' ?>" role="status"><div class="ui-alert-message">
             Заявка <a href="<?= issueEscape($issueUrl) ?>">#<?= (int)$outcome['id'] ?></a> сохранена.
             <?php if (!empty($outcome['workflow'])): ?>
                 Бизнес-процесс запущен.
             <?php else: ?>
                 <p>Запуск бизнес-процесса не подтверждён: <?= issueEscape($outcome['workflow_error']) ?></p>
                 <p>Не создавайте заявку повторно. Проверьте БП сохранённой заявки.</p>
+            <?php endif; ?>
+            <?php if (!empty($outcome['notification_error'])): ?>
+                <p><?= issueEscape($outcome['notification_error']) ?></p>
+                <p>Не создавайте заявку повторно. <a href="<?= issueEscape($successPath) ?>">Мои задачи</a></p>
             <?php endif; ?>
         </div></div>
         <a class="ui-btn ui-btn-light-border" href="<?= issueEscape(ISSUE_FORM_PATH) ?>">Создать новое обращение</a>
