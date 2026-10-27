@@ -1,54 +1,124 @@
+// Run: node tests/issues/create_issue.test.js
 const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 const assert = require('assert/strict');
 const source = fs.readFileSync(path.join(__dirname, '../../forms/issues/create_issue.php'), 'utf8');
-const match = source.match(/<script>([\s\S]*?)<\/script>/);
-assert(match, 'Inline form script exists');
-function render(initial, hasSelector = true) {
+const script = source.match(/<script>([\s\S]*?)<\/script>/)[1];
+function setup(initial = {}) {
     const nodes = {};
-    for (const id of ['issue-crm-value', 'issue-crm-title', 'issue-crm-select', 'issue-crm-clear', 'issue-crm-error', 'issue-create-form', 'issue-submit']) {
-        nodes[id] = {value: '', hidden: false, events: {}, addEventListener(name, fn) { this.events[name] = fn; }};
+    function node() {
+        return {
+            value: '', hidden: false, textContent: '', children: [], events: {},
+            addEventListener(type, handler) { this.events[type] = handler; },
+            appendChild(child) { this.children.push(child); },
+            replaceChildren() { this.children = []; },
+            focus() { this.focused = true; },
+            set innerHTML(html) {
+                this.textContent = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '\u00a0');
+            }
+        };
     }
-    let dialog;
-    class Dialog {
-        constructor(config) { this.config = config; this.items = []; dialog = this; }
-        show() { this.visible = true; }
-        getSelectedItems() { return this.items; }
-        choose(entity, id, title) {
-            const item = {
-                getEntityId: () => entity, getId: () => id, getTitle: () => title,
-                deselect: () => { this.items = this.items.filter(x => x !== item); this.config.events['Item:onDeselect'](); }
-            };
-            this.items = [item];
-            this.config.events['Item:onSelect']({getData: () => ({item})});
-        }
+    for (const id of ['issue-crm-value', 'issue-crm-title', 'issue-crm-select', 'issue-crm-clear',
+        'issue-crm-error', 'issue-crm-panel', 'issue-crm-query', 'issue-crm-entity',
+        'issue-crm-results', 'issue-create-form', 'issue-submit', 'issue-text-error']) {
+        nodes[id] = node();
     }
-    vm.runInNewContext(match[1].replace(/<\?= json_encode\(\$crmItem, \$jsonFlags\) \?>/, JSON.stringify(initial)), {
-        BX: {ready: fn => fn(), UI: hasSelector ? {EntitySelector: {Dialog}} : {}},
-        document: {getElementById: id => nodes[id]}
+    const form = nodes['issue-create-form'];
+    form.action = '/forms/issues/create_issue.php';
+    const field = node();
+    form.querySelector = () => initial.noField ? null : field;
+    nodes['issue-crm-panel'].hidden = true;
+    nodes['issue-crm-entity'].value = 'contact';
+    nodes['issue-crm-value'].value = initial.crmValue || '';
+    const calls = [];
+    const pending = [];
+    let timer;
+    const editor = initial.noEditor ? null : {GetContent: () => initial.html ?? '<p><b>Hello</b></p>'};
+    vm.runInNewContext(script, {
+        BX: {ready: fn => fn(), bitrix_sessid: () => 'test-session'},
+        window: {issueTextEditor: editor},
+        document: {getElementById: id => nodes[id], createElement: node},
+        URLSearchParams,
+        fetch: (url, options) => {
+            calls.push({url, options});
+            return new Promise(resolve => pending.push(resolve));
+        },
+        setTimeout: fn => { timer = fn; return 1; },
+        clearTimeout: () => { timer = null; }
     });
-    return {nodes, dialog};
+    return {
+        nodes, calls, field,
+        input(query) {
+            nodes['issue-crm-query'].value = query;
+            nodes['issue-crm-query'].events.input();
+        },
+        tick() { const fn = timer; timer = null; if (fn) fn(); },
+        respond(index, data, ok = true) { pending[index]({ok, json: async () => data}); },
+        submit() {
+            let prevented = false;
+            form.events.submit({preventDefault: () => { prevented = true; }});
+            return prevented;
+        }
+    };
 }
-const {nodes, dialog} = render(null);
-nodes['issue-crm-select'].events.click();
-assert.equal(dialog.visible, true);
-dialog.choose('company', 123, '<b>Company</b>');
-assert.equal(nodes['issue-crm-value'].value, 'CO_123');
-assert.equal(nodes['issue-crm-title'].textContent, '<b>Company</b>');
-assert.equal(nodes['issue-crm-clear'].hidden, false);
-dialog.choose('contact', 456, 'Contact');
-assert.equal(nodes['issue-crm-value'].value, 'C_456');
-nodes['issue-crm-clear'].events.click();
-assert.equal(nodes['issue-crm-value'].value, '');
-assert.equal(dialog.getSelectedItems().length, 0);
-assert.equal(nodes['issue-crm-clear'].hidden, true);
-nodes['issue-create-form'].events.submit();
-assert.equal(nodes['issue-submit'].disabled, true);
-assert.equal(render(null, false).nodes['issue-crm-select'].disabled, true);
-const initial = {id: 42, entityId: 'company', title: 'Saved company'};
-const restored = render(initial).dialog.config;
-assert.equal(restored.items[0].title, 'Saved company');
-assert.equal(restored.preselectedItems[0][0], 'company');
-assert.equal(restored.preselectedItems[0][1], 42);
-console.log('Client checks passed: selector, CRM prefixes, text output, clear, submit, fallback, restore.');
+const flush = () => new Promise(resolve => setImmediate(resolve));
+(async function () {
+    const t = setup();
+    t.nodes['issue-crm-select'].events.click();
+    assert.equal(t.calls[0].url, '/forms/issues/create_issue.php');
+    assert.equal(t.calls[0].options.credentials, 'same-origin');
+    assert.equal(t.calls[0].options.body.get('sessid'), 'test-session');
+    assert.equal(t.calls[0].options.body.get('entity'), 'contact');
+    t.respond(0, {items: [{id: 42, entityId: 'contact', title: '<b>Alice</b>'}]});
+    await flush();
+    let result = t.nodes['issue-crm-results'].children[0];
+    assert.equal(result.textContent, '<b>Alice</b> (#42)');
+    result.events.click();
+    assert.equal(t.nodes['issue-crm-value'].value, 'C_42');
+    assert.equal(t.nodes['issue-crm-title'].textContent, '<b>Alice</b>');
+    assert.equal(t.nodes['issue-crm-panel'].hidden, true);
+    t.nodes['issue-crm-clear'].events.click();
+    assert.equal(t.nodes['issue-crm-value'].value, '');
+    assert.equal(t.nodes['issue-crm-clear'].hidden, true);
+
+    t.nodes['issue-crm-select'].events.click();
+    t.nodes['issue-crm-entity'].value = 'company';
+    t.nodes['issue-crm-entity'].events.change();
+    assert.equal(t.calls[2].options.body.get('entity'), 'company');
+    t.input('Tricolor');
+    assert.equal(t.calls.length, 3, 'Search input is debounced');
+    t.tick();
+    assert.equal(t.calls[3].options.body.get('query'), 'Tricolor');
+    t.respond(3, {items: [{id: 99, entityId: 'company', title: 'Tricolor'}]});
+    await flush();
+    t.respond(2, {items: [{id: 1, entityId: 'company', title: 'Old result'}]});
+    await flush();
+    assert.equal(t.nodes['issue-crm-results'].children[0].textContent, 'Tricolor (#99)', 'Stale search cannot replace latest results');
+    t.nodes['issue-crm-results'].children[0].events.click();
+    assert.equal(t.nodes['issue-crm-value'].value, 'CO_99');
+
+    const enter = setup();
+    enter.nodes['issue-crm-query'].value = 'New';
+    let prevented = false;
+    enter.nodes['issue-crm-query'].events.keydown({key: 'Enter', preventDefault() { prevented = true; }});
+    assert.equal(prevented, true, 'Enter searches without submitting form');
+    enter.respond(0, {error: 'Session expired'}, false);
+    await flush();
+    assert.equal(enter.nodes['issue-crm-error'].textContent, 'Session expired');
+
+    const restored = setup({crmValue: 'CO_123'});
+    assert.equal(restored.nodes['issue-crm-value'].value, 'CO_123');
+    assert.equal(t.submit(), false);
+    assert.equal(t.field.value, '<p><b>Hello</b></p>', 'HTML is posted without losing formatting');
+    assert.equal(t.nodes['issue-submit'].disabled, true);
+    const empty = setup({html: '<p><br>&nbsp;</p>'});
+    assert.equal(empty.submit(), true);
+    assert.notEqual(empty.nodes['issue-submit'].disabled, true);
+    assert.equal(setup({html: '<p>\u200b</p>'}).submit(), true);
+    assert.equal(setup({noEditor: true}).submit(), true);
+    const missingField = setup({noField: true});
+    assert.equal(missingField.submit(), false);
+    assert.equal(missingField.nodes['issue-create-form'].children[0].value, '<p><b>Hello</b></p>');
+    console.log('Issue form client checks passed: CRM search, CSRF, contact/company selection, stale results, errors, HTML submission and empty editor validation.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
