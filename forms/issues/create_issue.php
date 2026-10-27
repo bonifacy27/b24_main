@@ -74,13 +74,14 @@ foreach ([
         issueStop('Проверьте настройки свойства #' . $propertyId . '.');
     }
 }
-if (
-    $properties[ISSUE_TEXT_PROPERTY]['USER_TYPE'] !== 'HTML'
-    || $properties[ISSUE_FILES_PROPERTY]['MULTIPLE'] !== 'Y'
-    || !in_array($properties[ISSUE_CRM_PROPERTY]['USER_TYPE'], ['CRM', 'S:CRM'], true)
-) {
-    issueStop('Проверьте типы свойств: 3203 — HTML/текст; 3204 — множественный файл; 3205 — привязка к CRM.');
-}
+// USER_TYPE может отличаться между версиями и настройками Битрикс.
+// Основные типы L/S/F/S проверены выше; формат записи выбирается по метаданным.
+$textIsHtml = in_array(
+    strtoupper((string)($properties[ISSUE_TEXT_PROPERTY]['USER_TYPE'] ?? '')),
+    ['HTML', 'S:HTML'],
+    true
+);
+$filesAreMultiple = $properties[ISSUE_FILES_PROPERTY]['MULTIPLE'] === 'Y';
 
 $topics = [];
 $result = CIBlockPropertyEnum::GetList(
@@ -218,6 +219,9 @@ if ($request->isPost()) {
                 }
                 $fileValues['n' . count($fileValues)] = ['VALUE' => $file, 'DESCRIPTION' => ''];
             }
+            if (!$filesAreMultiple && $fileCount > 1) {
+                $errors[] = 'Свойство «Вложение» допускает один файл. Для нескольких включите множественность свойства 3204.';
+            }
             if ($fileCount > ISSUE_MAX_FILES) {
                 $errors[] = 'Можно прикрепить не более ' . ISSUE_MAX_FILES . ' файлов.';
             }
@@ -229,12 +233,17 @@ if ($request->isPost()) {
         // Токен защищает повторный POST в пределах текущей сессии.
         $_SESSION[$sessionKey][$token]['processing'] = true;
         $element = new CIBlockElement();
+        $textPropertyValue = $textIsHtml
+            ? ['VALUE' => ['TEXT' => $text, 'TYPE' => 'text']]
+            : $text;
         $propertyValues = [
             ISSUE_TOPIC_PROPERTY => (int)$topic,
-            ISSUE_TEXT_PROPERTY => ['VALUE' => ['TEXT' => $text, 'TYPE' => 'text']],
+            ISSUE_TEXT_PROPERTY => $properties[ISSUE_TEXT_PROPERTY]['MULTIPLE'] === 'Y'
+                ? [$textPropertyValue] : $textPropertyValue,
         ];
         if ($fileValues) {
-            $propertyValues[ISSUE_FILES_PROPERTY] = $fileValues;
+            $propertyValues[ISSUE_FILES_PROPERTY] = $filesAreMultiple
+                ? $fileValues : reset($fileValues);
         }
         if ($crmValue !== '') {
             $propertyValues[ISSUE_CRM_PROPERTY] = $properties[ISSUE_CRM_PROPERTY]['MULTIPLE'] === 'Y'
@@ -362,8 +371,8 @@ $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_
             </div>
             <div class="issue-field">
                 <label class="ui-ctl-label-text" for="issue-files">Вложения</label>
-                <input type="file" name="attachments[]" id="issue-files" multiple>
-                <p class="issue-note">До 10 файлов, каждый не более 20 МБ. Документы, изображения и ZIP. Также действуют ограничения загрузки сервера.</p>
+                <input type="file" name="attachments[]" id="issue-files" <?= $filesAreMultiple ? 'multiple' : '' ?>>
+                <p class="issue-note"><?= $filesAreMultiple ? 'До 10 файлов' : 'Один файл' ?>, каждый не более 20 МБ. Документы, изображения и ZIP. Также действуют ограничения загрузки сервера.</p>
             </div>
             <div class="issue-field">
                 <label class="ui-ctl-label-text">Контрагент</label>
