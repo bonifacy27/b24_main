@@ -22,7 +22,6 @@ const ISSUE_MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ISSUE_ALLOWED_EXTENSIONS = 'jpg,jpeg,png,gif,webp,pdf,txt,csv,doc,docx,xls,xlsx,ppt,pptx,zip';
 const ISSUE_FORM_PATH = '/forms/issues/create_issue.php';
 const ISSUE_LIST_PATH = '/forms/issues/list.php';
-const ISSUE_SUCCESS_PATH = '/';
 
 global $APPLICATION, $USER;
 
@@ -252,6 +251,7 @@ while ($enum = $result->Fetch()) {
 }
 
 $userId = (int)$USER->GetID();
+$successPath = '/company/personal/user/' . $userId . '/tasks/';
 $sessionKey = 'ISSUE_CREATE_' . $userId;
 if (!isset($_SESSION[$sessionKey])) {
     $_SESSION[$sessionKey] = [];
@@ -273,7 +273,7 @@ if (is_string($resultToken)) {
     $entry = $_SESSION[$sessionKey][$resultToken] ?? null;
     if (is_array($entry) && !empty($entry['id'])) {
         if (!empty($entry['workflow'])) {
-            LocalRedirect(ISSUE_SUCCESS_PATH);
+            LocalRedirect($successPath);
             exit;
         }
         $outcome = $entry;
@@ -292,7 +292,7 @@ if ($request->isPost()) {
     } elseif (!is_array($entry)) {
         $errors[] = 'Форма устарела. Обновите страницу.';
     } elseif (!empty($entry['id'])) {
-        LocalRedirect(!empty($entry['workflow']) ? ISSUE_SUCCESS_PATH : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
+        LocalRedirect(!empty($entry['workflow']) ? $successPath : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
         exit;
     } elseif (!empty($entry['processing'])) {
         $errors[] = 'Эта форма уже отправлена. Проверьте список заявок перед повторным созданием.';
@@ -446,7 +446,7 @@ if ($request->isPost()) {
                 error_log('Issue #' . $createdId . ', workflow start failed: ' . $exception->getMessage());
             }
             LocalRedirect(!empty($_SESSION[$sessionKey][$token]['workflow'])
-                ? ISSUE_SUCCESS_PATH : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
+                ? $successPath : ISSUE_FORM_PATH . '?result=' . rawurlencode($token));
             exit;
         }
     }
