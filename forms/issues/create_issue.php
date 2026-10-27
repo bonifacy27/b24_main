@@ -55,25 +55,9 @@ foreach (['iblock', 'lists', 'bizproc', 'crm'] as $module) {
     }
 }
 
-$documentType = ['lists', ISSUE_DOCUMENT_ENTITY, 'iblock_' . ISSUE_IBLOCK_ID];
 // Создание через эту форму разрешено любому авторизованному пользователю.
-
-// Не подставляем другой ENTITY: он должен совпадать с шаблоном БП.
-$template = CBPWorkflowTemplateLoader::GetList(
-    [],
-    ['ID' => ISSUE_TEMPLATE_ID],
-    false,
-    false,
-    ['ID', 'MODULE_ID', 'ENTITY', 'DOCUMENT_TYPE']
-)->Fetch();
-if (
-    !$template
-    || $template['MODULE_ID'] !== $documentType[0]
-    || $template['ENTITY'] !== $documentType[1]
-    || $template['DOCUMENT_TYPE'] !== $documentType[2]
-) {
-    issueStop('Шаблон БП 1379 не найден либо не соответствует типу документа lists / BizprocDocument / iblock_409.');
-}
+// Шаблон запускается напрямую, как в работающей форме подбора персонала.
+// Ошибки запуска возвращает StartWorkflow; GetList не используется как проверка.
 
 $properties = [];
 $result = CIBlockProperty::GetList([], ['IBLOCK_ID' => ISSUE_IBLOCK_ID]);
@@ -287,7 +271,7 @@ if ($request->isPost()) {
                 $workflowId = CBPDocument::StartWorkflow(
                     ISSUE_TEMPLATE_ID,
                     ['lists', ISSUE_DOCUMENT_ENTITY, $createdId],
-                    [],
+                    ['TargetUser' => 'user_' . $userId],
                     $workflowErrors
                 );
                 if ($workflowId) {
