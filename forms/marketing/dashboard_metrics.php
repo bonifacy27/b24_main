@@ -33,27 +33,94 @@ function marketingStage($status, $stage, array $stageMap)
     if (isset($stageMap[$stage])) { return $stageMap[$stage]; }
     return (int)$status === 3 ? 'work' : 'new';
 }
+function marketingFieldAt(array $task, $field, $cutoff)
+{
+    $value = $task[$field === 'STATUS' ? 'status' : 'stage'];
+    foreach (array_reverse($task['logs']) as $log) {
+        if ($log['at'] < $cutoff) { break; }
+        if ($log['field'] === $field) { $value = (int)$log['from']; }
+    }
+    return $value;
+}
+
+function marketingStatusAt(array $task, $cutoff)
+{
+    $status = marketingFieldAt($task, 'STATUS', $cutoff);
+    // Older records may have a completion date but no corresponding status event.
+    if ($status === 5 && $task['closed'] && $task['closed'] >= $cutoff) {
+        foreach (array_reverse($task['logs']) as $log) {
+            if ($log['at'] < $cutoff) { break; }
+            if ($log['field'] === 'STATUS') { return $status; }
+        }
+        return 0;
+    }
+    return $status;
+}
+
 function marketingSnapshot(array $task, $cutoff, array $stageMap)
 {
-    $status = $task['status']; $stage = $task['stage'];
-    // Reverse subsequent events to reconstruct the end-of-period state.
-    foreach (array_reverse($task['logs']) as $log) {
-        if ($log['at'] < $cutoff) { continue; }
-        if ($log['field'] === 'STATUS') { $status = (int)$log['from']; }
-        if ($log['field'] === 'STAGE_ID') { $stage = (int)$log['from']; }
-    }
-    // Completion date is useful on portals with a partial history.
-    if ($status === 5 && $task['closed'] && $task['closed'] >= $cutoff) { $status = 3; }
-    return marketingStage($status, $stage, $stageMap);
+    $status = marketingStatusAt($task, $cutoff);
+    return marketingStage($status ?: 3, marketingFieldAt($task, 'STAGE_ID', $cutoff), $stageMap);
 }
-function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability)
+
+function marketingTaskTimeline(array $task, $field, $cutoff, $defaultStage = null)
+{
+    if (!$task['created'] || $task['created'] >= $cutoff) { return null; }
+
+    $completion = null;
+    if (marketingStatusAt($task, $cutoff) === 5) {
+        foreach (array_reverse($task['logs']) as $log) {
+            if ($log['at'] < $cutoff && $log['field'] === 'STATUS' && (int)$log['to'] === 5) {
+                $completion = $log['at'];
+                break;
+            }
+        }
+        if ($task['closed'] && $task['closed'] < $cutoff) {
+            $completion = max($completion ?? 0, $task['closed']);
+        }
+    }
+
+    $events = array_values(array_filter($task['logs'], static function ($log) use ($field) {
+        return $log['field'] === $field;
+    }));
+    if ($field === 'STAGE_ID' && !$events) { return null; }
+
+    $end = max($task['created'], $completion ?? $cutoff);
+    $cursor = $task['created'];
+    $state = isset($events[0]) ? (int)$events[0]['from'] : null;
+    $segments = [];
+    foreach ($events as $log) {
+        if ($log['at'] > $end || $log['at'] >= $cutoff) { break; }
+        $at = max($cursor, $log['at']);
+        if ($at > $cursor) {
+            $segments[] = ['state'=>$state === (int)$log['from'] ? $state : null, 'from'=>$cursor, 'to'=>$at];
+        }
+        $cursor = $at;
+        $state = (int)$log['to'];
+    }
+    if ($cursor < $end) {
+        // The next event can confirm state in an interval ending before the event.
+        $expected = marketingFieldAt($task, $field, $end + (int)($completion !== null));
+        $segments[] = ['state'=>$state === $expected ? $state : null, 'from'=>$cursor, 'to'=>$end];
+    }
+    if ($field === 'STAGE_ID' && $defaultStage !== null) {
+        foreach ($segments as &$segment) {
+            if ($segment['state'] === 0) { $segment['state'] = $defaultStage; }
+        }
+        unset($segment);
+    }
+    return ['segments'=>$segments, 'seconds'=>$end - $task['created'], 'completed'=>$completion !== null];
+}
+
+function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [])
 {
     $cutoff = min($to, $now + 1);
     $returnTimes = [];
-    $report = ['tasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
+    $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
     foreach ($tasks as $id => $task) {
         if (isset($task['included']) && !$task['included']) { continue; }
         if (!$task['created'] || $task['created'] >= $cutoff) { continue; }
+        if ($statuses && !in_array(marketingStatusAt($task, $cutoff), $statuses, true)) { continue; }
         $state = marketingSnapshot($task, $cutoff, $stageMap);
         if ($state === 'done' && $task['closed'] && $task['closed'] < $from) { continue; }
         $projectId = marketingProjectId($id, $tasks);
@@ -68,7 +135,8 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
             }
         }
         $project =& $report['projects'][$projectId];
-        ++$report['tasks']; ++$report['funnel'][$state]; ++$project['tasks'];
+        ++$report['tasks']; ++$report['funnel'][$state];
+        if ($task['parent'] > 0) { ++$report['subtasks']; ++$project['tasks']; }
         if ($state === 'done') { ++$project['done']; }
         $user = $task['responsible'];
         if (!isset($report['employees'][$user])) { $report['employees'][$user] = ['tasks'=>0,'done'=>0,'returns'=>0,'stale'=>0,'hours'=>0]; }

@@ -57,4 +57,34 @@ $inside=task(10,12);
 $r=marketingReport([10=>$inside,12=>$external],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08'),7,$config,$map,$availability);
 check($r['tasks']===1 && $r['projectCount']===1 && $r['hours']===0,'External metadata cannot inflate department counts or hours');
 check($r['projects'][12]['title']==='Task 12','External root names project');
+$timelineTask=task(50);
+$timelineTask['created']=ts('2026-10-01');
+$timelineTask['status']=5;
+$timelineTask['stage']=3;
+$timelineTask['closed']=ts('2026-10-26');
+$timelineTask['logs']=[
+    ['at'=>ts('2026-10-11'),'field'=>'STATUS','from'=>2,'to'=>3],
+    ['at'=>ts('2026-10-11'),'field'=>'STAGE_ID','from'=>0,'to'=>2],
+    ['at'=>ts('2026-10-16'),'field'=>'STATUS','from'=>3,'to'=>4],
+    ['at'=>ts('2026-10-16'),'field'=>'STAGE_ID','from'=>2,'to'=>3],
+    ['at'=>ts('2026-10-26'),'field'=>'STATUS','from'=>4,'to'=>5],
+];
+$cutoff=ts('2026-11-01');
+$status=marketingTaskTimeline($timelineTask,'STATUS',$cutoff);
+$stage=marketingTaskTimeline($timelineTask,'STAGE_ID',$cutoff,1);
+check($status['completed'] && $status['seconds']===25*86400,'Completion stops the timeline');
+check(array_column($status['segments'],'state')===[2,3,4],'Status timeline follows actual transitions');
+check(array_column($stage['segments'],'state')===[1,2,3],'Stage timeline uses the group default and kanban transitions');
+foreach ([$status,$stage] as $timeline) {
+    check(array_map(static function ($segment) {
+        return $segment['to'] - $segment['from'];
+    },$timeline['segments'])===[10*86400,5*86400,10*86400],'Intervals sum to 25 days');
+}
+$historical=marketingTaskTimeline($timelineTask,'STATUS',ts('2026-10-16'));
+check(!$historical['completed'] && array_column($historical['segments'],'state')===[2,3],'Cutoff excludes a transition at the boundary');
+check(marketingTaskTimeline(task(60),'STAGE_ID',$cutoff)===null,'Do not infer stage durations without transitions');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[3]);
+check($r['projectCount']===1 && $r['subtasks']===0,'Status filter uses the status at the end of the range');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[5]);
+check($r['projectCount']===0,'Status filter excludes a later completion');
 echo "Marketing dashboard: all checks passed\n";
