@@ -87,26 +87,21 @@ $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff
 check($r['projectCount']===1 && $r['subtasks']===0,'Status filter uses the status at the end of the range');
 $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[5]);
 check($r['projectCount']===0,'Status filter excludes a later completion');
-$tagConnection = new class {
-    public function isTableExists($table) { return true; }
-    public function getTableFields($table) {
-        return array_fill_keys($table === 'b_tasks_tag' ? ['ID','TASK_ID','NAME'] : ['TASK_ID','TAG_ID'], true);
-    }
-    public function query($sql) {
-        check(substr($sql, -4) === '(50)', 'Only load tags for requested task IDs');
-        return new class(strpos($sql, 'INNER JOIN') !== false ? 'ценообразование/контент' : 'Старый тег') {
-            private $tag;
-            public function __construct($tag) { $this->tag = $tag; }
-            public function fetch() {
-                if ($this->tag === null) { return false; }
-                $row = ['TASK_ID'=>50,'NAME'=>$this->tag];
-                $this->tag = null;
-                return $row;
-            }
-        };
-    }
+$fetchTags = static function (array $ids) {
+    check($ids === [50, 51], 'Pass only requested task IDs to the Tasks API');
+    return new class {
+        private $rows = [
+            ['TASK_ID'=>50,'NAME'=>'ценообразование/контент'],
+            ['TASK_ID'=>51,'NAME'=>'Тег подзадачи'],
+            ['TASK_ID'=>99,'NAME'=>'Посторонний тег'],
+        ];
+        public function Fetch() { return array_shift($this->rows); }
+    };
 };
-check(marketingLoadDashboardTags($tagConnection, [50]) === [50=>['Старый тег','ценообразование/контент']], 'Read linked tags even when legacy columns exist');
+check(marketingLoadDashboardTags($fetchTags, [50, 51]) === [
+    50=>['ценообразование/контент'],
+    51=>['Тег подзадачи'],
+], 'Read raw linked tags and keep them attached to their own tasks');
 
 $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[3],[1,2],1);
 check($r['projectCount']===1,'Match any chosen kanban stage at the cutoff in combination with status');
@@ -114,4 +109,17 @@ $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff
 check($r['projectCount']===0,'A later kanban stage does not match');
 $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-11'),$cutoff,7,$config,$map,$availability,[],[1],1);
 check($r['projectCount']===1,'An unset kanban stage matches the board default');
+$initiatorRoot = task(70);
+$initiatorRoot['creator'] = 10;
+$initiatorChild = task(71, 70);
+$initiatorChild['creator'] = 20;
+$initiatorChild['responsible'] = 30;
+$otherRoot = task(72);
+$otherRoot['creator'] = 30;
+$byInitiator = [70=>$initiatorRoot, 71=>$initiatorChild, 72=>$otherRoot];
+$r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,20);
+check(array_keys($r['taskReturns'])===[71], 'Filter by creator even if the same employee is an accomplice elsewhere');
+check($r['projectCount']===0 && $r['active']===0 && $r['subtasks']===1, 'A parent created by another user is context only');
+$r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,10);
+check(array_keys($r['taskReturns'])===[70] && $r['projectCount']===1, 'An initiator can be the responsible user of another task');
 echo "Marketing dashboard: all checks passed\n";

@@ -112,13 +112,14 @@ function marketingTaskTimeline(array $task, $field, $cutoff, $defaultStage = nul
     return ['segments'=>$segments, 'seconds'=>$end - $task['created'], 'completed'=>$completion !== null];
 }
 
-function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [], array $stages = [], $defaultStage = null)
+function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [], array $stages = [], $defaultStage = null, $creator = 0)
 {
     $cutoff = min($to, $now + 1);
     $returnTimes = [];
     $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
     foreach ($tasks as $id => $task) {
         if (isset($task['included']) && !$task['included']) { continue; }
+        if ($creator && ($task['creator'] ?? 0) !== $creator) { continue; }
         if (!$task['created'] || $task['created'] >= $cutoff) { continue; }
         if ($statuses && !in_array(marketingStatusAt($task, $cutoff), $statuses, true)) { continue; }
         if ($stages) {
@@ -178,6 +179,7 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
         unset($project);
     }
     foreach ($report['projects'] as $project) {
+        if ($creator && ($tasks[$project['id']]['creator'] ?? 0) !== $creator) { continue; }
         if ($project['id'] !== null) { ++$report['projectCount']; }
         if ($project['state'] === 'done') { ++$report['done']; }
         elseif ($project['state'] !== null) { ++$report['active']; }
