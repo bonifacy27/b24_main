@@ -32,6 +32,15 @@ $readMultiple = static function ($key) {
     $values = $_GET[$key] ?? [];
     return is_array($values) ? array_values(array_unique(array_filter($values, 'is_string'))) : [];
 };
+$positiveIds = static function (array $values) {
+    $ids = array_map(static function ($value) {
+        return preg_match('/^[0-9]+$/D', $value) ? (int)$value : 0;
+    }, $values);
+    return array_values(array_unique(array_filter($ids)));
+};
+$selectedEmployees = $positiveIds(array_merge($readMultiple('employees'), [$get('employee')]));
+$selectedDepartments = $positiveIds($readMultiple('departments'));
+$departmentPickerAvailable = Loader::includeModule('intranet');
 $statusNames = [
     1=>'Новая', 2=>'Ждёт выполнения', 3=>'В работе', 4=>'Ждёт контроля',
     5=>'Завершена', 6=>'Отложена', 7=>'Отклонена',
@@ -157,15 +166,30 @@ $selectedStatuses = array_values(array_filter(array_map('intval', $readMultiple(
 $selectedStages = array_values(array_filter(array_map('intval', $readMultiple('stages')), static function ($stage) use ($stageNames) {
     return isset($stageNames[$stage]);
 }));
-$employee = max(0, (int)$get('employee', '0'));
+$creatorIds = $selectedEmployees || $selectedDepartments ? array_fill_keys($selectedEmployees, true) : null;
+if ($selectedDepartments) {
+    try {
+        if (!$departmentPickerAvailable) { throw new RuntimeException('Intranet module is unavailable'); }
+        $members = CIntranetUtils::GetDepartmentEmployees($selectedDepartments, true);
+        if (!is_object($members)) { throw new RuntimeException('Department employee lookup failed'); }
+        $departmentEmployees = [];
+        while ($member = $members->Fetch()) {
+            $departmentEmployees[(int)$member['ID']] = true;
+        }
+        $creatorIds += $departmentEmployees;
+    } catch (Throwable $e) {
+        $warnings[] = 'Не удалось получить сотрудников выбранных подразделений. В отчёте учтены сотрудники, выбранные вручную.';
+        AddMessage2Log('Marketing dashboard: cannot read department employees: ' . $e->getMessage(), 'tasks');
+    }
+}
 $reportTasks = $tasks;
 foreach ($reportTasks as &$task) {
     $task['included'] = $task['in_group']
         && (!$selectedTags || array_intersect($selectedTags, $task['tags']));
 }
 unset($task);
-$current = marketingReport($reportTasks,$fromDate->getTimestamp(),$toDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$employee);
-$previous = marketingReport($reportTasks,$previousFrom->getTimestamp(),$fromDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$employee);
+$current = marketingReport($reportTasks,$fromDate->getTimestamp(),$toDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$creatorIds);
+$previous = marketingReport($reportTasks,$previousFrom->getTimestamp(),$fromDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$creatorIds);
 uasort($current['projects'], static function ($a, $b) {
     return strcmp($a['title'], $b['title']);
 });
@@ -212,12 +236,19 @@ $renderTimeline = static function ($timeline, array $labels, $fallback) use ($h,
 <form class="panel filters" method="get">
 <label>С<input type="date" name="from" required value="<?= $h($fromDate->format('Y-m-d')) ?>"></label>
 <label>По<input type="date" name="to" required value="<?= $h($endDate->format('Y-m-d')) ?>"></label>
-<div class="employee-picker">
-    <div id="md-employee-label">Инициатор</div>
-    <input type="hidden" name="employee" id="md-employee" value="<?= $employee ?: '' ?>">
-    <button type="button" id="md-employee-select" aria-labelledby="md-employee-label md-employee-select"><?= $h($employee ? $name($employee) : 'Все сотрудники') ?></button>
-    <button type="button" id="md-employee-clear" aria-label="Сбросить выбор сотрудника" <?= $employee ? '' : 'hidden' ?>>×</button>
+<?php foreach ([
+    ['employees', 'user', 'Инициаторы', 'Все сотрудники', $selectedEmployees, true],
+    ['departments', 'department', 'Подразделения', 'Выбрать подразделения', $selectedDepartments, $departmentPickerAvailable],
+] as [$field, $entity, $label, $placeholder, $selected, $pickerAvailable]): ?>
+<div class="employee-picker" data-field="<?= $field ?>" data-entity="<?= $entity ?>" data-placeholder="<?= $h($placeholder) ?>">
+    <div id="md-<?= $field ?>-label"><?= $h($label) ?></div>
+    <span class="picker-values">
+        <?php foreach ($selected as $id): ?><input type="hidden" name="<?= $field ?>[]" value="<?= $id ?>"><?php endforeach ?>
+    </span>
+    <button type="button" class="picker-select" id="md-<?= $field ?>-select" aria-labelledby="md-<?= $field ?>-label md-<?= $field ?>-select" <?= $pickerAvailable ? '' : 'disabled' ?>><?= $h($selected ? 'Выбрано: ' . count($selected) : $placeholder) ?></button>
+    <button type="button" class="picker-clear" aria-label="<?= $h('Очистить выбор: ' . $label) ?>" <?= $selected ? '' : 'hidden' ?>>×</button>
 </div>
+<?php endforeach ?>
 <label>Теги
     <select name="tags[]" multiple size="4">
     <?php foreach ($tagOptions as $tag => $unused): ?>
@@ -244,44 +275,61 @@ $renderTimeline = static function ($timeline, array $labels, $fallback) use ($h,
 </form>
 <script>
 BX.ready(function () {
-    const input = document.getElementById('md-employee');
-    const button = document.getElementById('md-employee-select');
-    const clear = document.getElementById('md-employee-clear');
-    if (!BX.UI || !BX.UI.EntitySelector) {
-        button.disabled = true;
-    } else {
-        const dialog = new BX.UI.EntitySelector.Dialog({
-            targetNode: button,
-            context: 'MARKETING_DASHBOARD_EMPLOYEE',
-            multiple: false,
-            enableSearch: true,
-            entities: [{id: 'user'}],
-            preselectedItems: input.value ? [['user', Number(input.value)]] : [],
-            events: {
-                'Item:onSelect': function (event) {
-                    const item = event.getData().item;
-                    input.value = item.getId();
-                    button.textContent = item.getTitle();
-                    clear.hidden = false;
-                },
-                'Item:onDeselect': function (event) {
-                    if (input.value === String(event.getData().item.getId())) {
-                        input.value = '';
-                        button.textContent = 'Все сотрудники';
-                        clear.hidden = true;
+    document.querySelectorAll('.md .employee-picker').forEach(function (picker) {
+        const {field, entity, placeholder} = picker.dataset;
+        const values = picker.querySelector('.picker-values');
+        const button = picker.querySelector('.picker-select');
+        const clear = picker.querySelector('.picker-clear');
+        const selected = new Set(Array.from(values.querySelectorAll('input'), function (input) {
+            return Number(input.value);
+        }));
+
+        function renderSelection() {
+            values.replaceChildren();
+            selected.forEach(function (id) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = field + '[]';
+                input.value = id;
+                values.append(input);
+            });
+            button.textContent = selected.size ? 'Выбрано: ' + selected.size : placeholder;
+            clear.hidden = !selected.size;
+        }
+
+        let dialog;
+        if (!button.disabled && BX.UI && BX.UI.EntitySelector) {
+            dialog = new BX.UI.EntitySelector.Dialog({
+                targetNode: button,
+                context: 'MARKETING_DASHBOARD_' + field.toUpperCase(),
+                multiple: true,
+                enableSearch: true,
+                entities: [entity === 'department'
+                    ? {id: entity, options: {selectMode: 'departmentsOnly'}}
+                    : {id: entity}],
+                preselectedItems: Array.from(selected, function (id) { return [entity, id]; }),
+                events: {
+                    'Item:onSelect': function (event) {
+                        selected.add(Number(event.getData().item.getId()));
+                        renderSelection();
+                    },
+                    'Item:onDeselect': function (event) {
+                        selected.delete(Number(event.getData().item.getId()));
+                        renderSelection();
                     }
                 }
-            }
-        });
-        button.addEventListener('click', function () { dialog.show(); });
+            });
+            button.addEventListener('click', function () { dialog.show(); });
+        } else {
+            button.disabled = true;
+        }
         clear.addEventListener('click', function () {
-            dialog.getSelectedItems().forEach(function (item) { item.deselect(); });
+            if (dialog) {
+                dialog.getSelectedItems().forEach(function (item) { item.deselect(); });
+            }
+            selected.clear();
+            renderSelection();
         });
-    }
-    clear.addEventListener('click', function () {
-        input.value = '';
-        button.textContent = 'Все сотрудники';
-        clear.hidden = true;
     });
 });
 </script>
@@ -293,7 +341,7 @@ BX.ready(function () {
 <div class="cards"><?php foreach(['Задачи'=>$current['projectCount'],'Подзадачи'=>$current['subtasks'],'Активные задачи'=>$available['history']?$current['active']:null,'Завершённые задачи'=>$available['history']?$current['done']:null,'Выполнено в срок, %'=>$current['percent'],'Возвраты'=>$available['history']?$current['returns']:null,'Без движения > '.$staleDays.' дней'=>count($current['stale']),'Трудозатраты, ч'=>$available['elapsed']?$current['hours']:null] as $label=>$value): ?><div class="card"><div class="muted"><?= $h($label) ?></div><div class="value"><?= $fmt($value) ?></div></div><?php endforeach ?></div>
 <section class="panel"><h2>Распределение задач и подзадач на конец периода</h2><div class="funnel"><?php foreach(['new'=>'Новая / отложена','work'=>'В работе','review'=>'Согласование','done'=>'Завершена'] as $key=>$label): ?><div><?= $label ?><div class="value"><?= $available['history']?$current['funnel'][$key]:'—' ?></div><progress max="<?= max(1,$current['tasks']) ?>" value="<?= $available['history']?$current['funnel'][$key]:0 ?>"></progress></div><?php endforeach ?></div></section>
 <details class="panel md-list"><summary>Сотрудники</summary><div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Задачи и подзадачи (ответственный)</th><th>Завершено за период</th><th>Возвраты</th><th>Без движения</th><th>Записано часов</th></tr></thead><tbody><?php foreach($current['employees'] as $id=>$employeeRow): ?><tr><td><?= $h($name($id)) ?></td><?php foreach(['tasks','done','returns','stale','hours'] as $key): ?><td><?= $fmt(($key==='returns' && !$available['history']) || ($key==='hours' && !$available['elapsed']) ? null : $employeeRow[$key]) ?></td><?php endforeach ?></tr><?php endforeach ?></tbody></table></div></details>
-<details class="panel md-list"><summary>Задачи</summary><div class="scroll"><table><thead><tr><th>Задача / теги</th><th>Ответственный / соисполнители</th><th>Состояние</th><th>Рабочие дни в работе</th><th>Подзадач</th><th>Возвраты</th><th>Часы за период / сотрудники</th><th>Воронка по статусам</th><th>Воронка по стадиям канбана</th></tr></thead><tbody><?php foreach($current['projects'] as $project): ?><tr><td class="wrap"><?= $link($project['id'],$project['title']) ?><?php if ($employee && $project['id'] !== null && $tasks[$project['id']]['creator'] !== $employee): ?><div class="muted">Родительская задача подзадач из выборки</div><?php endif ?><div class="muted"><?= $h(implode(', ',$tasks[$project['id']]['tags'] ?? [])) ?></div></td><td class="wrap"><?= $project['responsible']?$h($name($project['responsible'])):'Недоступен' ?><div class="muted"><?php $members=array_diff(array_keys($project['members']),[$project['responsible']]); echo $h(implode(', ',array_map($name,$members))); ?></div></td><td><?= !$available['history']?'Нет данных':($project['state']===null?'Недоступно':($project['state']==='done'?'Завершён':'Активен')) ?></td><td><?= $fmt($project['days']) ?></td><td><?= $project['tasks'] ?></td><td><?= $fmt($available['history']?$project['returns']:null) ?></td><td><?= $fmt($available['elapsed']?$project['hours']:null) ?><?php if ($available['elapsed']): foreach ($project['employeeHours'] as $worker=>$hours): ?><div class="muted"><?= $h($name($worker)) ?>: <?= $fmt($hours) ?> ч</div><?php endforeach; endif ?></td>
+<details class="panel md-list"><summary>Задачи</summary><div class="scroll"><table><thead><tr><th>Задача / теги</th><th>Ответственный / соисполнители</th><th>Состояние</th><th>Рабочие дни в работе</th><th>Подзадач</th><th>Возвраты</th><th>Часы за период / сотрудники</th><th>Воронка по статусам</th><th>Воронка по стадиям канбана</th></tr></thead><tbody><?php foreach($current['projects'] as $project): ?><tr><td class="wrap"><?= $link($project['id'],$project['title']) ?><?php if ($creatorIds !== null && $project['id'] !== null && !isset($creatorIds[$tasks[$project['id']]['creator']])): ?><div class="muted">Родительская задача подзадач из выборки</div><?php endif ?><div class="muted"><?= $h(implode(', ',$tasks[$project['id']]['tags'] ?? [])) ?></div></td><td class="wrap"><?= $project['responsible']?$h($name($project['responsible'])):'Недоступен' ?><div class="muted"><?php $members=array_diff(array_keys($project['members']),[$project['responsible']]); echo $h(implode(', ',array_map($name,$members))); ?></div></td><td><?= !$available['history']?'Нет данных':($project['state']===null?'Недоступно':($project['state']==='done'?'Завершён':'Активен')) ?></td><td><?= $fmt($project['days']) ?></td><td><?= $project['tasks'] ?></td><td><?= $fmt($available['history']?$project['returns']:null) ?></td><td><?= $fmt($available['elapsed']?$project['hours']:null) ?><?php if ($available['elapsed']): foreach ($project['employeeHours'] as $worker=>$hours): ?><div class="muted"><?= $h($name($worker)) ?>: <?= $fmt($hours) ?> ч</div><?php endforeach; endif ?></td>
 <?php $root = $tasks[$project['id']] ?? null; ?>
 <td><?php $renderTimeline($available['history'] && $root ? marketingTaskTimeline($root, 'STATUS', $cutoff) : null, $statusNames, 'Статус'); ?></td>
 <td><?php $renderTimeline($available['history'] && $stageNames && !empty($root['in_group']) ? marketingTaskTimeline($root, 'STAGE_ID', $cutoff, $defaultStage) : null, $stageNames, 'Стадия'); ?></td>
@@ -303,7 +351,7 @@ BX.ready(function () {
 <details class="panel md-list"><summary>Сравнение периодов</summary><p class="muted">Текущий: <?= $h($fromDate->format('d.m.Y').' — '.$toDate->modify('-1 day')->format('d.m.Y')) ?>; предыдущий: <?= $h($previousFrom->format('d.m.Y').' — '.$fromDate->modify('-1 day')->format('d.m.Y')) ?>. Текущий период рассчитан по момент обновления.</p><div class="scroll"><table><thead><tr><th>Показатель</th><th>Текущий</th><th>Предыдущий</th><th>Изменение</th></tr></thead><tbody><?php foreach(['subtasks'=>'Подзадачи','active'=>'Активные задачи','done'=>'Завершённые задачи','closed'=>'Завершено задач и подзадач за период','percent'=>'В срок, %','returns'=>'Возвраты','hours'=>'Трудозатраты, ч'] as $key=>$label): $a=$current[$key]; $b=$previous[$key]; if ((!$available['history'] && in_array($key,['active','done','returns'],true)) || (!$available['elapsed'] && $key==='hours')) { $a=$b=null; } ?><tr><td><?= $label ?></td><td><?= $fmt($a) ?></td><td><?= $fmt($b) ?></td><td><?= $a===null||$b===null?'—':(($a-$b>0?'+':'').$fmt($a-$b).($key==='percent'?' п.п.':'')) ?></td></tr><?php endforeach ?><tr><td>Задачи</td><td><?= $current['projectCount'] ?></td><td><?= $previous['projectCount'] ?></td><td><?= $current['projectCount']-$previous['projectCount'] ?></td></tr></tbody></table></div></details>
 <details class="panel">
     <summary>Как считаются показатели</summary>
-    <p>Задачи верхнего уровня объединяют свои подзадачи. Фильтр «Инициатор» отбирает задачи и подзадачи, где выбранный сотрудник указан постановщиком. Фильтр «Теги» ищет любое из выбранных значений среди собственных тегов задачи или подзадачи. Фильтры «Статус» и «Стадия канбана» используют состояние на конец каждого сравниваемого диапазона. Все заполненные фильтры применяются одновременно.</p>
+    <p>Задачи верхнего уровня объединяют свои подзадачи. По постановщику учитываются все выбранные сотрудники и сотрудники выбранных подразделений, включая вложенные отделы. Фильтр «Теги» ищет любое из выбранных значений среди собственных тегов задачи или подзадачи. Фильтры «Статус» и «Стадия канбана» используют состояние на конец каждого сравниваемого диапазона. Все заполненные фильтры применяются одновременно.</p>
     <p>Воронки показывают календарное время от создания задачи до завершения или конца выбранного диапазона. Для текущего диапазона расчёт ограничен моментом обновления. При повторном открытии показываются все зафиксированные интервалы до итогового завершения. Названия стадий берутся из канбана группы, переходы — из сохранившегося журнала.</p>
     <p>Рабочие дни считаются по пятидневке и праздничным дням РФ от фактического начала задачи (или создания) до завершения или конца диапазона. Трудозатраты — время, записанное сотрудниками в выбранном диапазоне. В долю завершённых в срок входят завершённые задачи и подзадачи с указанным дедлайном. Порог для показателя «Без движения» — <?= $staleDays ?> календарных дней с последней активности.</p>
 </details>
