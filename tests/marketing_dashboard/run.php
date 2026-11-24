@@ -30,6 +30,13 @@ check($r['departments'][0]['tasks']===1,'Keep tasks whose initiator has no depar
 check($r['employees'][20]['hours']==2 && $r['employees'][10]['tasks']===2,'Preserve executor attribution');
 $r=marketingReport($tasksWithCreators,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability,[],[],null,[32=>true],[31=>[9],32=>[7,8]]);
 check(array_keys($r['initiators'])===[32] && array_keys($r['departments'])===[7,8],'Both new sections use the filtered report tasks');
+$taggedTasks = $tasks;
+$taggedTasks[2]['tags'] = ['ценообразование/контент','Контент','Контент','0'];
+$r=marketingReport($taggedTasks,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
+check(count($r['tags'])===3 && $r['tags']['ценообразование/контент']==$completedMetrics && $r['tags']['Контент']==$completedMetrics && $r['tags'][0]==$completedMetrics,'Aggregate once per tag and exclude untagged tasks');
+$taggedTasks[2]['included'] = false;
+$r=marketingReport($taggedTasks,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
+check($r['tags']===[], 'Tag metrics respect report filters');
 $old=$child; $old['closed']=ts('2026-09-15'); $old['logs']=[];
 $r=marketingReport([1=>$t,2=>$old],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08'),7,$config,$map,$availability);
 check($r['tasks']===1 && $r['percent']===null,'Completed before period excluded; missing denominator');

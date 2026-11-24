@@ -116,7 +116,7 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
 {
     $cutoff = min($to, $now + 1);
     $returnTimes = [];
-    $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'initiators'=>[], 'departments'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
+    $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'initiators'=>[], 'departments'=>[], 'tags'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
     foreach ($tasks as $id => $task) {
         if (isset($task['included']) && !$task['included']) { continue; }
         if ($creatorIds !== null && !isset($creatorIds[$task['creator'] ?? 0])) { continue; }
@@ -188,7 +188,12 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
             'stale'=>(int)$isStale,
             'hours'=>$taskHours,
         ];
-        foreach (['initiators'=>[$creator], 'departments'=>$departmentIds] as $dimension=>$ids) {
+        $groups = [
+            'initiators'=>[$creator],
+            'departments'=>$departmentIds,
+            'tags'=>array_unique($task['tags'] ?? []),
+        ];
+        foreach ($groups as $dimension=>$ids) {
             foreach ($ids as $groupId) {
                 foreach ($taskMetrics as $key=>$value) {
                     $report[$dimension][$groupId][$key] = ($report[$dimension][$groupId][$key] ?? 0) + $value;
