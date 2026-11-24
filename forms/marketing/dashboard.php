@@ -150,13 +150,37 @@ foreach ($tasks as &$task) {
     foreach (array_merge([$task['responsible'],$task['creator']],$task['accomplices'],array_column($task['elapsed'],'user')) as $id) { if ($id) { $userIds[$id]=true; } }
 }
 unset($task); ksort($tagOptions,SORT_NATURAL);
-$users=[];
+$userIds += array_fill_keys($selectedEmployees, true);
+$users = [];
+$userDepartments = [];
+$departmentIds = array_fill_keys($selectedDepartments, true);
 if ($userIds) {
     $by='last_name'; $order='asc';
-    $result=CUser::GetList($by,$order,['ID'=>implode('|',array_keys($userIds))],['FIELDS'=>['ID','NAME','LAST_NAME','LOGIN']]);
-    while ($row=$result->Fetch()) { $users[(int)$row['ID']]=trim($row['LAST_NAME'].' '.$row['NAME']) ?: $row['LOGIN']; }
+    $result=CUser::GetList($by,$order,['ID'=>implode('|',array_keys($userIds))],[
+        'FIELDS'=>['ID','NAME','LAST_NAME','LOGIN'],
+        'SELECT'=>['UF_DEPARTMENT'],
+    ]);
+    while ($row=$result->Fetch()) {
+        $id = (int)$row['ID'];
+        $users[$id] = trim($row['LAST_NAME'].' '.$row['NAME']) ?: $row['LOGIN'];
+        $userDepartments[$id] = array_values(array_unique(array_filter(array_map('intval', (array)($row['UF_DEPARTMENT'] ?? [])))));
+        $departmentIds += array_fill_keys($userDepartments[$id], true);
+    }
+}
+$departmentNames = [];
+if ($departmentIds && Loader::includeModule('iblock')) {
+    $structureId = (int)COption::GetOptionInt('intranet', 'iblock_structure', 0);
+    if ($structureId) {
+        $sections = CIBlockSection::GetList([], ['IBLOCK_ID'=>$structureId, 'ID'=>array_keys($departmentIds)], false, ['ID','NAME']);
+        while ($row = $sections->Fetch()) {
+            $departmentNames[(int)$row['ID']] = $row['NAME'];
+        }
+    }
 }
 $name=static function($id) use ($users) { return $users[$id] ?? ('Пользователь #'.$id); };
+$departmentName = static function ($id) use ($departmentNames) {
+    return $departmentNames[$id] ?? ('Подразделение #'.$id);
+};
 $selectedTags = array_values(array_filter($readMultiple('tags'), static function ($tag) use ($tagOptions) {
     return isset($tagOptions[$tag]);
 }));
@@ -338,11 +362,33 @@ BX.ready(function () {
 <?php if (!$available['history']): ?><div class="notice">История изменений недоступна: возвраты и исторические статусы не рассчитываются достоверно. Сравнение числа задач и часов доступно; исторические воронки и состояние задач недоступны.</div><?php endif ?>
 <?php if (!$available['elapsed']): ?><div class="notice">Учёт времени недоступен. Трудозатраты не заменяются длительностью задачи.</div><?php endif ?>
 <?php if (!$tasks): ?><div class="notice">В группе нет задач.</div><?php endif ?>
+<?php if ($selectedEmployees || $selectedDepartments): ?>
+<div class="panel" aria-label="Применённый отбор по инициаторам">
+    <?php if ($selectedEmployees): ?>
+    <div><strong>Выбранные инициаторы</strong> · <?= $h(implode(', ', array_map($name, $selectedEmployees))) ?></div>
+    <?php endif ?>
+    <?php if ($selectedDepartments): ?>
+    <div><strong>Выбранные подразделения</strong> · <?= $h(implode(', ', array_map($departmentName, $selectedDepartments))) ?></div>
+    <?php endif ?>
+</div>
+<?php endif ?>
 <div class="cards"><?php foreach(['Задачи'=>$current['projectCount'],'Подзадачи'=>$current['subtasks'],'Активные задачи'=>$available['history']?$current['active']:null,'Завершённые задачи'=>$available['history']?$current['done']:null,'Выполнено в срок, %'=>$current['percent'],'Возвраты'=>$available['history']?$current['returns']:null,'Без движения > '.$staleDays.' дней'=>count($current['stale']),'Трудозатраты, ч'=>$available['elapsed']?$current['hours']:null] as $label=>$value): ?><div class="card"><div class="muted"><?= $h($label) ?></div><div class="value"><?= $fmt($value) ?></div></div><?php endforeach ?></div>
 <section class="panel"><h2>Распределение задач и подзадач на конец периода</h2><div class="funnel"><?php foreach(['new'=>'Новая / отложена','work'=>'В работе','review'=>'Согласование','done'=>'Завершена'] as $key=>$label): ?><div><?= $label ?><div class="value"><?= $available['history']?$current['funnel'][$key]:'—' ?></div><progress max="<?= max(1,$current['tasks']) ?>" value="<?= $available['history']?$current['funnel'][$key]:0 ?>"></progress></div><?php endforeach ?></div></section>
 <details class="panel md-list"><summary>Сотрудники</summary><div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Задачи и подзадачи (ответственный)</th><th>Завершено за период</th><th>Возвраты</th><th>Без движения</th><th>Записано часов</th></tr></thead><tbody><?php foreach($current['employees'] as $id=>$employeeRow): ?><tr><td><?= $h($name($id)) ?></td><?php foreach(['tasks','done','returns','stale','hours'] as $key): ?><td><?= $fmt(($key==='returns' && !$available['history']) || ($key==='hours' && !$available['elapsed']) ? null : $employeeRow[$key]) ?></td><?php endforeach ?></tr><?php endforeach ?></tbody></table></div></details>
-<details class="panel md-list"><summary>Задачи</summary><div class="scroll"><table><thead><tr><th>Задача / теги</th><th>Ответственный / соисполнители</th><th>Состояние</th><th>Рабочие дни в работе</th><th>Подзадач</th><th>Возвраты</th><th>Часы за период / сотрудники</th><th>Воронка по статусам</th><th>Воронка по стадиям канбана</th></tr></thead><tbody><?php foreach($current['projects'] as $project): ?><tr><td class="wrap"><?= $link($project['id'],$project['title']) ?><?php if ($creatorIds !== null && $project['id'] !== null && !isset($creatorIds[$tasks[$project['id']]['creator']])): ?><div class="muted">Родительская задача подзадач из выборки</div><?php endif ?><div class="muted"><?= $h(implode(', ',$tasks[$project['id']]['tags'] ?? [])) ?></div></td><td class="wrap"><?= $project['responsible']?$h($name($project['responsible'])):'Недоступен' ?><div class="muted"><?php $members=array_diff(array_keys($project['members']),[$project['responsible']]); echo $h(implode(', ',array_map($name,$members))); ?></div></td><td><?= !$available['history']?'Нет данных':($project['state']===null?'Недоступно':($project['state']==='done'?'Завершён':'Активен')) ?></td><td><?= $fmt($project['days']) ?></td><td><?= $project['tasks'] ?></td><td><?= $fmt($available['history']?$project['returns']:null) ?></td><td><?= $fmt($available['elapsed']?$project['hours']:null) ?><?php if ($available['elapsed']): foreach ($project['employeeHours'] as $worker=>$hours): ?><div class="muted"><?= $h($name($worker)) ?>: <?= $fmt($hours) ?> ч</div><?php endforeach; endif ?></td>
-<?php $root = $tasks[$project['id']] ?? null; ?>
+<details class="panel md-list"><summary>Задачи</summary><div class="scroll"><table><thead><tr><th scope="col">Инициатор / подразделение</th><th>Задача / теги</th><th>Ответственный / соисполнители</th><th>Состояние</th><th>Рабочие дни в работе</th><th>Подзадач</th><th>Возвраты</th><th>Часы за период / сотрудники</th><th>Воронка по статусам</th><th>Воронка по стадиям канбана</th></tr></thead><tbody><?php foreach($current['projects'] as $project): ?>
+<?php
+$root = $tasks[$project['id']] ?? null;
+$creator = $root['creator'] ?? 0;
+$departments = $userDepartments[$creator] ?? [];
+?>
+<tr>
+<td class="wrap">
+    <?= $creator ? $h($name($creator)) : '—' ?>
+    <?php if ($departments): ?>
+        <div class="muted"><?= $h(implode(', ', array_map($departmentName, $departments))) ?></div>
+    <?php endif ?>
+</td>
+<td class="wrap"><?= $link($project['id'],$project['title']) ?><?php if ($creatorIds !== null && $project['id'] !== null && !isset($creatorIds[$tasks[$project['id']]['creator']])): ?><div class="muted">Родительская задача подзадач из выборки</div><?php endif ?><div class="muted"><?= $h(implode(', ',$tasks[$project['id']]['tags'] ?? [])) ?></div></td><td class="wrap"><?= $project['responsible']?$h($name($project['responsible'])):'Недоступен' ?><div class="muted"><?php $members=array_diff(array_keys($project['members']),[$project['responsible']]); echo $h(implode(', ',array_map($name,$members))); ?></div></td><td><?= !$available['history']?'Нет данных':($project['state']===null?'Недоступно':($project['state']==='done'?'Завершён':'Активен')) ?></td><td><?= $fmt($project['days']) ?></td><td><?= $project['tasks'] ?></td><td><?= $fmt($available['history']?$project['returns']:null) ?></td><td><?= $fmt($available['elapsed']?$project['hours']:null) ?><?php if ($available['elapsed']): foreach ($project['employeeHours'] as $worker=>$hours): ?><div class="muted"><?= $h($name($worker)) ?>: <?= $fmt($hours) ?> ч</div><?php endforeach; endif ?></td>
 <td><?php $renderTimeline($available['history'] && $root ? marketingTaskTimeline($root, 'STATUS', $cutoff) : null, $statusNames, 'Статус'); ?></td>
 <td><?php $renderTimeline($available['history'] && $stageNames && !empty($root['in_group']) ? marketingTaskTimeline($root, 'STAGE_ID', $cutoff, $defaultStage) : null, $stageNames, 'Стадия'); ?></td>
 </tr><?php endforeach ?></tbody></table></div></details>
