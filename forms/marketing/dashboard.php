@@ -77,7 +77,7 @@ foreach ($nativeRows as $row) {
         'created'=>$timestamp($row['CREATED_DATE']), 'changed'=>$timestamp($row['ACTIVITY_DATE'] ?? $row['CHANGED_DATE']), 'closed'=>$timestamp($row['CLOSED_DATE']), 'deadline'=>$timestamp($row['DEADLINE']), 'start'=>$timestamp($row['DATE_START']), 'accomplices'=>[], 'tags'=>[], 'logs'=>[], 'elapsed'=>[]];
 }
 $connection = \Bitrix\Main\Application::getConnection();
-$available = ['history'=>false,'elapsed'=>false,'tags'=>false];
+$available = ['history'=>false,'elapsed'=>false];
 // Additional data belongs only to tasks selected by the administrator API actor.
 $load = static function ($table, array $required, $callback) use ($connection, &$tasks, &$warnings) {
     if (!$tasks) { return false; }
@@ -106,20 +106,13 @@ $available['elapsed'] = $load('b_tasks_elapsed_time',['TASK_ID','USER_ID','CREAT
     $at = $timestamp($row['CREATED_DATE']);
     if ($at) { $tasks[(int)$row['TASK_ID']]['elapsed'][] = ['at'=>$at,'user'=>(int)$row['USER_ID'],'seconds'=>max(0,(int)$row['SECONDS'])]; }
 });
-$available['tags'] = $load('b_tasks_tag',['TASK_ID','NAME'],static function ($row) use (&$tasks) { $tasks[(int)$row['TASK_ID']]['tags'][] = (string)$row['NAME']; });
-if (!$available['tags']) {
-    try {
-        if ($connection->isTableExists('b_tasks_task_tag') && $connection->isTableExists('b_tasks_tag')) {
-            $linkFields = $connection->getTableFields('b_tasks_task_tag'); $tagFields = $connection->getTableFields('b_tasks_tag');
-            if (isset($linkFields['TASK_ID'],$linkFields['TAG_ID'],$tagFields['ID'],$tagFields['NAME'])) {
-                foreach (array_chunk(array_keys($tasks),500) as $ids) {
-                    $rows = $connection->query('SELECT L.TASK_ID, T.NAME FROM b_tasks_task_tag L INNER JOIN b_tasks_tag T ON T.ID=L.TAG_ID WHERE L.TASK_ID IN (' . implode(',',array_map('intval',$ids)) . ')');
-                    while ($row=$rows->fetch()) { $tasks[(int)$row['TASK_ID']]['tags'][]=(string)$row['NAME']; }
-                }
-                $available['tags']=true;
-            }
-        }
-    } catch (Throwable $e) { $warnings[]='Теги недоступны.'; }
+try {
+    foreach (marketingLoadDashboardTags($connection, array_keys($tasks)) as $id => $tags) {
+        $tasks[$id]['tags'] = $tags;
+    }
+} catch (Throwable $e) {
+    $warnings[] = 'Не удалось загрузить теги задач.';
+    AddMessage2Log('Marketing dashboard: cannot read task tags', 'tasks');
 }
 $stageMap = $config['stage_map']; $stageNames=[]; $defaultStage=null;
 try {
@@ -158,6 +151,9 @@ $selectedTags = array_values(array_filter($readMultiple('tags'), static function
 $selectedStatuses = array_values(array_filter(array_map('intval', $readMultiple('statuses')), static function ($status) use ($statusNames) {
     return isset($statusNames[$status]);
 }));
+$selectedStages = array_values(array_filter(array_map('intval', $readMultiple('stages')), static function ($stage) use ($stageNames) {
+    return isset($stageNames[$stage]);
+}));
 $employee = max(0, (int)$get('employee', '0'));
 $reportTasks = $tasks;
 foreach ($reportTasks as &$task) {
@@ -166,8 +162,8 @@ foreach ($reportTasks as &$task) {
         && (!$employee || $task['responsible'] === $employee || in_array($employee, $task['accomplices'], true));
 }
 unset($task);
-$current = marketingReport($reportTasks,$fromDate->getTimestamp(),$toDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses);
-$previous = marketingReport($reportTasks,$previousFrom->getTimestamp(),$fromDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses);
+$current = marketingReport($reportTasks,$fromDate->getTimestamp(),$toDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage);
+$previous = marketingReport($reportTasks,$previousFrom->getTimestamp(),$fromDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage);
 uasort($current['projects'], static function ($a, $b) {
     return strcmp($a['title'], $b['title']);
 });
@@ -234,6 +230,14 @@ $renderTimeline = static function ($timeline, array $labels, $fallback) use ($h,
     <?php endforeach ?>
     </select>
 </label>
+<label>Стадия канбана
+    <select name="stages[]" multiple size="4" <?= $stageNames ? '' : 'disabled' ?>>
+    <?php foreach ($stageNames as $id => $label): ?>
+        <option value="<?= $id ?>" <?= in_array($id, $selectedStages, true) ? 'selected' : '' ?>><?= $h($label) ?></option>
+    <?php endforeach ?>
+    <?php if (!$stageNames): ?><option>Стадии недоступны</option><?php endif ?>
+    </select>
+</label>
 <button type="submit">Применить</button><a href="?">Сбросить</a>
 </form>
 <script>
@@ -296,7 +300,7 @@ BX.ready(function () {
 <details class="panel md-list"><summary>Сравнение периодов</summary><p class="muted">Текущий: <?= $h($fromDate->format('d.m.Y').' — '.$toDate->modify('-1 day')->format('d.m.Y')) ?>; предыдущий: <?= $h($previousFrom->format('d.m.Y').' — '.$fromDate->modify('-1 day')->format('d.m.Y')) ?>. Текущий период рассчитан по момент обновления.</p><div class="scroll"><table><thead><tr><th>Показатель</th><th>Текущий</th><th>Предыдущий</th><th>Изменение</th></tr></thead><tbody><?php foreach(['subtasks'=>'Подзадачи','active'=>'Активные задачи','done'=>'Завершённые задачи','closed'=>'Завершено задач и подзадач за период','percent'=>'В срок, %','returns'=>'Возвраты','hours'=>'Трудозатраты, ч'] as $key=>$label): $a=$current[$key]; $b=$previous[$key]; if ((!$available['history'] && in_array($key,['active','done','returns'],true)) || (!$available['elapsed'] && $key==='hours')) { $a=$b=null; } ?><tr><td><?= $label ?></td><td><?= $fmt($a) ?></td><td><?= $fmt($b) ?></td><td><?= $a===null||$b===null?'—':(($a-$b>0?'+':'').$fmt($a-$b).($key==='percent'?' п.п.':'')) ?></td></tr><?php endforeach ?><tr><td>Задачи</td><td><?= $current['projectCount'] ?></td><td><?= $previous['projectCount'] ?></td><td><?= $current['projectCount']-$previous['projectCount'] ?></td></tr></tbody></table></div></details>
 <details class="panel">
     <summary>Как считаются показатели</summary>
-    <p>Задачи верхнего уровня объединяют свои подзадачи. При выборе сотрудника учитываются текущие ответственный и соисполнители. Фильтр «Теги» ищет любое из выбранных значений среди собственных тегов задачи или подзадачи. Фильтр «Статус» использует статус на конец каждого сравниваемого диапазона. Все заполненные фильтры применяются одновременно.</p>
+    <p>Задачи верхнего уровня объединяют свои подзадачи. При выборе сотрудника учитываются текущие ответственный и соисполнители. Фильтр «Теги» ищет любое из выбранных значений среди собственных тегов задачи или подзадачи. Фильтры «Статус» и «Стадия канбана» используют состояние на конец каждого сравниваемого диапазона. Все заполненные фильтры применяются одновременно.</p>
     <p>Воронки показывают календарное время от создания задачи до завершения или конца выбранного диапазона. Для текущего диапазона расчёт ограничен моментом обновления. При повторном открытии показываются все зафиксированные интервалы до итогового завершения. Названия стадий берутся из канбана группы, переходы — из сохранившегося журнала.</p>
     <p>Рабочие дни считаются по пятидневке и праздничным дням РФ от фактического начала задачи (или создания) до завершения или конца диапазона. Трудозатраты — время, записанное сотрудниками в выбранном диапазоне. В долю завершённых в срок входят завершённые задачи и подзадачи с указанным дедлайном. Порог для показателя «Без движения» — <?= $staleDays ?> календарных дней с последней активности.</p>
 </details>

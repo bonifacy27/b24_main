@@ -87,4 +87,31 @@ $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff
 check($r['projectCount']===1 && $r['subtasks']===0,'Status filter uses the status at the end of the range');
 $r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[5]);
 check($r['projectCount']===0,'Status filter excludes a later completion');
+$tagConnection = new class {
+    public function isTableExists($table) { return true; }
+    public function getTableFields($table) {
+        return array_fill_keys($table === 'b_tasks_tag' ? ['ID','TASK_ID','NAME'] : ['TASK_ID','TAG_ID'], true);
+    }
+    public function query($sql) {
+        check(substr($sql, -4) === '(50)', 'Only load tags for requested task IDs');
+        return new class(strpos($sql, 'INNER JOIN') !== false ? 'ценообразование/контент' : 'Старый тег') {
+            private $tag;
+            public function __construct($tag) { $this->tag = $tag; }
+            public function fetch() {
+                if ($this->tag === null) { return false; }
+                $row = ['TASK_ID'=>50,'NAME'=>$this->tag];
+                $this->tag = null;
+                return $row;
+            }
+        };
+    }
+};
+check(marketingLoadDashboardTags($tagConnection, [50]) === [50=>['Старый тег','ценообразование/контент']], 'Read linked tags even when legacy columns exist');
+
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[3],[1,2],1);
+check($r['projectCount']===1,'Match any chosen kanban stage at the cutoff in combination with status');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[],[3],1);
+check($r['projectCount']===0,'A later kanban stage does not match');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-11'),$cutoff,7,$config,$map,$availability,[],[1],1);
+check($r['projectCount']===1,'An unset kanban stage matches the board default');
 echo "Marketing dashboard: all checks passed\n";

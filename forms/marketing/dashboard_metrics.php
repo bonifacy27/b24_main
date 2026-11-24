@@ -112,7 +112,7 @@ function marketingTaskTimeline(array $task, $field, $cutoff, $defaultStage = nul
     return ['segments'=>$segments, 'seconds'=>$end - $task['created'], 'completed'=>$completion !== null];
 }
 
-function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [])
+function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [], array $stages = [], $defaultStage = null)
 {
     $cutoff = min($to, $now + 1);
     $returnTimes = [];
@@ -121,6 +121,10 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
         if (isset($task['included']) && !$task['included']) { continue; }
         if (!$task['created'] || $task['created'] >= $cutoff) { continue; }
         if ($statuses && !in_array(marketingStatusAt($task, $cutoff), $statuses, true)) { continue; }
+        if ($stages) {
+            $stage = marketingFieldAt($task, 'STAGE_ID', $cutoff) ?: $defaultStage;
+            if (!in_array($stage, $stages, true)) { continue; }
+        }
         $state = marketingSnapshot($task, $cutoff, $stageMap);
         if ($state === 'done' && $task['closed'] && $task['closed'] < $from) { continue; }
         $projectId = marketingProjectId($id, $tasks);
