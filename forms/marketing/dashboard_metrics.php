@@ -112,11 +112,11 @@ function marketingTaskTimeline(array $task, $field, $cutoff, $defaultStage = nul
     return ['segments'=>$segments, 'seconds'=>$end - $task['created'], 'completed'=>$completion !== null];
 }
 
-function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [], array $stages = [], $defaultStage = null, ?array $creatorIds = null)
+function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $calendar, array $stageMap, array $availability, array $statuses = [], array $stages = [], $defaultStage = null, ?array $creatorIds = null, array $userDepartments = [])
 {
     $cutoff = min($to, $now + 1);
     $returnTimes = [];
-    $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
+    $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'initiators'=>[], 'departments'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
     foreach ($tasks as $id => $task) {
         if (isset($task['included']) && !$task['included']) { continue; }
         if ($creatorIds !== null && !isset($creatorIds[$task['creator'] ?? 0])) { continue; }
@@ -147,7 +147,8 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
         if (!isset($report['employees'][$user])) { $report['employees'][$user] = ['tasks'=>0,'done'=>0,'returns'=>0,'stale'=>0,'hours'=>0]; }
         ++$report['employees'][$user]['tasks'];
         foreach (array_unique(array_merge([$user], $task['accomplices'])) as $member) { $project['members'][$member] = true; }
-        if ($task['closed'] && $task['closed'] >= $from && $task['closed'] < $cutoff && $state === 'done') {
+        $closedInPeriod = $task['closed'] && $task['closed'] >= $from && $task['closed'] < $cutoff && $state === 'done';
+        if ($closedInPeriod) {
             ++$report['closed']; ++$report['employees'][$user]['done'];
             if ($task['deadline']) { ++$report['withDeadline']; if ($task['closed'] <= $task['deadline']) { ++$report['onTime']; } }
         }
@@ -164,17 +165,35 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
             }
         }
         if ($task['changed'] && $task['changed'] < $cutoff) { $lastActivity = max($lastActivity,$task['changed']); }
-        if ($state !== 'done' && (int)$task['status'] !== 7 && $cutoff - 1 - $lastActivity > $staleDays * 86400) {
+        $isStale = $state !== 'done' && (int)$task['status'] !== 7 && $cutoff - 1 - $lastActivity > $staleDays * 86400;
+        if ($isStale) {
             $report['stale'][$id] = ['title'=>$task['title'],'days'=>(int)floor(($cutoff-1-$lastActivity)/86400),'returns'=>$returnTimes[$id] ?? []];
             ++$report['employees'][$user]['stale'];
         }
+        $taskHours = 0;
         foreach ($task['elapsed'] as $entry) {
             if ($entry['at'] < $from || $entry['at'] >= $cutoff) { continue; }
-            $hours = $entry['seconds'] / 3600; $report['hours'] += $hours; $project['hours'] += $hours;
+            $hours = $entry['seconds'] / 3600; $report['hours'] += $hours; $project['hours'] += $hours; $taskHours += $hours;
             $worker = $entry['user'];
             $project['employeeHours'][$worker] = ($project['employeeHours'][$worker] ?? 0) + $hours;
             if (!isset($report['employees'][$worker])) { $report['employees'][$worker] = ['tasks'=>0,'done'=>0,'returns'=>0,'stale'=>0,'hours'=>0]; }
             $report['employees'][$worker]['hours'] += $hours;
+        }
+        $creator = $task['creator'] ?? 0;
+        $departmentIds = array_unique($userDepartments[$creator] ?? []) ?: [0];
+        $taskMetrics = [
+            'tasks'=>1,
+            'done'=>(int)$closedInPeriod,
+            'returns'=>$report['taskReturns'][$id],
+            'stale'=>(int)$isStale,
+            'hours'=>$taskHours,
+        ];
+        foreach (['initiators'=>[$creator], 'departments'=>$departmentIds] as $dimension=>$ids) {
+            foreach ($ids as $groupId) {
+                foreach ($taskMetrics as $key=>$value) {
+                    $report[$dimension][$groupId][$key] = ($report[$dimension][$groupId][$key] ?? 0) + $value;
+                }
+            }
         }
         unset($project);
     }

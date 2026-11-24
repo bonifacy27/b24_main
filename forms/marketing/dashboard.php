@@ -212,7 +212,7 @@ foreach ($reportTasks as &$task) {
         && (!$selectedTags || array_intersect($selectedTags, $task['tags']));
 }
 unset($task);
-$current = marketingReport($reportTasks,$fromDate->getTimestamp(),$toDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$creatorIds);
+$current = marketingReport($reportTasks,$fromDate->getTimestamp(),$toDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$creatorIds,$userDepartments);
 $previous = marketingReport($reportTasks,$previousFrom->getTimestamp(),$fromDate->getTimestamp(),$now,$staleDays,$config,$stageMap,$available,$selectedStatuses,$selectedStages,$defaultStage,$creatorIds);
 uasort($current['projects'], static function ($a, $b) {
     return strcmp($a['title'], $b['title']);
@@ -374,7 +374,38 @@ BX.ready(function () {
 <?php endif ?>
 <div class="cards"><?php foreach(['Задачи'=>$current['projectCount'],'Подзадачи'=>$current['subtasks'],'Активные задачи'=>$available['history']?$current['active']:null,'Завершённые задачи'=>$available['history']?$current['done']:null,'Выполнено в срок, %'=>$current['percent'],'Возвраты'=>$available['history']?$current['returns']:null,'Без движения > '.$staleDays.' дней'=>count($current['stale']),'Трудозатраты, ч'=>$available['elapsed']?$current['hours']:null] as $label=>$value): ?><div class="card"><div class="muted"><?= $h($label) ?></div><div class="value"><?= $fmt($value) ?></div></div><?php endforeach ?></div>
 <section class="panel"><h2>Распределение задач и подзадач на конец периода</h2><div class="funnel"><?php foreach(['new'=>'Новая / отложена','work'=>'В работе','review'=>'Согласование','done'=>'Завершена'] as $key=>$label): ?><div><?= $label ?><div class="value"><?= $available['history']?$current['funnel'][$key]:'—' ?></div><progress max="<?= max(1,$current['tasks']) ?>" value="<?= $available['history']?$current['funnel'][$key]:0 ?>"></progress></div><?php endforeach ?></div></section>
-<details class="panel md-list"><summary>Сотрудники</summary><div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Задачи и подзадачи (ответственный)</th><th>Завершено за период</th><th>Возвраты</th><th>Без движения</th><th>Записано часов</th></tr></thead><tbody><?php foreach($current['employees'] as $id=>$employeeRow): ?><tr><td><?= $h($name($id)) ?></td><?php foreach(['tasks','done','returns','stale','hours'] as $key): ?><td><?= $fmt(($key==='returns' && !$available['history']) || ($key==='hours' && !$available['elapsed']) ? null : $employeeRow[$key]) ?></td><?php endforeach ?></tr><?php endforeach ?></tbody></table></div></details>
+<?php foreach ([
+    ['Исполнители', 'Исполнитель', 'Задачи и подзадачи (ответственный)', $current['employees'], $name],
+    ['Инициаторы', 'Инициатор', 'Поставлено задач и подзадач', $current['initiators'], $name],
+    ['Подразделения', 'Подразделение инициатора', 'Поставлено задач и подзадач', $current['departments'], $departmentName],
+] as [$title, $groupLabel, $tasksLabel, $rows, $groupName]): ?>
+<details class="panel md-list">
+    <summary><?= $h($title) ?></summary>
+    <div class="scroll">
+        <table>
+            <thead><tr>
+                <th scope="col"><?= $h($groupLabel) ?></th>
+                <th scope="col"><?= $h($tasksLabel) ?></th>
+                <th scope="col">Завершено за период</th>
+                <th scope="col">Возвраты</th>
+                <th scope="col">Без движения</th>
+                <th scope="col">Записано часов</th>
+            </tr></thead>
+            <tbody>
+            <?php foreach ($rows as $id=>$row): ?>
+                <tr>
+                    <td><?= $h($id ? $groupName($id) : 'Не указано') ?></td>
+                    <?php foreach (['tasks','done','returns','stale','hours'] as $key): ?>
+                    <td><?= $fmt(($key==='returns' && !$available['history']) || ($key==='hours' && !$available['elapsed']) ? null : $row[$key]) ?></td>
+                    <?php endforeach ?>
+                </tr>
+            <?php endforeach ?>
+            <?php if (!$rows): ?><tr><td colspan="6">Нет данных по выбранным условиям</td></tr><?php endif ?>
+            </tbody>
+        </table>
+    </div>
+</details>
+<?php endforeach ?>
 <details class="panel md-list"><summary>Задачи</summary><div class="scroll"><table><thead><tr><th scope="col">Инициатор / подразделение</th><th>Задача / теги</th><th>Ответственный / соисполнители</th><th>Состояние</th><th>Рабочие дни в работе</th><th>Подзадач</th><th>Возвраты</th><th>Часы за период / сотрудники</th><th>Воронка по статусам</th><th>Воронка по стадиям канбана</th></tr></thead><tbody><?php foreach($current['projects'] as $project): ?>
 <?php
 $root = $tasks[$project['id']] ?? null;
@@ -399,7 +430,7 @@ $departments = $userDepartments[$creator] ?? [];
     <summary>Как считаются показатели</summary>
     <p>Задачи верхнего уровня объединяют свои подзадачи. По постановщику учитываются все выбранные сотрудники и сотрудники выбранных подразделений, включая вложенные отделы. Фильтр «Теги» ищет любое из выбранных значений среди собственных тегов задачи или подзадачи. Фильтры «Статус» и «Стадия канбана» используют состояние на конец каждого сравниваемого диапазона. Все заполненные фильтры применяются одновременно.</p>
     <p>Воронки показывают календарное время от создания задачи до завершения или конца выбранного диапазона. Для текущего диапазона расчёт ограничен моментом обновления. При повторном открытии показываются все зафиксированные интервалы до итогового завершения. Названия стадий берутся из канбана группы, переходы — из сохранившегося журнала.</p>
-    <p>Рабочие дни считаются по пятидневке и праздничным дням РФ от фактического начала задачи (или создания) до завершения или конца диапазона. Трудозатраты — время, записанное сотрудниками в выбранном диапазоне. В долю завершённых в срок входят завершённые задачи и подзадачи с указанным дедлайном. Порог для показателя «Без движения» — <?= $staleDays ?> календарных дней с последней активности.</p>
+    <p>Рабочие дни считаются по пятидневке и праздничным дням РФ от фактического начала задачи (или создания) до завершения или конца диапазона. Трудозатраты — время, записанное сотрудниками в выбранном диапазоне. В разделе «Исполнители» часы относятся к сотруднику, который их записал. В разделах «Инициаторы» и «Подразделения» часы относятся к поставленной задаче. Если инициатор состоит в нескольких подразделениях, задача учитывается в каждом из них. В долю завершённых в срок входят завершённые задачи и подзадачи с указанным дедлайном. Порог для показателя «Без движения» — <?= $staleDays ?> календарных дней с последней активности.</p>
 </details>
 </div>
 <?php require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/footer.php'); ?>
