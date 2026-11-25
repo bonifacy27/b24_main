@@ -9,11 +9,20 @@ if (!$USER->IsAuthorized() || !Loader::includeModule('tasks')) {
 require_once __DIR__ . '/dashboard_metrics.php';
 require_once __DIR__ . '/dashboard_tasks.php';
 $config = require __DIR__ . '/dashboard_config.php';
-$groupId = (int)$config['group_id'];
 $zone = new DateTimeZone($config['timezone']);
 $today = new DateTimeImmutable('now', $zone);
 $now = $today->getTimestamp();
 $get = static function ($key, $default = '') { return isset($_GET[$key]) && is_string($_GET[$key]) ? $_GET[$key] : $default; };
+$defaultGroupId = (int)$config['group_id'];
+$groupIds = array_unique(array_merge([$defaultGroupId], array_map('intval', $config['additional_group_ids'] ?? [])));
+$requestedGroupId = filter_var($get('group'), FILTER_VALIDATE_INT);
+$groupId = in_array($requestedGroupId, $groupIds, true) ? $requestedGroupId : $defaultGroupId;
+$groupNames = [];
+$socialNetworkAvailable = Loader::includeModule('socialnetwork');
+foreach ($groupIds as $id) {
+    $group = $socialNetworkAvailable ? CSocNetGroup::GetByID($id) : null;
+    $groupNames[$id] = $group['NAME'] ?? ('Группа #'.$id);
+}
 $parseDate = static function ($value) use ($zone) {
     $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value, $zone);
     return $date && $date->format('Y-m-d') === $value ? $date : null;
@@ -258,11 +267,18 @@ $renderTimeline = static function ($timeline, array $labels, $fallback) use ($h,
 ?>
 <style>
 .md{font:14px/1.5 Arial,sans-serif;color:#172a45;max-width:1600px;margin:auto}.md *{box-sizing:border-box}.md h1{font-size:27px;margin:0}.md h2{font-size:19px;margin:0 0 16px}.md .muted{color:#65748b}.md .panel{background:#fff;border:1px solid #dfe6ee;border-radius:12px;padding:22px;margin:18px 0}.md .filters{display:flex;flex-wrap:wrap;gap:14px;align-items:end}.md label{display:flex;flex-direction:column;gap:5px}.md input,.md select,.md button{padding:9px;border:1px solid #bcc9d8;border-radius:6px;font:inherit;max-width:250px}.md button{background:#1565cf;color:white;cursor:pointer}.md .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.md .card{background:#f4f8ff;border:1px solid #dde8fa;border-radius:10px;padding:18px}.md .value{font-size:29px;font-weight:bold}.md summary{cursor:pointer;font-size:19px;font-weight:bold}.md details[open]>summary{margin-bottom:16px}.md summary:focus-visible{outline:2px solid #1565cf;outline-offset:5px}.md .scroll{overflow:auto}.md table{width:100%;border-collapse:collapse;white-space:nowrap}.md th,.md td{padding:11px 13px;border-bottom:1px solid #e7edf3;text-align:left}.md th{background:#f4f7fa}.md td.wrap{white-space:normal;min-width:220px}.md a{color:#1565cf}.md .funnel{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.md progress{width:100%;height:14px;accent-color:#1565cf}.md .notice{background:#fff6dc;padding:12px;border-radius:8px;margin:10px 0}@media(max-width:800px){.md .cards,.md .funnel{grid-template-columns:repeat(2,1fr)}.md .panel{padding:14px}}
-.md .timeline summary{font-size:14px}.md .timeline ol{padding-left:20px;margin:0}.md .timeline li+li{margin-top:8px}.md .employee-picker button{max-width:250px}.md select[multiple]{min-width:165px}
+.md .group-filter{flex-basis:100%;align-items:flex-start}.md .timeline summary{font-size:14px}.md .timeline ol{padding-left:20px;margin:0}.md .timeline li+li{margin-top:8px}.md .employee-picker button{max-width:250px}.md select[multiple]{min-width:165px}
 </style>
 <div class="md">
-<h1>Маркетинг · задачи и подзадачи</h1><p class="muted">Группа #<?= $groupId ?> · <?= $h($today->format('d.m.Y H:i')) ?> МСК · Все задачи группы · выборка от лица администратора</p>
+<h1>Маркетинг · задачи и подзадачи</h1><p class="muted"><?= $h($today->format('d.m.Y H:i')) ?> МСК · Все задачи группы · выборка от лица администратора</p>
 <form class="panel filters" method="get">
+<label class="group-filter">Группа
+    <select name="group" id="md-group">
+    <?php foreach ($groupNames as $id=>$label): ?>
+        <option value="<?= $id ?>" <?= $id === $groupId ? 'selected' : '' ?>><?= $h($label) ?></option>
+    <?php endforeach ?>
+    </select>
+</label>
 <label>С<input type="date" name="from" required value="<?= $h($fromDate->format('Y-m-d')) ?>"></label>
 <label>По<input type="date" name="to" required value="<?= $h($endDate->format('Y-m-d')) ?>"></label>
 <?php foreach ([
@@ -300,10 +316,20 @@ $renderTimeline = static function ($timeline, array $labels, $fallback) use ($h,
     <?php if (!$stageNames): ?><option>Стадии недоступны</option><?php endif ?>
     </select>
 </label>
-<button type="submit">Применить</button><a href="?">Сбросить</a>
+<button type="submit">Применить</button><a href="?group=<?= $groupId ?>">Сбросить</a>
 </form>
 <script>
 BX.ready(function () {
+    const groupSelect = document.getElementById('md-group');
+    groupSelect.addEventListener('change', function () {
+        const form = groupSelect.form;
+        if (!form.reportValidity()) { return; }
+
+        form.elements.namedItem('tags[]').selectedIndex = -1;
+        form.elements.namedItem('stages[]').selectedIndex = -1;
+        form.requestSubmit();
+    });
+
     document.querySelectorAll('.md .employee-picker').forEach(function (picker) {
         const {field, entity, placeholder} = picker.dataset;
         const values = picker.querySelector('.picker-values');
