@@ -27,3 +27,21 @@ function marketingLoadDashboardTasks(callable $fetch, $groupId)
     }
     return array_values($tasks);
 }
+
+/** The Tasks API resolves the tag storage used by the installed Bitrix version. */
+function marketingLoadDashboardTags(callable $fetch, array $taskIds)
+{
+    $tags = [];
+    foreach (array_chunk($taskIds, 500) as $ids) {
+        $requested = array_fill_keys($ids, true);
+        $rows = $fetch($ids);
+        while ($row = $rows->Fetch()) {
+            $id = (int)$row['TASK_ID'];
+            $name = (string)$row['NAME'];
+            if (isset($requested[$id]) && $name !== '') {
+                $tags[$id][] = $name;
+            }
+        }
+    }
+    return $tags;
+}

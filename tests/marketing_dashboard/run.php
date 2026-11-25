@@ -12,6 +12,11 @@ $child['elapsed']=[['at'=>ts('2026-10-04'),'user'=>20,'seconds'=>7200],['at'=>ts
 $tasks=[1=>$t,2=>$child]; $availability=['history'=>true,'elapsed'=>true];
 $r=marketingReport($tasks,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
 check($r['tasks']===2 && count($r['projects'])===1,'Root projects and task count');
+$nested = task(3, 2);
+$standalone = task(4);
+$withNested = marketingReport($tasks + [3=>$nested,4=>$standalone],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
+check($withNested['projectCount']===2 && $withNested['rootsWithSubtasks']===1 && $withNested['subtasksInCountedRoots']===2,'Count each root once and include matching descendants');
+
 check($r['returns']===1 && $r['taskReturns'][2]===1,'Deduplicate simultaneous returns');
 check($r['percent']===100.0,'On-time ratio');
 check($r['hours']==2.0 && $r['employees'][20]['hours']==2.0,'Actual worker and period boundary');
@@ -19,6 +24,24 @@ check($r['projects'][1]['employeeHours'][20]==2.0,'Employee hours per project');
 check(count($r['stale'])===1 && isset($r['stale'][1]),'Stale tasks exclude done');
 check($r['funnel']['done']===1 && $r['funnel']['work']===1,'Funnel');
 check(marketingSnapshot($child,ts('2026-10-01'),$map)==='review','Reverse history');
+$tasksWithCreators = $tasks;
+$tasksWithCreators[1]['creator'] = 31;
+$tasksWithCreators[2]['creator'] = 32;
+$r=marketingReport($tasksWithCreators,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability,[],[],null,null,[32=>[7,8,8]]);
+$completedMetrics = ['tasks'=>1,'done'=>1,'returns'=>1,'stale'=>0,'hours'=>2];
+check($r['initiators'][32] == $completedMetrics && $r['initiators'][31]['stale']===1,'Aggregate task metrics under their initiators');
+check($r['departments'][7] == $completedMetrics && $r['departments'][8] == $completedMetrics,'Attribute task metrics once per initiator department');
+check($r['departments'][0]['tasks']===1,'Keep tasks whose initiator has no department');
+check($r['employees'][20]['hours']==2 && $r['employees'][10]['tasks']===2,'Preserve executor attribution');
+$r=marketingReport($tasksWithCreators,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability,[],[],null,[32=>true],[31=>[9],32=>[7,8]]);
+check(array_keys($r['initiators'])===[32] && array_keys($r['departments'])===[7,8],'Both new sections use the filtered report tasks');
+$taggedTasks = $tasks;
+$taggedTasks[2]['tags'] = ['ценообразование/контент','Контент','Контент','0'];
+$r=marketingReport($taggedTasks,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
+check(count($r['tags'])===3 && $r['tags']['ценообразование/контент']==$completedMetrics && $r['tags']['Контент']==$completedMetrics && $r['tags'][0]==$completedMetrics,'Aggregate once per tag and exclude untagged tasks');
+$taggedTasks[2]['included'] = false;
+$r=marketingReport($taggedTasks,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
+check($r['tags']===[], 'Tag metrics respect report filters');
 $old=$child; $old['closed']=ts('2026-09-15'); $old['logs']=[];
 $r=marketingReport([1=>$t,2=>$old],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08'),7,$config,$map,$availability);
 check($r['tasks']===1 && $r['percent']===null,'Completed before period excluded; missing denominator');
@@ -57,4 +80,75 @@ $inside=task(10,12);
 $r=marketingReport([10=>$inside,12=>$external],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08'),7,$config,$map,$availability);
 check($r['tasks']===1 && $r['projectCount']===1 && $r['hours']===0,'External metadata cannot inflate department counts or hours');
 check($r['projects'][12]['title']==='Task 12','External root names project');
+$timelineTask=task(50);
+$timelineTask['created']=ts('2026-10-01');
+$timelineTask['status']=5;
+$timelineTask['stage']=3;
+$timelineTask['closed']=ts('2026-10-26');
+$timelineTask['logs']=[
+    ['at'=>ts('2026-10-11'),'field'=>'STATUS','from'=>2,'to'=>3],
+    ['at'=>ts('2026-10-11'),'field'=>'STAGE_ID','from'=>0,'to'=>2],
+    ['at'=>ts('2026-10-16'),'field'=>'STATUS','from'=>3,'to'=>4],
+    ['at'=>ts('2026-10-16'),'field'=>'STAGE_ID','from'=>2,'to'=>3],
+    ['at'=>ts('2026-10-26'),'field'=>'STATUS','from'=>4,'to'=>5],
+];
+$cutoff=ts('2026-11-01');
+$status=marketingTaskTimeline($timelineTask,'STATUS',$cutoff);
+$stage=marketingTaskTimeline($timelineTask,'STAGE_ID',$cutoff,1);
+check($status['completed'] && $status['seconds']===25*86400,'Completion stops the timeline');
+check(array_column($status['segments'],'state')===[2,3,4],'Status timeline follows actual transitions');
+check(array_column($stage['segments'],'state')===[1,2,3],'Stage timeline uses the group default and kanban transitions');
+foreach ([$status,$stage] as $timeline) {
+    check(array_map(static function ($segment) {
+        return $segment['to'] - $segment['from'];
+    },$timeline['segments'])===[10*86400,5*86400,10*86400],'Intervals sum to 25 days');
+}
+$historical=marketingTaskTimeline($timelineTask,'STATUS',ts('2026-10-16'));
+check(!$historical['completed'] && array_column($historical['segments'],'state')===[2,3],'Cutoff excludes a transition at the boundary');
+check(marketingTaskTimeline(task(60),'STAGE_ID',$cutoff)===null,'Do not infer stage durations without transitions');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[3]);
+check($r['projectCount']===1 && $r['subtasks']===0,'Status filter uses the status at the end of the range');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[5]);
+check($r['projectCount']===0,'Status filter excludes a later completion');
+$fetchTags = static function (array $ids) {
+    check($ids === [50, 51], 'Pass only requested task IDs to the Tasks API');
+    return new class {
+        private $rows = [
+            ['TASK_ID'=>50,'NAME'=>'ценообразование/контент'],
+            ['TASK_ID'=>51,'NAME'=>'Тег подзадачи'],
+            ['TASK_ID'=>99,'NAME'=>'Посторонний тег'],
+        ];
+        public function Fetch() { return array_shift($this->rows); }
+    };
+};
+check(marketingLoadDashboardTags($fetchTags, [50, 51]) === [
+    50=>['ценообразование/контент'],
+    51=>['Тег подзадачи'],
+], 'Read raw linked tags and keep them attached to their own tasks');
+
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[3],[1,2],1);
+check($r['projectCount']===1,'Match any chosen kanban stage at the cutoff in combination with status');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-16'),$cutoff,7,$config,$map,$availability,[],[3],1);
+check($r['projectCount']===0,'A later kanban stage does not match');
+$r=marketingReport([50=>$timelineTask],ts('2026-10-01'),ts('2026-10-11'),$cutoff,7,$config,$map,$availability,[],[1],1);
+check($r['projectCount']===1,'An unset kanban stage matches the board default');
+$initiatorRoot = task(70);
+$initiatorRoot['creator'] = 10;
+$initiatorChild = task(71, 70);
+$initiatorChild['creator'] = 20;
+$initiatorChild['responsible'] = 30;
+$otherRoot = task(72);
+$otherRoot['creator'] = 30;
+$byInitiator = [70=>$initiatorRoot, 71=>$initiatorChild, 72=>$otherRoot];
+$r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[20=>true]);
+check(array_keys($r['taskReturns'])===[71], 'Filter by creator even if the same employee is an accomplice elsewhere');
+check($r['projectCount']===0 && $r['active']===0 && $r['subtasks']===1, 'A parent created by another user is context only');
+check($r['rootsWithSubtasks']===0 && $r['subtasksInCountedRoots']===0, 'Context-only roots and their children are outside the paired metric');
+
+$r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[10=>true]);
+check(array_keys($r['taskReturns'])===[70] && $r['projectCount']===1, 'An initiator can be the responsible user of another task');
+$r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[10=>true,20=>true]);
+check(array_keys($r['taskReturns'])===[70,71] && $r['projectCount']===1 && $r['subtasks']===1, 'Multiple initiators are combined');
+$r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[]);
+check($r['tasks']===0, 'A department with no members does not disable the initiator filter');
 echo "Marketing dashboard: all checks passed\n";

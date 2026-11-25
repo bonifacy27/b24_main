@@ -1,6 +1,7 @@
 <?php
 return [
-    'group_id' => 163,
+    'group_id' => 242, // Default report group.
+    'additional_group_ids' => [184],
     // 0: first active member of Bitrix administrator group (ID 1).
     'administrator_user_id' => 0,
     'timezone' => 'Europe/Moscow',
