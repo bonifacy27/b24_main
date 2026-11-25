@@ -12,6 +12,11 @@ $child['elapsed']=[['at'=>ts('2026-10-04'),'user'=>20,'seconds'=>7200],['at'=>ts
 $tasks=[1=>$t,2=>$child]; $availability=['history'=>true,'elapsed'=>true];
 $r=marketingReport($tasks,ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
 check($r['tasks']===2 && count($r['projects'])===1,'Root projects and task count');
+$nested = task(3, 2);
+$standalone = task(4);
+$withNested = marketingReport($tasks + [3=>$nested,4=>$standalone],ts('2026-10-01'),ts('2026-11-01'),ts('2026-10-08 12:00'),7,$config,$map,$availability);
+check($withNested['projectCount']===2 && $withNested['rootsWithSubtasks']===1 && $withNested['subtasksInCountedRoots']===2,'Count each root once and include matching descendants');
+
 check($r['returns']===1 && $r['taskReturns'][2]===1,'Deduplicate simultaneous returns');
 check($r['percent']===100.0,'On-time ratio');
 check($r['hours']==2.0 && $r['employees'][20]['hours']==2.0,'Actual worker and period boundary');
@@ -138,6 +143,8 @@ $byInitiator = [70=>$initiatorRoot, 71=>$initiatorChild, 72=>$otherRoot];
 $r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[20=>true]);
 check(array_keys($r['taskReturns'])===[71], 'Filter by creator even if the same employee is an accomplice elsewhere');
 check($r['projectCount']===0 && $r['active']===0 && $r['subtasks']===1, 'A parent created by another user is context only');
+check($r['rootsWithSubtasks']===0 && $r['subtasksInCountedRoots']===0, 'Context-only roots and their children are outside the paired metric');
+
 $r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[10=>true]);
 check(array_keys($r['taskReturns'])===[70] && $r['projectCount']===1, 'An initiator can be the responsible user of another task');
 $r=marketingReport($byInitiator,ts('2026-10-01'),$cutoff,$cutoff,7,$config,$map,$availability,[],[],null,[10=>true,20=>true]);

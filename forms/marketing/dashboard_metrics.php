@@ -116,7 +116,7 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
 {
     $cutoff = min($to, $now + 1);
     $returnTimes = [];
-    $report = ['tasks'=>0, 'subtasks'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'initiators'=>[], 'departments'=>[], 'tags'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
+    $report = ['tasks'=>0, 'subtasks'=>0, 'rootsWithSubtasks'=>0, 'subtasksInCountedRoots'=>0, 'taskReturns'=>[], 'projects'=>[], 'employees'=>[], 'initiators'=>[], 'departments'=>[], 'tags'=>[], 'funnel'=>array_fill_keys(['new','work','review','done'],0), 'closed'=>0, 'withDeadline'=>0, 'onTime'=>0, 'returns'=>0, 'stale'=>[], 'hours'=>0, 'active'=>0, 'done'=>0, 'projectCount'=>0];
     foreach ($tasks as $id => $task) {
         if (isset($task['included']) && !$task['included']) { continue; }
         if ($creatorIds !== null && !isset($creatorIds[$task['creator'] ?? 0])) { continue; }
@@ -204,7 +204,13 @@ function marketingReport(array $tasks, $from, $to, $now, $staleDays, array $cale
     }
     foreach ($report['projects'] as $project) {
         if ($creatorIds !== null && !isset($creatorIds[$tasks[$project['id']]['creator'] ?? 0])) { continue; }
-        if ($project['id'] !== null) { ++$report['projectCount']; }
+        if ($project['id'] !== null) {
+            ++$report['projectCount'];
+            if ($project['tasks'] > 0) {
+                ++$report['rootsWithSubtasks'];
+                $report['subtasksInCountedRoots'] += $project['tasks'];
+            }
+        }
         if ($project['state'] === 'done') { ++$report['done']; }
         elseif ($project['state'] !== null) { ++$report['active']; }
     }
